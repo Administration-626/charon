@@ -38,10 +38,10 @@ switching away and back is always clean and reversible.
 
 | Tool | Endpoint | Credentials |
 |------|----------|-------------|
-| **Codex** | `~/.codex/config.toml` (`model_provider` → `base_url`) | `~/.codex/auth.json` |
+| **Codex** | `~/.codex/config.toml` (`model_provider` → `base_url`) | `~/.codex/config.toml` (`experimental_bearer_token`) |
 | **Claude Code** | `~/.claude/settings.json` (`env.ANTHROPIC_BASE_URL`) | `settings.json` env key **or** macOS Keychain `Claude Code-credentials` |
-| **OpenCode** | `~/.config/opencode/opencode.json` (`provider.*.options.baseURL`) | `~/.local/share/opencode/auth.json` |
-| **Pi** | `~/.pi/agent/extensions/charon.ts` (`pi.registerProvider("charon", ...)`) | `~/.pi/agent/auth.json` |
+| **OpenCode** | `~/.config/opencode/opencode.jsonc` (`provider.*.options.baseURL`) | `opencode.jsonc` (`provider.charon.options.apiKey`) |
+| **Pi** | `~/.pi/agent/extensions/charon.ts` (`baseUrl`) | `~/.pi/agent/extensions/charon.ts` (`apiKey`) |
 
 ## Supported platforms
 
