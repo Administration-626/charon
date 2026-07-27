@@ -118,6 +118,10 @@ func (m *model) renderModels() {
 
 	if m.modelFilter == "" {
 		items = append(items, item{title: "← Back (change URL / key)", desc: "", value: backModel})
+		items = append(items, item{title: "✎ Enter custom model ID...", desc: "Input a specific unlisted model ID", value: customModel})
+		items = append(items, item{value: sepSentinel})
+	} else {
+		items = append(items, item{title: "✎ Enter custom model ID...", desc: "Input a specific unlisted model ID", value: customModel})
 		items = append(items, item{value: sepSentinel})
 	}
 
@@ -139,8 +143,6 @@ func (m *model) renderModels() {
 		skipTitle = "✓ " + skipTitle
 	}
 	items = append(items, item{title: skipTitle, desc: "", value: skipModel, active: skipChosen})
-	customTitle := "✎ Enter custom model ID..."
-	items = append(items, item{title: customTitle, desc: "", value: customModel})
 
 	m.list.SetDelegate(themedCompactDelegate())
 	m.list.SetItems(items)

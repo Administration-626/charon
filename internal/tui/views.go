@@ -108,7 +108,13 @@ func (m model) View() string {
 	}
 
 	out := m.list.View()
-	if m.view == viewTools {
+	if m.view == viewPickModel {
+		tip := `💡 Tip: Type directly to search models (e.g. "claude", "deepseek", "3.5")`
+		if m.modelFilter != "" {
+			tip = fmt.Sprintf(`🔍 Filter: %q (%d matches) · Esc: clear filter`, m.modelFilter, len(m.list.Items())-2)
+		}
+		out += "\n\n" + hintStyle.Render(tip)
+	} else if m.view == viewTools {
 		out = banner(m.version) + "\n\n" + out // blank line between the banner and the list title
 	}
 	if line := statusRender(m.statusLvl, m.status); line != "" {
