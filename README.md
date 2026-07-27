@@ -81,7 +81,7 @@ curl -fsSL https://github.com/Administration-626/charon/releases/latest/download
 ### Homebrew (macOS & Linux)
 
 ```sh
-brew install --cask mtty80/tap/charon
+brew install --cask Administration-626/tap/charon
 ```
 
 <details>

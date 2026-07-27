@@ -2,7 +2,7 @@
 # install.sh — download a prebuilt charon binary and put it on your PATH.
 #
 # Quick install (Linux & macOS, no Go required):
-#   curl -fsSL https://github.com/mingtheanlay/charon/releases/latest/download/install.sh | sh
+#   curl -fsSL https://github.com/Administration-626/charon/releases/latest/download/install.sh | sh
 #
 # Options (environment variables):
 #   PREFIX=/usr/local   install under <PREFIX>/bin instead of ~/.local (may need sudo)
@@ -12,7 +12,7 @@
 
 set -eu
 
-REPO="mingtheanlay/charon"
+REPO="Administration-626/charon"
 BINARY="charon"
 PREFIX="${PREFIX:-$HOME/.local}"
 BINDIR="$PREFIX/bin"

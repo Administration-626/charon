@@ -46,15 +46,15 @@ checksum:
 homebrew_casks:
   - name: charon
     repository:
-      owner: mtty80
+      owner: Administration-626
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    homepage: "https://github.com/mingtheanlay/charon"
+    homepage: "https://github.com/Administration-626/charon"
     description: "Switch Codex, Claude Code and OpenCode between endpoint + credential profiles"
     # Shown by `brew info --cask charon` — point users at the no-Homebrew curl installer.
     caveats: |
       Not using Homebrew? Install with one line on Linux or macOS:
-        curl -fsSL https://github.com/mingtheanlay/charon/releases/latest/download/install.sh | sh
+        curl -fsSL https://github.com/Administration-626/charon/releases/latest/download/install.sh | sh
     completions:
       bash: completions/charon.bash
       zsh: completions/charon.zsh
@@ -71,7 +71,7 @@ homebrew_casks:
 
 release:
   github:
-    owner: mingtheanlay
+    owner: Administration-626
     name: charon
   # Attach the curl installer to each release so it can be fetched from the
   # release CDN (github.com/.../releases/latest/download/install.sh) instead of
