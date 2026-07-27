@@ -79,36 +79,26 @@ func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+s":
 		return m.submitForm()
 	case "up", "shift+tab":
-		m.formFocus = (m.formFocus - 1 + 6) % 6
+		m.formFocus = (m.formFocus - 1 + 7) % 7
 		return m.syncFormFocus()
 	case "down", "tab":
-		m.formFocus = (m.formFocus + 1) % 6
+		m.formFocus = (m.formFocus + 1) % 7
 		return m.syncFormFocus()
 	case "enter":
-		if m.formFocus == 4 { // [ Save Profile ]
-			return m.submitForm()
-		}
-		if m.formFocus == 5 { // [ Cancel ]
-			m.dupSource = ""
-			m.view = viewProfiles
-			m.setStatus(statusInfo, "cancelled")
-			m.loadProfiles("")
-			return m, nil
-		}
-		m.formFocus = (m.formFocus + 1) % 6
-		return m.syncFormFocus()
-	case "m", "ctrl+m":
-		if m.formFocus == 3 {
+		if m.formFocus == 4 { // └── [ Fetch & Pick Online Models ]
 			endpoint := strings.TrimRight(strings.TrimSpace(m.formInputs[1].Value()), "/")
 			key := strings.TrimSpace(m.formInputs[2].Value())
+			if endpoint == "" && key == "" {
+				m.setStatus(statusErr, "API URL & Key required")
+				return m, nil
+			}
 			if endpoint == "" {
-				m.setStatus(statusInfo, "Hint: set API Base URL first, then press 'm' to fetch models")
+				m.setStatus(statusErr, "API URL required")
 				return m, nil
 			}
 			if key == "" && !strings.Contains(endpoint, "localhost") && !strings.Contains(endpoint, "127.0.0.1") {
-				m.setStatus(statusInfo, "Hint: remote API usually requires an API Key to fetch models")
-			} else {
-				m.clearStatus()
+				m.setStatus(statusErr, "API Key required")
+				return m, nil
 			}
 			m.wiz.endpoint = endpoint
 			m.wiz.key = key
@@ -116,6 +106,18 @@ func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			cmd := m.beginFetch()
 			return m, cmd
 		}
+		if m.formFocus == 5 { // [ Save Profile ]
+			return m.submitForm()
+		}
+		if m.formFocus == 6 { // [ Cancel ]
+			m.dupSource = ""
+			m.view = viewProfiles
+			m.setStatus(statusInfo, "cancelled")
+			m.loadProfiles("")
+			return m, nil
+		}
+		m.formFocus = (m.formFocus + 1) % 7
+		return m.syncFormFocus()
 	}
 
 	if m.formFocus < 4 {

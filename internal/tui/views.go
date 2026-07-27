@@ -56,9 +56,6 @@ func (m model) View() string {
 				bar := promptStyle.Render("▌ ")
 				labelStr := promptStyle.Render(labels[i] + " : ")
 				inputStr := m.formInputs[i].View()
-				if i == 3 {
-					inputStr += hintStyle.Render(" (press m to pick)")
-				}
 				formLines = append(formLines, bar+labelStr+inputStr)
 			} else {
 				// Unfocused Row: Muted, low contrast
@@ -73,23 +70,33 @@ func (m model) View() string {
 				inputStr := hintStyle.Render(inputVal)
 				formLines = append(formLines, bar+labelStr+inputStr)
 			}
+			if i == 3 {
+				// Add tree-indented Fetch & Pick button under Model Slug
+				fetchBtn := "                   └── [ Fetch & Pick Online Models ]"
+				if m.formFocus == 4 {
+					fetchBtn = promptStyle.Render("                 ▌ └── [ Fetch & Pick Online Models ]")
+				} else {
+					fetchBtn = hintStyle.Render(fetchBtn)
+				}
+				formLines = append(formLines, fetchBtn)
+			}
 		}
 
-		saveBtn := "[ Save Profile ]"
-		cancelBtn := "[ Cancel ]"
-		if m.formFocus == 4 {
-			saveBtn = promptStyle.Render("▸ [ Save Profile ]")
+		saveBtn := "  [ Save Profile ]"
+		cancelBtn := "  [ Cancel ]"
+		if m.formFocus == 5 {
+			saveBtn = promptStyle.Render("▌ [ Save Profile ]")
 		} else {
 			saveBtn = hintStyle.Render("  [ Save Profile ]")
 		}
-		if m.formFocus == 5 {
-			cancelBtn = promptStyle.Render("▸ [ Cancel ]")
+		if m.formFocus == 6 {
+			cancelBtn = promptStyle.Render("▌ [ Cancel ]")
 		} else {
 			cancelBtn = hintStyle.Render("  [ Cancel ]")
 		}
 
-		btnLine := "\n  " + saveBtn + "    " + cancelBtn
-		hint := "\n\n" + hintStyle.Render("↑/↓ / tab: switch field · type/backspace: edit directly · ctrl+s: save · esc: cancel")
+		btnLine := "\n  " + saveBtn + "\n  " + cancelBtn
+		hint := "\n\n" + hintStyle.Render("↑/↓ / tab: switch focus · type/backspace: edit directly · enter: select button · ctrl+s: save · esc: cancel")
 
 		body := header + strings.Join(formLines, "\n") + "\n" + btnLine + hint
 		if line := statusRender(m.statusLvl, m.status); line != "" {
