@@ -99,8 +99,19 @@ func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.syncFormFocus()
 	case "m", "ctrl+m":
 		if m.formFocus == 3 {
-			m.wiz.endpoint = strings.TrimSpace(m.formInputs[1].Value())
-			m.wiz.key = strings.TrimSpace(m.formInputs[2].Value())
+			endpoint := strings.TrimRight(strings.TrimSpace(m.formInputs[1].Value()), "/")
+			key := strings.TrimSpace(m.formInputs[2].Value())
+			if endpoint == "" {
+				m.setStatus(statusInfo, "Hint: set API Base URL first, then press 'm' to fetch models")
+				return m, nil
+			}
+			if key == "" && !strings.Contains(endpoint, "localhost") && !strings.Contains(endpoint, "127.0.0.1") {
+				m.setStatus(statusInfo, "Hint: remote API usually requires an API Key to fetch models")
+			} else {
+				m.clearStatus()
+			}
+			m.wiz.endpoint = endpoint
+			m.wiz.key = key
 			m.fromForm = true
 			cmd := m.beginFetch()
 			return m, cmd
@@ -111,7 +122,7 @@ func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.formInputs[m.formFocus], cmd = m.formInputs[m.formFocus].Update(msg)
 		m.wiz.name = strings.TrimSpace(m.formInputs[0].Value())
-		m.wiz.endpoint = strings.TrimSpace(m.formInputs[1].Value())
+		m.wiz.endpoint = strings.TrimRight(strings.TrimSpace(m.formInputs[1].Value()), "/")
 		m.wiz.key = strings.TrimSpace(m.formInputs[2].Value())
 		m.wiz.model = strings.TrimSpace(m.formInputs[3].Value())
 		return m, cmd
@@ -139,7 +150,7 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 	if name == "" {
 		name = m.wiz.name
 	}
-	m.wiz.endpoint = strings.TrimSpace(m.formInputs[1].Value())
+	m.wiz.endpoint = strings.TrimRight(strings.TrimSpace(m.formInputs[1].Value()), "/")
 	m.wiz.key = strings.TrimSpace(m.formInputs[2].Value())
 	m.wiz.model = strings.TrimSpace(m.formInputs[3].Value())
 	return m.finishAdd(name)

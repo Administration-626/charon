@@ -51,29 +51,41 @@ func (m model) View() string {
 		var formLines []string
 
 		for i := 0; i < 4; i++ {
-			prefix := "  "
 			if m.formFocus == i {
-				prefix = "▸ "
+				// Focused Row: Bold accent bar, bold label, clear input
+				bar := promptStyle.Render("▌ ")
+				labelStr := promptStyle.Render(labels[i] + " : ")
+				inputStr := m.formInputs[i].View()
+				if i == 3 {
+					inputStr += hintStyle.Render(" (press m to pick)")
+				}
+				formLines = append(formLines, bar+labelStr+inputStr)
+			} else {
+				// Unfocused Row: Muted, low contrast
+				bar := "  "
+				labelStr := hintStyle.Render(labels[i] + " : ")
+				inputVal := m.formInputs[i].Value()
+				if inputVal == "" {
+					inputVal = m.formInputs[i].Placeholder
+				} else if i == 2 { // Password masking for Token
+					inputVal = strings.Repeat("•", len(inputVal))
+				}
+				inputStr := hintStyle.Render(inputVal)
+				formLines = append(formLines, bar+labelStr+inputStr)
 			}
-			labelStr := labels[i] + " : "
-			inputStr := m.formInputs[i].View()
-			if i == 3 && m.formFocus == 3 {
-				inputStr += hintStyle.Render(" (press m to pick)")
-			}
-			formLines = append(formLines, prefix+labelStr+inputStr)
 		}
 
 		saveBtn := "[ Save Profile ]"
 		cancelBtn := "[ Cancel ]"
 		if m.formFocus == 4 {
-			saveBtn = promptStyle.Render("[ Save Profile ]")
+			saveBtn = promptStyle.Render("▸ [ Save Profile ]")
 		} else {
-			saveBtn = hintStyle.Render("[ Save Profile ]")
+			saveBtn = hintStyle.Render("  [ Save Profile ]")
 		}
 		if m.formFocus == 5 {
-			cancelBtn = promptStyle.Render("[ Cancel ]")
+			cancelBtn = promptStyle.Render("▸ [ Cancel ]")
 		} else {
-			cancelBtn = hintStyle.Render("[ Cancel ]")
+			cancelBtn = hintStyle.Render("  [ Cancel ]")
 		}
 
 		btnLine := "\n  " + saveBtn + "    " + cancelBtn
