@@ -144,14 +144,27 @@ func (m *model) syncFormFocus() (tea.Model, tea.Cmd) {
 func (m model) submitForm() (tea.Model, tea.Cmd) {
 	name := strings.TrimSpace(m.formInputs[0].Value())
 	if name == "" && m.wiz.origName != profile.DefaultName {
-		m.setStatus(statusErr, "profile name is required")
+		m.setStatus(statusErr, "Profile Name is required")
 		return m, nil
 	}
 	if name == "" {
 		name = m.wiz.name
 	}
-	m.wiz.endpoint = strings.TrimRight(strings.TrimSpace(m.formInputs[1].Value()), "/")
-	m.wiz.key = strings.TrimSpace(m.formInputs[2].Value())
+
+	endpoint := strings.TrimRight(strings.TrimSpace(m.formInputs[1].Value()), "/")
+	if endpoint == "" {
+		m.setStatus(statusErr, "API Base URL is required")
+		return m, nil
+	}
+
+	key := strings.TrimSpace(m.formInputs[2].Value())
+	if key == "" {
+		m.setStatus(statusErr, "API Key is required")
+		return m, nil
+	}
+
+	m.wiz.endpoint = endpoint
+	m.wiz.key = key
 	m.wiz.model = strings.TrimSpace(m.formInputs[3].Value())
 	return m.finishAdd(name)
 }
