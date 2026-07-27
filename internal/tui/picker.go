@@ -134,6 +134,9 @@ func (m *model) renderModels() {
 	}
 	items = append(items, item{title: skipTitle, desc: "", value: skipModel, active: skipChosen})
 	skipIndex := len(items) - 1
+	if m.modelFilter == "" {
+		items = append(items, item{title: "← Back (change URL / key)", desc: "", value: backModel})
+	}
 	m.list.SetDelegate(themedCompactDelegate())
 	m.list.SetItems(items)
 	// No search: land on the checked row; while searching, the best match is on top.

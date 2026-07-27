@@ -123,6 +123,25 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.loadEditForm()
 			return m, nil
 		}
+		if m.view == viewAddKey {
+			m.view = viewAddEndpoint
+			m.clearStatus()
+			m.startInput(exampleEndpoint, false)
+			m.input.SetValue(m.wiz.endpoint)
+			return m, textinput.Blink
+		}
+		if m.view == viewAddName {
+			if len(m.allModels) > 0 {
+				m.view = viewPickModel
+				m.clearStatus()
+				return m, nil
+			}
+			m.view = viewAddKey
+			m.clearStatus()
+			m.startInput("API key", true)
+			m.input.SetValue(m.wiz.key)
+			return m, textinput.Blink
+		}
 		src := m.dupSource
 		m.dupSource = ""
 		m.view = viewProfiles

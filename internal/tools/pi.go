@@ -143,8 +143,10 @@ func newPi() *Tool {
 			artifact.NewMergedJSONFile("settings.json", settingsPath, 0o600,
 				"defaultProvider", "defaultModel", "defaultThinkingLevel").
 				WithDisplay("defaultModel", "defaultThinkingLevel"),
-			artifact.NewFile("charon.ts", extensionPath, 0o600),    // charon owns this extension file outright
-			artifact.NewRotatingFile("auth.json", authPath, 0o600), // OAuth provider logins; pi refreshes them in place
+			artifact.NewFile("charon.ts", extensionPath, 0o600), // charon owns this extension file outright
+			// auth.json holds OAuth provider logins. The charon provider stores its key
+			// in charon.ts (apiKey field) instead; snapshotting auth.json would silently
+			// clobber existing OAuth sessions on profile switch.
 		},
 		ApplyAuth: func(a AuthSpec) error {
 			// Preserve the previously-registered model list when this call doesn't bring

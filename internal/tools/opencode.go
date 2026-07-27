@@ -41,7 +41,9 @@ func newOpenCode() *Tool {
 			artifact.NewMergedJSONFile(filepath.Base(configPath), configPath, 0o600, "provider", "model", "small_model", "reasoningEffort", "agent", "agents").
 				WithDisplay("model", "reasoningEffort").
 				WithAgentFallback("agent", "agents"),
-			artifact.NewRotatingFile("auth.json", authPath, 0o600), // OAuth logins (e.g. github-copilot); OpenCode refreshes them in place
+			// auth.json holds OAuth logins (e.g. github-copilot). The charon provider
+			// stores its key in opencode.jsonc options.apiKey instead; snapshotting
+			// auth.json would silently clobber existing OAuth sessions on profile switch.
 		},
 		ApplyAuth: func(a AuthSpec) error {
 			// Register a "charon" provider: OpenCode needs options.apiKey and a

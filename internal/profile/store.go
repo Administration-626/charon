@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"charon/internal/artifact"
 	"charon/internal/tools"
@@ -234,13 +235,13 @@ func validateNewName(name string) error {
 }
 
 // sanitizeProfileName maps an account identity to a filesystem-safe profile name,
-// keeping [A-Za-z0-9._@-] and replacing every other run with a single "-".
+// keeping letters, digits, and [._@-] while replacing every other run with a single "-".
 func sanitizeProfileName(s string) string {
 	var b strings.Builder
 	dash := false
 	for _, r := range s {
 		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+		case unicode.IsLetter(r), unicode.IsDigit(r),
 			r == '.', r == '_', r == '@', r == '-':
 			b.WriteRune(r)
 			dash = false

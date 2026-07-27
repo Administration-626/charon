@@ -58,12 +58,13 @@ const (
 const (
 	addSentinel = "\x00add"     // the "add new" list row
 	skipModel   = "\x00nomodel" // the "skip model" list row
+	backModel   = "\x00back"    // the "back to previous step" list row
 	sepSentinel = "\x00sep"     // a blank divider row (inert; cursor skips it)
 )
 
 // isSentinel reports whether v is a synthetic action row rather than a profile.
 func isSentinel(v string) bool {
-	return v == addSentinel || v == skipModel || v == sepSentinel
+	return v == addSentinel || v == skipModel || v == backModel || v == sepSentinel
 }
 
 type item struct {
@@ -572,9 +573,11 @@ func (m model) onEsc() (tea.Model, tea.Cmd) {
 			m.view = viewEditForm
 			m.loadEditForm()
 		} else {
-			m.view = viewProfiles
-			m.setStatus(statusInfo, "cancelled")
-			m.loadProfiles("")
+			m.view = viewAddKey
+			m.clearStatus()
+			m.startInput("API key", true)
+			m.input.SetValue(m.wiz.key)
+			return m, textinput.Blink
 		}
 	}
 	return m, nil
@@ -624,6 +627,13 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case viewPickModel:
+		if it.value == backModel {
+			m.view = viewAddKey
+			m.clearStatus()
+			m.startInput("API key", true)
+			m.input.SetValue(m.wiz.key)
+			return m, textinput.Blink
+		}
 		if it.value == skipModel {
 			m.wiz.model = ""
 		} else {

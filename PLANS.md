@@ -56,6 +56,32 @@ to encrypted local export — no network sync.
 
 ---
 
+## Known issues
+
+### TUI wizard: add "← Back" item to model picker and input steps ✅ (done)
+In the add-profile wizard, cancelling at any step (`esc`) drops all entered
+data and returns to the profile list. The model-picker step (`viewPickModel`)
+now has a **`← Back`** selectable item that returns to the key-input step
+while preserving the already-entered endpoint and key. Similarly, text-input
+steps (`viewAddKey`, `viewAddName`) support stepping back with `esc` without
+losing progress.
+
+### Profile name rejects Unicode (Chinese characters) ✅ (done)
+`charon add codex --name codex公益站` now supports Unicode letters and digits, so
+Chinese profile names (and other non-ASCII names) work natively.
+
+### Profile snapshots store redundant config data ("插槽" refactor)
+Each profile stores a full copy of the tool's config file (e.g.
+`config.toml`), even though only 3–4 owned keys differ between profiles
+(`model`, `model_provider`, `model_providers`, `model_reasoning_effort`).
+Non-owned keys (`sandbox_mode`, `projects`, `approval_policy`, …) are dead
+weight — they are overwritten by live values on restore anyway.
+
+Ideal design: a profile is just its `Spec` (`{endpoint, key, model}`); switching
+calls `ApplyAuth(Spec)` directly, with no file-level snapshot or merge needed.
+The one open question is how to persist in-session model changes (e.g. `/model`
+inside the tool) back to `Spec.Model` without an explicit `charon refresh`.
+
 _Context: the refactor/hygiene items (A/B) and the throttled model-fetch
 loading screen are already implemented; this file tracks the remaining feature
 work._

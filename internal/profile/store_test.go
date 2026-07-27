@@ -10,6 +10,19 @@ import (
 	"charon/internal/tools"
 )
 
+func TestUnicodeProfileName(t *testing.T) {
+	for _, name := range []string{"codex公益站", "profile-中文", "test.name", "my_profile@home-1"} {
+		if err := validateName(name); err != nil {
+			t.Errorf("validateName(%q) unexpected error: %v", name, err)
+		}
+	}
+	for _, invalid := range []string{"path/name", "name with spaces", "..", ""} {
+		if err := validateName(invalid); err == nil {
+			t.Errorf("validateName(%q) expected error, got nil", invalid)
+		}
+	}
+}
+
 // fakeTool builds a tool whose auth surface is two files under dir, so the
 // store can be exercised without touching real configs.
 func fakeTool(dir string) (*tools.Tool, string, string) {
@@ -806,7 +819,7 @@ func TestSanitizeProfileName(t *testing.T) {
 		"acc_123.default-x":    "acc_123.default-x",
 		"///":                  "",
 		"":                     "",
-		"多 bytes":              "bytes",
+		"多 bytes":              "多-bytes",
 	}
 	for in, want := range cases {
 		if got := sanitizeProfileName(in); got != want {

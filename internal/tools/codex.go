@@ -43,7 +43,10 @@ func newCodex() *Tool {
 			artifact.NewMergedTOMLFile("config.toml", configPath, 0o600,
 				"model", "model_context_window", "model_provider", "model_providers", "model_reasoning_effort").
 				WithDisplay("model", "model_reasoning_effort"),
-			artifact.NewRotatingFile("auth.json", authPath, 0o600), // ChatGPT OAuth tokens; Codex refreshes them in place
+			// auth.json holds ChatGPT OAuth tokens or the native OPENAI_API_KEY. Neither
+			// participates in auth for a charon custom provider (key lives in config.toml
+			// experimental_bearer_token); snapshotting it would silently clobber the
+			// user's OAuth login whenever profiles are switched.
 		},
 		ApplyAuth: func(a AuthSpec) error {
 			// Register a self-contained OpenAI-compatible provider (key embedded inline)
