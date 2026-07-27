@@ -76,8 +76,6 @@ func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.setStatus(statusInfo, "cancelled")
 		m.loadProfiles("")
 		return m, nil
-	case "ctrl+s":
-		return m.submitForm()
 	case "up", "shift+tab":
 		m.formFocus = (m.formFocus - 1 + 7) % 7
 		return m.syncFormFocus()

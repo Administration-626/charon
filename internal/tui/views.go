@@ -96,7 +96,7 @@ func (m model) View() string {
 		}
 
 		btnLine := "\n  " + saveBtn + "\n  " + cancelBtn
-		hint := "\n\n" + hintStyle.Render("↑/↓ / tab: switch focus · type/backspace: edit directly · enter: select button · ctrl+s: save · esc: cancel")
+		hint := "\n\n" + hintStyle.Render("↑/↓ / tab: switch focus · type/backspace: edit directly · enter: select button · esc: cancel")
 
 		body := header + strings.Join(formLines, "\n") + "\n" + btnLine + hint
 		if line := statusRender(m.statusLvl, m.status); line != "" {
