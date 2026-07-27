@@ -76,11 +76,10 @@ on the fetched `/v1/models` API response.
 Chinese profile names (and other non-ASCII names) work natively.
 
 ### Single-page Form UI refactor for Profile Creation (Add/Edit Flow) ✅ (done)
-Replaced the multi-step wizard and list-wrapper with a native **Multi-Textinput Form Model** (`[]textinput.Model`) matching mature TUI standards (e.g. Claude Code, LazyGit):
-- **Direct uninhibited typing**: Focus on Name, URL, Token, or Model allows typing, backspacing, and cursor movement directly on the row with zero key-interception by list wrappers.
-- **Seamless focus navigation**: Press `↑`/`↓` or `Tab`/`Shift+Tab` to seamlessly move input focus between fields.
-- **On-demand model fetching**: Press `m` / `Ctrl+M` on the Model row to fetch and pick from `/v1/models`.
-- **Standard Save & Cancel buttons**: Distinct `[ Save Profile ]` and `[ Cancel ]` buttons at the bottom. `Ctrl+S` or `[ Save Profile ]` + `Enter` submits; `Esc` or `[ Cancel ]` + `Enter` cancels and exits.
+Replaced the multi-step wizard and list-wrapper with a native **Multi-Textinput Form Model** (`[]textinput.Model`) with **Option C high-contrast styling** & **defensive pre-checks**:
+- **Option C High-Contrast UI**: Active field features a bold accent bar (`▌`), bold label, and bright text input, while inactive fields remain subtly muted for maximum contrast and focus clarity.
+- **Pre-fetch defensive checks**: Intercepts `m` key model fetching if API Base URL is missing, rendering a gentle status hint instead of crashing with 401 errors. Supports local endpoints (e.g. `localhost`).
+- **URL & String normalization**: Automatically trims whitespace and trailing slashes `/` on submission to prevent path-resolution issues.
 
 ### Profile snapshots store redundant config data ("插槽" refactor)
 Each profile stores a full copy of the tool's config file (e.g.
