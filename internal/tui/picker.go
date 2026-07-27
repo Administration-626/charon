@@ -168,9 +168,9 @@ func (m *model) renderModels() {
 	title := m.tool.Title + " — choose a model"
 	if m.modelFilter != "" {
 		title += fmt.Sprintf(" · search: %s (%d matches)", m.modelFilter, len(ids))
-		m.setStatus(statusInfo, fmt.Sprintf("Filter: %s (%d matches)", m.modelFilter, len(ids)))
+		m.setStatus(statusInfo, fmt.Sprintf("🔍 Filter: %q (%d matches found) · Esc: clear filter", m.modelFilter, len(ids)))
 	} else if len(ids) > 0 {
-		m.clearStatus()
+		m.setStatus(statusInfo, `💡 Tip: Type directly to search models (e.g. "claude", "deepseek", "3.5")`)
 	}
 	m.list.Title = title
 	m.setHelpKeys(keyChoose, keyFilter, keyRefresh, keyBack)
