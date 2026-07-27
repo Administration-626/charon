@@ -75,11 +75,11 @@ on the fetched `/v1/models` API response.
 `charon add codex --name codex公益站` now supports Unicode letters and digits, so
 Chinese profile names (and other non-ASCII names) work natively.
 
-### Single-page Form UI refactor for Profile Creation (Add Flow) ✅ (done)
-Replaced the multi-step wizard with a unified Single-page Form view (reusing `viewEditForm` mechanics) with **true in-place editing**:
-- **All fields in one view**: Display `Name`, `URL`, `Token`, `Model` together on a single screen/form list.
-- **Zero view jumping (In-place editing)**: Pressing `Enter` / `e` activates in-line editing directly under the target row on the same page. Pressing `Enter` applies the line edit and automatically advances focus to the next field (Name → URL → Token → Model).
-- **On-demand model fetching**: Pressing `e` / `Enter` on the `Model` row triggers fetching & picking from `/v1/models` (or entering a custom model ID), directly updating the form.
+### Single-page Form UI refactor for Profile Creation (Add/Edit Flow) ✅ (done)
+Replaced the multi-step wizard with a unified Single-page Form view (reusing `viewEditForm` mechanics) matching mature TUI standards (e.g. Claude Code, GitUI):
+- **Direct typing**: Moving focus (`↑`/`↓`) to Name, URL, Token, or Model allows typing/backspacing directly on the row without pressing extra activation keys (`e`/`Enter`).
+- **On-demand model fetching**: Press `m` / `Ctrl+M` on the Model row to fetch and pick from `/v1/models`.
+- **Standard Save & Cancel buttons**: Distinct `[ Save Profile ]` and `[ Cancel ]` buttons at the bottom. `Ctrl+S` or `[ Save Profile ]` + `Enter` submits; `Esc` or `[ Cancel ]` + `Enter` cancels and exits.
 
 ### Profile snapshots store redundant config data ("插槽" refactor)
 Each profile stores a full copy of the tool's config file (e.g.
