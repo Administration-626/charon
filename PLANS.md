@@ -76,9 +76,9 @@ on the fetched `/v1/models` API response.
 Chinese profile names (and other non-ASCII names) work natively.
 
 ### Single-page Form UI refactor for Profile Creation (Add Flow) ✅ (done)
-Replaced the multi-step wizard with a unified Single-page Form view (reusing `viewEditForm` mechanics).
+Replaced the multi-step wizard with a unified Single-page Form view (reusing `viewEditForm` mechanics) with **true in-place editing**:
 - **All fields in one view**: Display `Name`, `URL`, `Token`, `Model` together on a single screen/form list.
-- **Seamless navigation**: Use `↑`/`↓` keys to move freely between fields for edits, eliminating the need for step-by-step back navigation.
+- **Zero view jumping (In-place editing)**: Pressing `Enter` / `e` activates in-line editing directly under the target row on the same page. Pressing `Enter` applies the line edit and automatically advances focus to the next field (Name → URL → Token → Model).
 - **On-demand model fetching**: Pressing `e` / `Enter` on the `Model` row triggers fetching & picking from `/v1/models` (or entering a custom model ID), directly updating the form.
 
 ### Profile snapshots store redundant config data ("插槽" refactor)
