@@ -29,14 +29,10 @@ func (m model) View() string {
 			promptStyle.Render(m.spinner.View()+m.loadingMsg) +
 			"\n\n" + hintStyle.Render("fetching models from "+m.wiz.endpoint)
 	case viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField, viewAddCustomModel:
-		hint := "enter: continue · esc: back"
-		if m.view == viewAddEndpoint || m.view == viewDupName || m.view == viewEditField {
-			hint = "enter: continue · esc: cancel"
-		}
 		body := m.wizardHeader() +
 			promptStyle.Render(m.prompt()) +
 			"\n\n  " + m.input.View() +
-			"\n\n" + hintStyle.Render(hint)
+			"\n\n" + hintStyle.Render(m.optionsHelp())
 		if line := statusRender(m.statusLvl, m.status); line != "" {
 			body += "\n" + line
 		}
@@ -89,6 +85,28 @@ func (m model) prompt() string {
 		return "Enter custom model ID (e.g. gpt-4o, claude-3-7-sonnet):"
 	case viewDupName:
 		return "Name the duplicate of " + m.dupSource + ":"
+	default:
+		return ""
+	}
+}
+
+func (m model) optionsHelp() string {
+	switch m.view {
+	case viewAddEndpoint:
+		return "Options:\n  • [ Enter ] Continue to API Key\n  • [ Esc   ] Cancel & Return"
+	case viewAddKey:
+		return "Options:\n  • [ Enter ] Continue to Fetch Models\n  • [ Esc   ] ← Back to API Base URL"
+	case viewAddCustomModel:
+		return "Options:\n  • [ Enter ] Use Custom Model ID\n  • [ Esc   ] ← Back to Model List"
+	case viewAddName:
+		if len(m.allModels) > 0 {
+			return "Options:\n  • [ Enter ] Save Profile\n  • [ Esc   ] ← Back to Model Selection"
+		}
+		return "Options:\n  • [ Enter ] Save Profile\n  • [ Esc   ] ← Back to API Key"
+	case viewEditField:
+		return "Options:\n  • [ Enter ] Save Field\n  • [ Esc   ] Cancel Field Edit"
+	case viewDupName:
+		return "Options:\n  • [ Enter ] Duplicate Profile\n  • [ Esc   ] Cancel"
 	default:
 		return ""
 	}
