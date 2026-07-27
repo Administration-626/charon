@@ -79,7 +79,7 @@ Chinese profile names (and other non-ASCII names) work natively.
 Replaced the multi-step wizard and list-wrapper with a native **Multi-Textinput Form Model** (`[]textinput.Model`) featuring a vertical single-column layout:
 - **Vertical single-column focus**: 7 focus items in a single vertical flow (Name → URL → Token → Model → Fetch Button → Save Button → Cancel Button), seamlessly driven by `↑`/`↓` and `Tab`/`Shift+Tab` without interfering with `←`/`→` in-line text cursor.
 - **Tree-indented Fetch button**: `└── [ Fetch & Pick Online Models ]` sits directly under Model Slug as a subordinate action item.
-- **Defensive pre-checks**: Intercepts Fetch button if API URL or Key is missing, displaying concise status hints (`✗ API URL required` / `✗ API Key required`).
+- **Strict required validation**: Enforces Name, API Base URL, and API Key as mandatory fields upon submission, rendering red status bar errors (`✗ Profile Name is required` / `✗ API Base URL is required` / `✗ API Key is required`) at the absolute bottom of the screen.
 - **Direct typing**: Uninhibited typing/backspacing in text inputs without extra edit keys or letter `m` key-conflicts.
 
 ### Profile snapshots store redundant config data ("插槽" refactor)
