@@ -80,25 +80,27 @@ func newOpenCode() *Tool {
 				"name":    "charon",
 				"options": options,
 			}
-			if a.Model != "" {
+			modelSlug := strings.TrimPrefix(strings.TrimSpace(a.Model), "charon/")
+			if modelSlug != "" {
 				// Register every model the caller already fetched (e.g. the TUI wizard's
-				// picker list), not just a.Model, so OpenCode's own /models picker can
+				// picker list), not just modelSlug, so OpenCode's own /models picker can
 				// switch between them without re-adding the profile. Falls back to the
-				// previously-registered list, then just a.Model, when the caller has no
+				// previously-registered list, then just modelSlug, when the caller has no
 				// fetched list (e.g. the CLI --model flag or an edit of another field).
 				ids := a.AllModels
 				if len(ids) == 0 {
 					ids = existingModels
 				}
 				if len(ids) == 0 {
-					ids = []string{a.Model}
+					ids = []string{modelSlug}
 				}
 				modelMap := make(map[string]any, len(ids))
 				for _, id := range ids {
-					modelMap[id] = map[string]any{"name": id}
+					cleanID := strings.TrimPrefix(strings.TrimSpace(id), "charon/")
+					modelMap[cleanID] = map[string]any{"name": cleanID}
 				}
 				entry["models"] = modelMap
-				cfg["model"] = "charon/" + a.Model
+				cfg["model"] = "charon/" + modelSlug
 			}
 			provider["charon"] = entry
 

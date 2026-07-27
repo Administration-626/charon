@@ -160,12 +160,13 @@ func newPi() *Tool {
 					}
 				}
 			}
+			modelSlug := strings.TrimSpace(a.Model)
 			ids := a.AllModels
 			if len(ids) == 0 {
 				ids = existingModels
 			}
-			if len(ids) == 0 && a.Model != "" {
-				ids = []string{a.Model}
+			if len(ids) == 0 && modelSlug != "" {
+				ids = []string{modelSlug}
 			}
 
 			cfg := piProviderConfig{
@@ -182,18 +183,18 @@ func newPi() *Tool {
 			if err := os.MkdirAll(filepath.Dir(extensionPath), 0o700); err != nil {
 				return err
 			}
-			if err := artifact.AtomicWrite(extensionPath, content, 0o600); err != nil {
-				return err
+			if err := artifact.AtomicWrite(extensionPath, []byte(content), 0o600); err != nil {
+				return fmt.Errorf("write charon.ts: %w", err)
 			}
 
 			s, err := loadJSONMap(settingsPath)
 			if err != nil {
 				return err
 			}
-			s["defaultProvider"] = "charon"
-			if a.Model != "" {
-				s["defaultModel"] = a.Model
+			if modelSlug != "" {
+				s["defaultModel"] = modelSlug
 			}
+			s["defaultProvider"] = "charon"
 			return writeJSONMap(settingsPath, s, 0o600)
 		},
 		Detected: func() bool {

@@ -55,13 +55,14 @@ func newCodex() *Tool {
 			if err != nil {
 				return err
 			}
-			if a.Model != "" {
-				cfg["model"] = a.Model
+			modelSlug := strings.TrimSpace(a.Model)
+			if modelSlug != "" {
+				cfg["model"] = modelSlug
 			}
 			// Codex sizes unknown (non-OpenAI) slugs at 272K > Claude's real 200K and overruns
 			// the context; pin the window for Claude models, clearing any stale prior value.
 			delete(cfg, "model_context_window")
-			if w := claudeContextWindow(a.Model); w != 0 {
+			if w := claudeContextWindow(modelSlug); w != 0 {
 				cfg["model_context_window"] = w
 			}
 			cfg["model_provider"] = "charon"
