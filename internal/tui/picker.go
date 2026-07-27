@@ -167,7 +167,10 @@ func (m *model) renderModels() {
 	m.list.Select(selectedIndex)
 	title := m.tool.Title + " — choose a model"
 	if m.modelFilter != "" {
-		title += fmt.Sprintf(" · search: %s (%d)", m.modelFilter, len(ids))
+		title += fmt.Sprintf(" · search: %s (%d matches)", m.modelFilter, len(ids))
+		m.setStatus(statusInfo, fmt.Sprintf("Filter: %s (%d matches)", m.modelFilter, len(ids)))
+	} else if len(ids) > 0 {
+		m.clearStatus()
 	}
 	m.list.Title = title
 	m.setHelpKeys(keyChoose, keyFilter, keyRefresh, keyBack)
@@ -180,6 +183,11 @@ func (m model) updatePickModel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlC:
 		return m, tea.Quit
 	case tea.KeyEsc:
+		if m.modelFilter != "" {
+			m.modelFilter = ""
+			m.renderModels()
+			return m, nil
+		}
 		return m.onEsc()
 	case tea.KeyEnter:
 		return m.onEnter()
