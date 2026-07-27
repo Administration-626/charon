@@ -83,7 +83,7 @@ func (i item) FilterValue() string { return i.title }
 var (
 	keySwitch = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "switch"))
 	keyEdit   = key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit"))
-	keyBackup = key.NewBinding(key.WithKeys("c", "b"), key.WithHelp("c", "clone"))
+	keyBackup = key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "clone"))
 	keyDelete = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete"))
 	keyBack   = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back"))
 	keyOpen   = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open"))
@@ -444,7 +444,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == viewProfiles && m.tool.ApplyAuth != nil {
 				return m.onEditKey()
 			}
-		case "c", "b":
+		case "c":
 			if m.view == viewProfiles {
 				if it, ok := m.selectedProfile(); ok {
 					return m.startBackup(it.value)
