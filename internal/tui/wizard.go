@@ -123,6 +123,11 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.loadEditForm()
 			return m, nil
 		}
+		if m.view == viewAddCustomModel {
+			m.view = viewPickModel
+			m.clearStatus()
+			return m, nil
+		}
 		if m.view == viewAddKey {
 			m.view = viewAddEndpoint
 			m.clearStatus()
@@ -214,6 +219,22 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clearStatus()
 			cmd := m.beginFetch()
 			return m, cmd
+
+		case viewAddCustomModel:
+			val = strings.TrimSpace(val)
+			m.wiz.model = val
+			m.clearStatus()
+			if m.fromForm {
+				m.fromForm = false
+				m.editField = ""
+				return m.finishAdd(m.wiz.name)
+			}
+			if m.wiz.edit {
+				return m.finishAdd(m.wiz.name)
+			}
+			m.view = viewAddName
+			m.startInput("profile name (e.g. openrouter-fast)", false)
+			return m, textinput.Blink
 
 		case viewAddName:
 			val = strings.TrimSpace(val)

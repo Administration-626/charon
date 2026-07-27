@@ -134,6 +134,10 @@ func (m *model) renderModels() {
 	}
 	items = append(items, item{title: skipTitle, desc: "", value: skipModel, active: skipChosen})
 	skipIndex := len(items) - 1
+
+	customTitle := "✎ Enter custom model ID..."
+	items = append(items, item{title: customTitle, desc: "", value: customModel})
+
 	if m.modelFilter == "" {
 		items = append(items, item{title: "← Back (change URL / key)", desc: "", value: backModel})
 	}

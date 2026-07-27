@@ -39,6 +39,7 @@ const (
 	viewAddKey        // wizard: enter API key
 	viewFetching      // wizard: fetching models
 	viewPickModel     // wizard: choose a model
+	viewAddCustomModel // wizard: enter custom model ID
 	viewAddName       // wizard: name the profile
 	viewDupName       // backup: name the duplicated proxy profile
 	viewEditForm      // edit: field picker (url/name/token/model)
@@ -56,15 +57,16 @@ const (
 )
 
 const (
-	addSentinel = "\x00add"     // the "add new" list row
-	skipModel   = "\x00nomodel" // the "skip model" list row
-	backModel   = "\x00back"    // the "back to previous step" list row
-	sepSentinel = "\x00sep"     // a blank divider row (inert; cursor skips it)
+	addSentinel = "\x00add"         // the "add new" list row
+	skipModel   = "\x00nomodel"     // the "skip model" list row
+	customModel = "\x00custommodel" // the "custom model" list row
+	backModel   = "\x00back"        // the "back to previous step" list row
+	sepSentinel = "\x00sep"         // a blank divider row (inert; cursor skips it)
 )
 
 // isSentinel reports whether v is a synthetic action row rather than a profile.
 func isSentinel(v string) bool {
-	return v == addSentinel || v == skipModel || v == backModel || v == sepSentinel
+	return v == addSentinel || v == skipModel || v == customModel || v == backModel || v == sepSentinel
 }
 
 type item struct {
@@ -205,7 +207,7 @@ func (m *model) setHelpKeys(bindings ...key.Binding) {
 // inputView reports whether the current view is a text-entry step.
 func (m model) inputView() bool {
 	switch m.view {
-	case viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField:
+	case viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField, viewAddCustomModel:
 		return true
 	}
 	return false
@@ -632,6 +634,15 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 			m.clearStatus()
 			m.startInput("API key", true)
 			m.input.SetValue(m.wiz.key)
+			return m, textinput.Blink
+		}
+		if it.value == customModel {
+			m.view = viewAddCustomModel
+			m.clearStatus()
+			m.startInput("custom model ID (e.g. gpt-4o, claude-3-7-sonnet)", false)
+			if m.wiz.model != "" {
+				m.input.SetValue(m.wiz.model)
+			}
 			return m, textinput.Blink
 		}
 		if it.value == skipModel {
