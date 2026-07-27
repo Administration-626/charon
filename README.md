@@ -5,10 +5,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/mingtheanlay/charon/releases/latest"><img src="https://img.shields.io/github/v/release/mingtheanlay/charon?style=flat-square&color=6c47ff" alt="Latest Release"></a>
-  <a href="https://github.com/mingtheanlay/charon/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/mingtheanlay/charon/ci.yml?branch=main&style=flat-square&label=CI" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/mingtheanlay/charon?style=flat-square" alt="MIT License"></a>
-  <a href="https://github.com/mingtheanlay/charon/issues"><img src="https://img.shields.io/github/issues/mingtheanlay/charon?style=flat-square" alt="Open Issues"></a>
+  <a href="https://github.com/Administration-626/charon/releases/latest"><img src="https://img.shields.io/github/v/release/Administration-626/charon?style=flat-square&color=6c47ff" alt="Latest Release"></a>
+  <a href="https://github.com/Administration-626/charon/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Administration-626/charon/ci.yml?branch=main&style=flat-square&label=CI" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Administration-626/charon?style=flat-square" alt="MIT License"></a>
+  <a href="https://github.com/Administration-626/charon/issues"><img src="https://img.shields.io/github/issues/Administration-626/charon?style=flat-square" alt="Open Issues"></a>
 </p>
 
 <p align="center">
@@ -22,7 +22,7 @@ surface, so it works for both API-key logins and OAuth/ChatGPT sessions — and
 switching away and back is always clean and reversible.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mingtheanlay/charon/main/assets/screenshot.png" alt="Charon interactive menu" width="80%">
+  <img src="https://raw.githubusercontent.com/Administration-626/charon/main/assets/screenshot.png" alt="Charon interactive menu" width="80%">
 </p>
 
 ## Features
@@ -73,7 +73,7 @@ No Go needed — downloads the prebuilt binary for your platform, verifies its
 checksum, and installs to `~/.local/bin`:
 
 ```sh
-curl -fsSL https://github.com/mingtheanlay/charon/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/Administration-626/charon/releases/latest/download/install.sh | sh
 ```
 
 > Prepend `PREFIX=/usr/local` to install system-wide, or `VERSION=v1.2.3` to pin a release.
@@ -88,12 +88,12 @@ brew install --cask mtty80/tap/charon
 <summary><b>Other methods</b> — manual binary · build from source</summary>
 
 **Pre-built binary** — grab your platform's archive from the
-[Releases page](https://github.com/mingtheanlay/charon/releases/latest)
+[Releases page](https://github.com/Administration-626/charon/releases/latest)
 (`charon_{darwin,linux}_{amd64,arm64}.tar.gz`) and verify it against the included
 `checksums.txt`:
 
 ```sh
-curl -L https://github.com/mingtheanlay/charon/releases/latest/download/charon_darwin_arm64.tar.gz | tar xz
+curl -L https://github.com/Administration-626/charon/releases/latest/download/charon_darwin_arm64.tar.gz | tar xz
 sudo mv charon /usr/local/bin/
 ```
 
@@ -291,8 +291,8 @@ are never touched** — live in [AGENTS.md](AGENTS.md).
 **PRs and issues are very welcome.** This is an early project with plenty of room
 to grow — your ideas and bug reports genuinely shape where it goes next.
 
-- 🐛 **Found a bug?** [Open an issue](https://github.com/mingtheanlay/charon/issues/new) with the tool name, OS, and expected vs. actual behavior.
-- 💡 **Have an idea?** [Start a discussion](https://github.com/mingtheanlay/charon/issues/new) — new tool support, UX tweaks, anything is fair game.
+- 🐛 **Found a bug?** [Open an issue](https://github.com/Administration-626/charon/issues/new) with the tool name, OS, and expected vs. actual behavior.
+- 💡 **Have an idea?** [Start a discussion](https://github.com/Administration-626/charon/issues/new) — new tool support, UX tweaks, anything is fair game.
 - 🔧 **Sending a fix or feature?** Fork → branch → PR. Run `make fmt && make test` before pushing. See [AGENTS.md](AGENTS.md) for the conventions.
 
 No contribution is too small — a typo fix is as appreciated as a new feature.

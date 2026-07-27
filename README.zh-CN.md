@@ -5,10 +5,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/mingtheanlay/charon/releases/latest"><img src="https://img.shields.io/github/v/release/mingtheanlay/charon?style=flat-square&color=6c47ff" alt="Latest Release"></a>
-  <a href="https://github.com/mingtheanlay/charon/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/mingtheanlay/charon/ci.yml?branch=main&style=flat-square&label=CI" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/mingtheanlay/charon?style=flat-square" alt="MIT License"></a>
-  <a href="https://github.com/mingtheanlay/charon/issues"><img src="https://img.shields.io/github/issues/mingtheanlay/charon?style=flat-square" alt="Open Issues"></a>
+  <a href="https://github.com/Administration-626/charon/releases/latest"><img src="https://img.shields.io/github/v/release/Administration-626/charon?style=flat-square&color=6c47ff" alt="Latest Release"></a>
+  <a href="https://github.com/Administration-626/charon/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Administration-626/charon/ci.yml?branch=main&style=flat-square&label=CI" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Administration-626/charon?style=flat-square" alt="MIT License"></a>
+  <a href="https://github.com/Administration-626/charon/issues"><img src="https://img.shields.io/github/issues/Administration-626/charon?style=flat-square" alt="Open Issues"></a>
 </p>
 
 <p align="center">
@@ -21,7 +21,7 @@ Charon 是一个用 Go 编写的小型 CLI，能够检测 **Codex**、**Claude C
 API-key 登录，也适用于 OAuth/ChatGPT 会话——切换出去再切回来始终干净、可逆。
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mingtheanlay/charon/main/assets/screenshot.png" alt="Charon interactive menu" width="80%">
+  <img src="https://raw.githubusercontent.com/Administration-626/charon/main/assets/screenshot.png" alt="Charon interactive menu" width="80%">
 </p>
 
 ## 功能
@@ -68,7 +68,7 @@ Keychain 支持按平台编译（`keychain_darwin.go` 与 `keychain_other.go`）
 无需 Go——下载对应平台的预编译二进制、校验 checksum，并安装到 `~/.local/bin`：
 
 ```sh
-curl -fsSL https://github.com/mingtheanlay/charon/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/Administration-626/charon/releases/latest/download/install.sh | sh
 ```
 
 > 前置 `PREFIX=/usr/local` 可装到系统目录；前置 `VERSION=v1.2.3` 可锁定某个发行版。
@@ -82,12 +82,12 @@ brew install --cask mtty80/tap/charon
 <details>
 <summary><b>其它方式</b> · 手动二进制 · 从源码构建</summary>
 
-**预编译二进制** —— 从 [Releases 页面](https://github.com/mingtheanlay/charon/releases/latest)
+**预编译二进制** —— 从 [Releases 页面](https://github.com/Administration-626/charon/releases/latest)
 下载你平台对应的压缩包（`charon_{darwin,linux}_{amd64,arm64}.tar.gz`），并对照随包
 附带的 `checksums.txt` 校验：
 
 ```sh
-curl -L https://github.com/mingtheanlay/charon/releases/latest/download/charon_darwin_arm64.tar.gz | tar xz
+curl -L https://github.com/Administration-626/charon/releases/latest/download/charon_darwin_arm64.tar.gz | tar xz
 sudo mv charon /usr/local/bin/
 ```
 
@@ -271,8 +271,8 @@ CI（`.github/workflows/ci.yml`）在 Linux 和 macOS 上运行格式检查、ve
 **欢迎提 PR 和 issue。** 这是个早期项目，还有大量成长空间——你的想法和 bug 报告会
 切实影响它下一步的方向。
 
-- 🐛 **发现 bug？** [提个 issue](https://github.com/mingtheanlay/charon/issues/new)，附上工具名、系统、期望与实际行为。
-- 💡 **有想法？** [开个讨论](https://github.com/mingtheanlay/charon/issues/new)——新工具支持、UX 调整，什么都行。
+- 🐛 **发现 bug？** [提个 issue](https://github.com/Administration-626/charon/issues/new)，附上工具名、系统、期望与实际行为。
+- 💡 **有想法？** [开个讨论](https://github.com/Administration-626/charon/issues/new)——新工具支持、UX 调整，什么都行。
 - 🔧 **提交修复或功能？** Fork → branch → PR。推送前跑 `make fmt && make test`。约定见 [AGENTS.md](AGENTS.md)。
 
 再小的贡献也欢迎——改个错别字和加个功能同样感激。
