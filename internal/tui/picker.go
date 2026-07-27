@@ -115,6 +115,12 @@ func (m *model) showModels(ids []string) {
 func (m *model) renderModels() {
 	ids := filterModels(m.allModels, m.modelFilter)
 	var items []list.Item
+
+	if m.modelFilter == "" {
+		items = append(items, item{title: "← Back (change URL / key)", desc: "", value: backModel})
+		items = append(items, item{value: sepSentinel})
+	}
+
 	for _, id := range ids {
 		title := id
 		isChosen := id == m.wiz.model
@@ -123,7 +129,7 @@ func (m *model) renderModels() {
 		}
 		items = append(items, item{title: title, desc: "", value: id, active: isChosen})
 	}
-	// A blank divider sets the skip row apart from the models (only when not searching).
+	// A blank divider sets the action rows apart from the models (only when not searching).
 	if len(ids) > 0 && m.modelFilter == "" {
 		items = append(items, item{value: sepSentinel})
 	}
@@ -133,24 +139,25 @@ func (m *model) renderModels() {
 		skipTitle = "✓ " + skipTitle
 	}
 	items = append(items, item{title: skipTitle, desc: "", value: skipModel, active: skipChosen})
-	skipIndex := len(items) - 1
-
 	customTitle := "✎ Enter custom model ID..."
 	items = append(items, item{title: customTitle, desc: "", value: customModel})
 
-	if m.modelFilter == "" {
-		items = append(items, item{title: "← Back (change URL / key)", desc: "", value: backModel})
-	}
 	m.list.SetDelegate(themedCompactDelegate())
 	m.list.SetItems(items)
 	// No search: land on the checked row; while searching, the best match is on top.
 	selectedIndex := 0
 	if m.modelFilter == "" {
 		if m.wiz.model == "" {
-			selectedIndex = skipIndex // the trailing skip row
+			// Find the index of skipModel
+			for i, it := range items {
+				if itemVal, ok := it.(item); ok && itemVal.value == skipModel {
+					selectedIndex = i
+					break
+				}
+			}
 		} else {
-			for i, id := range ids {
-				if id == m.wiz.model {
+			for i, it := range items {
+				if itemVal, ok := it.(item); ok && itemVal.value == m.wiz.model {
 					selectedIndex = i
 					break
 				}

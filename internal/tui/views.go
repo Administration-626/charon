@@ -28,11 +28,15 @@ func (m model) View() string {
 		return m.wizardHeader() +
 			promptStyle.Render(m.spinner.View()+m.loadingMsg) +
 			"\n\n" + hintStyle.Render("fetching models from "+m.wiz.endpoint)
-	case viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField:
+	case viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField, viewAddCustomModel:
+		hint := "enter: continue · esc: back"
+		if m.view == viewAddEndpoint || m.view == viewDupName || m.view == viewEditField {
+			hint = "enter: continue · esc: cancel"
+		}
 		body := m.wizardHeader() +
 			promptStyle.Render(m.prompt()) +
 			"\n\n  " + m.input.View() +
-			"\n\n" + hintStyle.Render("enter: continue · esc: cancel")
+			"\n\n" + hintStyle.Render(hint)
 		if line := statusRender(m.statusLvl, m.status); line != "" {
 			body += "\n" + line
 		}
@@ -81,6 +85,8 @@ func (m model) prompt() string {
 		return "API key — input is hidden as you type:"
 	case viewAddName:
 		return "Name this profile (e.g. work, openrouter-fast):"
+	case viewAddCustomModel:
+		return "Enter custom model ID (e.g. gpt-4o, claude-3-7-sonnet):"
 	case viewDupName:
 		return "Name the duplicate of " + m.dupSource + ":"
 	default:
