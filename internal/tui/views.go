@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"strings"
+
+	"charon/internal/secret"
 )
 
 // statusRender styles a status line for the level (glyph-prefixed); "" for an empty message.
@@ -64,8 +66,8 @@ func (m model) View() string {
 				inputVal := m.formInputs[i].Value()
 				if inputVal == "" {
 					inputVal = m.formInputs[i].Placeholder
-				} else if i == 2 { // Password masking for Token
-					inputVal = strings.Repeat("•", len(inputVal))
+				} else if i == 2 { // Partial masking for API Key
+					inputVal = secret.Mask(inputVal)
 				}
 				inputStr := hintStyle.Render(inputVal)
 				formLines = append(formLines, bar+labelStr+inputStr)

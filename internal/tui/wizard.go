@@ -63,7 +63,7 @@ func (m *model) loadEditForm() {
 	m.formInputs = make([]textinput.Model, 4)
 	m.formInputs[0] = newFormInput("e.g. openrouter-fast", m.wiz.name, false)
 	m.formInputs[1] = newFormInput(exampleEndpoint, m.wiz.endpoint, false)
-	m.formInputs[2] = newFormInput("sk-or-v1-xxxxxxxx", m.wiz.key, true)
+	m.formInputs[2] = newFormInput("sk-or-v1-xxxxxxxx", m.wiz.key, false)
 	m.formInputs[3] = newFormInput("gpt-4o (press m to pick)", m.wiz.model, false)
 	m.formInputs[0].Focus()
 }
