@@ -73,12 +73,6 @@ curl -fsSL https://github.com/Administration-626/charon/releases/latest/download
 
 > 前置 `PREFIX=/usr/local` 可装到系统目录；前置 `VERSION=v1.2.3` 可锁定某个发行版。
 
-### Homebrew（macOS 与 Linux）
-
-```sh
-brew install --cask Administration-626/tap/charon
-```
-
 <details>
 <summary><b>其它方式</b> · 手动二进制 · 从源码构建</summary>
 
@@ -136,7 +130,7 @@ charon uninstall             # 卸载已安装的 charon 二进制
 
 ### Shell 补全
 
-补全脚本随发行版压缩包提供，并通过 Homebrew 自动安装。手动启用方式：
+ 补全脚本随发行版压缩包提供。手动启用方式：
 
 ```sh
 # bash —— 加到 ~/.bashrc

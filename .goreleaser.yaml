@@ -1,6 +1,6 @@
-# GoReleaser config for charon — builds cross-platform binaries, cuts a GitHub
-# release, and publishes a Homebrew cask to your tap.
-# Docs: https://goreleaser.com
+ # GoReleaser config for charon — builds cross-platform binaries and cuts a
+ # GitHub release.
+ # Docs: https://goreleaser.com
 version: 2
 
 before:
@@ -40,34 +40,6 @@ archives:
 
 checksum:
   name_template: "checksums.txt"
-
-# Publishes/updates the Homebrew cask automatically on each release.
-# `brews` (Formula-based) is deprecated by GoReleaser in favor of `homebrew_casks`.
-homebrew_casks:
-  - name: charon
-    repository:
-      owner: Administration-626
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    homepage: "https://github.com/Administration-626/charon"
-    description: "Switch Codex, Claude Code and OpenCode between endpoint + credential profiles"
-    # Shown by `brew info --cask charon` — point users at the no-Homebrew curl installer.
-    caveats: |
-      Not using Homebrew? Install with one line on Linux or macOS:
-        curl -fsSL https://github.com/Administration-626/charon/releases/latest/download/install.sh | sh
-    completions:
-      bash: completions/charon.bash
-      zsh: completions/charon.zsh
-      fish: completions/charon.fish
-    # The binary is unsigned/unnotarized, so macOS quarantines it on download
-    # and refuses to run it ("charon is damaged") unless the quarantine
-    # attribute is stripped after install.
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/charon"]
-          end
 
 release:
   github:

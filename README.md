@@ -78,12 +78,6 @@ curl -fsSL https://github.com/Administration-626/charon/releases/latest/download
 
 > Prepend `PREFIX=/usr/local` to install system-wide, or `VERSION=v1.2.3` to pin a release.
 
-### Homebrew (macOS & Linux)
-
-```sh
-brew install --cask Administration-626/tap/charon
-```
-
 <details>
 <summary><b>Other methods</b> — manual binary · build from source</summary>
 
@@ -142,8 +136,7 @@ also flags **`(modified)`** next to a tool whose live config changed outside Cha
 
 ### Shell completions
 
-Completions ship in the release archives and are installed automatically via
-Homebrew. To enable them manually:
+ Completions ship in the release archives. To enable them manually:
 
 ```sh
 # bash — add to ~/.bashrc
