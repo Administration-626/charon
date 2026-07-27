@@ -5,11 +5,8 @@ import (
 	"strings"
 
 	"charon/internal/profile"
-	"charon/internal/secret"
 	"charon/internal/tools"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -45,52 +42,107 @@ func wizardStep(v view) (n, total int, label string) {
 	return 0, 0, ""
 }
 
-// loadEditForm populates the field picker from the working wizard values.
+func newFormInput(placeholder, value string, isPassword bool) textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = placeholder
+	ti.CharLimit = 256
+	ti.Width = 40
+	if isPassword {
+		ti.EchoMode = textinput.EchoPassword
+		ti.EchoCharacter = '•'
+	}
+	if value != "" {
+		ti.SetValue(value)
+	}
+	return ti
+}
+
+// loadEditForm populates the native multi-input form.
 func (m *model) loadEditForm() {
-	token := "(none — required)"
-	if m.wiz.key != "" {
-		token = secret.Mask(m.wiz.key)
+	m.formFocus = 0
+	m.formInputs = make([]textinput.Model, 4)
+	m.formInputs[0] = newFormInput("e.g. openrouter-fast", m.wiz.name, false)
+	m.formInputs[1] = newFormInput(exampleEndpoint, m.wiz.endpoint, false)
+	m.formInputs[2] = newFormInput("sk-or-v1-xxxxxxxx", m.wiz.key, true)
+	m.formInputs[3] = newFormInput("gpt-4o (press m to pick)", m.wiz.model, false)
+	m.formInputs[0].Focus()
+}
+
+func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.dupSource = ""
+		m.view = viewProfiles
+		m.setStatus(statusInfo, "cancelled")
+		m.loadProfiles("")
+		return m, nil
+	case "ctrl+s":
+		return m.submitForm()
+	case "up", "shift+tab":
+		m.formFocus = (m.formFocus - 1 + 6) % 6
+		return m.syncFormFocus()
+	case "down", "tab":
+		m.formFocus = (m.formFocus + 1) % 6
+		return m.syncFormFocus()
+	case "enter":
+		if m.formFocus == 4 { // [ Save Profile ]
+			return m.submitForm()
+		}
+		if m.formFocus == 5 { // [ Cancel ]
+			m.dupSource = ""
+			m.view = viewProfiles
+			m.setStatus(statusInfo, "cancelled")
+			m.loadProfiles("")
+			return m, nil
+		}
+		m.formFocus = (m.formFocus + 1) % 6
+		return m.syncFormFocus()
+	case "m", "ctrl+m":
+		if m.formFocus == 3 {
+			m.wiz.endpoint = strings.TrimSpace(m.formInputs[1].Value())
+			m.wiz.key = strings.TrimSpace(m.formInputs[2].Value())
+			m.fromForm = true
+			cmd := m.beginFetch()
+			return m, cmd
+		}
 	}
-	modelVal := m.wiz.model
-	if modelVal == "" {
-		modelVal = "(none — use default)"
+
+	if m.formFocus < 4 {
+		var cmd tea.Cmd
+		m.formInputs[m.formFocus], cmd = m.formInputs[m.formFocus].Update(msg)
+		m.wiz.name = strings.TrimSpace(m.formInputs[0].Value())
+		m.wiz.endpoint = strings.TrimSpace(m.formInputs[1].Value())
+		m.wiz.key = strings.TrimSpace(m.formInputs[2].Value())
+		m.wiz.model = strings.TrimSpace(m.formInputs[3].Value())
+		return m, cmd
 	}
-	endpoint := m.wiz.endpoint
-	if endpoint == "" {
-		endpoint = "(none — use default)"
+	return m, nil
+}
+
+func (m *model) syncFormFocus() (tea.Model, tea.Cmd) {
+	for i := 0; i < 4; i++ {
+		if i == m.formFocus {
+			m.formInputs[i].Focus()
+		} else {
+			m.formInputs[i].Blur()
+		}
 	}
-	nameVal := m.wiz.name
-	if nameVal == "" {
-		nameVal = "(none — required)"
+	return *m, textinput.Blink
+}
+
+func (m model) submitForm() (tea.Model, tea.Cmd) {
+	name := strings.TrimSpace(m.formInputs[0].Value())
+	if name == "" && m.wiz.origName != profile.DefaultName {
+		m.setStatus(statusErr, "profile name is required")
+		return m, nil
 	}
-	items := []list.Item{}
-	if m.wiz.origName != profile.DefaultName {
-		items = append(items, item{title: "Profile Name", desc: nameVal, value: fieldName})
+	if name == "" {
+		name = m.wiz.name
 	}
-	items = append(items,
-		item{title: "API Base URL", desc: endpoint, value: fieldURL},
-		item{title: "API Key/Token", desc: token, value: fieldToken},
-		item{title: "Model Slug", desc: modelVal + "  (press m to fetch & pick)", value: fieldModel},
-		item{value: sepSentinel},
-		item{title: "[ Save Profile ]", desc: "Submit and save profile (Ctrl+S)", value: actionSave},
-		item{title: "[ Cancel ]", desc: "Discard changes and exit (Esc)", value: actionCancel},
-	)
-	m.list.SetDelegate(themedDelegate()) // two-line rows show each field's value
-	m.list.SetItems(items)
-	if m.wiz.edit {
-		m.list.Title = fmt.Sprintf("Edit %s / %s", m.tool.Title, m.wiz.name)
-	} else {
-		m.list.Title = fmt.Sprintf("Add %s Profile", m.tool.Title)
-	}
-	// Land on the field last visited; a fresh form falls back to the first row.
-	m.list.Select(0)
-	m.selectByValue(m.editField)
-	m.setHelpKeys(
-		key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "move field")),
-		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "edit/select")),
-		key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "save")),
-		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
-	)
+	m.wiz.endpoint = strings.TrimSpace(m.formInputs[1].Value())
+	m.wiz.key = strings.TrimSpace(m.formInputs[2].Value())
+	m.wiz.model = strings.TrimSpace(m.formInputs[3].Value())
+	return m.finishAdd(name)
 }
 
 // onEditFormSelect handles a chosen row in the edit field-picker.

@@ -1,6 +1,9 @@
 package tui
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // statusRender styles a status line for the level (glyph-prefixed); "" for an empty message.
 func statusRender(level statusLevel, msg string) string {
@@ -37,15 +40,54 @@ func (m model) View() string {
 			body += "\n" + line
 		}
 		return body
-	}
-	out := m.list.View()
-	if m.view == viewEditForm {
-		hint := "↑/↓: move field · type/backspace to edit · ctrl+s: save · esc: cancel"
-		if m.editField == fieldModel {
-			hint = "type to edit · press m to fetch & pick models · ctrl+s: save · esc: cancel"
+	case viewEditForm:
+		title := m.tool.Title + " · Edit Profile"
+		if !m.wiz.edit {
+			title = m.tool.Title + " · New Profile"
 		}
-		out += "\n\n" + hintStyle.Render(hint)
-	} else if m.view == viewTools {
+		header := "\n" + titleStyle.Render(title) + "\n\n"
+
+		labels := []string{"Profile Name ", "API Base URL ", "API Key/Token", "Model Slug   "}
+		var formLines []string
+
+		for i := 0; i < 4; i++ {
+			prefix := "  "
+			if m.formFocus == i {
+				prefix = "▸ "
+			}
+			labelStr := labels[i] + " : "
+			inputStr := m.formInputs[i].View()
+			if i == 3 && m.formFocus == 3 {
+				inputStr += hintStyle.Render(" (press m to pick)")
+			}
+			formLines = append(formLines, prefix+labelStr+inputStr)
+		}
+
+		saveBtn := "[ Save Profile ]"
+		cancelBtn := "[ Cancel ]"
+		if m.formFocus == 4 {
+			saveBtn = promptStyle.Render("[ Save Profile ]")
+		} else {
+			saveBtn = hintStyle.Render("[ Save Profile ]")
+		}
+		if m.formFocus == 5 {
+			cancelBtn = promptStyle.Render("[ Cancel ]")
+		} else {
+			cancelBtn = hintStyle.Render("[ Cancel ]")
+		}
+
+		btnLine := "\n  " + saveBtn + "    " + cancelBtn
+		hint := "\n\n" + hintStyle.Render("↑/↓ / tab: switch field · type/backspace: edit directly · ctrl+s: save · esc: cancel")
+
+		body := header + strings.Join(formLines, "\n") + "\n" + btnLine + hint
+		if line := statusRender(m.statusLvl, m.status); line != "" {
+			body += "\n" + line
+		}
+		return body
+	}
+
+	out := m.list.View()
+	if m.view == viewTools {
 		out = banner(m.version) + "\n\n" + out // blank line between the banner and the list title
 	}
 	if line := statusRender(m.statusLvl, m.status); line != "" {
@@ -54,8 +96,7 @@ func (m model) View() string {
 	return out
 }
 
-// wizardHeader renders the titled bar and "Step n of N" line for add-flow screens
-// (just a blank line for non-wizard input steps).
+// wizardHeader renders the titled bar for add-flow screens.
 func (m model) wizardHeader() string {
 	n, total, label := wizardStep(m.view)
 	if total == 0 {

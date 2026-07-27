@@ -109,6 +109,9 @@ type model struct {
 	delTarget string // profile name pending delete confirmation
 	dupSource string // profile being duplicated by the backup flow
 
+	formInputs []textinput.Model // native form inputs for Name, URL, Token, Model
+	formFocus  int               // index of focused form element (0: Name, 1: URL, 2: Token, 3: Model, 4: Save, 5: Cancel)
+
 	spinner    spinner.Model
 	loadingMsg string      // playful line shown on the loading screen, picked per fetch
 	pending    *fetchedMsg // fetch result held back until the min-load window elapses
@@ -206,8 +209,8 @@ func (m *model) setHelpKeys(bindings ...key.Binding) {
 
 // inputView reports whether the current view is a text-entry step.
 func (m model) inputView() bool {
-	if m.view == viewEditForm && m.editField != "" {
-		return true
+	if m.view == viewEditForm {
+		return m.formFocus < 4
 	}
 	switch m.view {
 	case viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField, viewAddCustomModel:
@@ -402,6 +405,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// ctrl+c is the only way to quit, from any screen.
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
+		}
+		if m.view == viewEditForm {
+			return m.updateEditForm(msg)
 		}
 		if m.inputView() {
 			return m.updateInput(msg)
