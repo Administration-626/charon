@@ -82,6 +82,7 @@ Adopted Option 1 intuitive profile management flow matching mature TUI standards
 - **Dual `add` pathways**: Top-level `＋ Add new profile…` list item plus global `a` shortcut instantly opens the native single-column form.
 - **Strict required validation**: Enforces Name, API Base URL, and API Key as mandatory fields upon submission, rendering red status bar errors at the bottom.
 - **Dynamic Model placeholders**: Dynamically renders tool-aware default model placeholders (e.g. `e.g. claude-3-7-sonnet (leave blank for default)` for Claude Code, `e.g. gpt-4o (leave blank for default)` for Codex).
+- **Instant type-to-search model filter**: Zero-key trigger instant fuzzy searching (powered by `sahilm/fuzzy`) when picking models from API providers. Type `claude` or `3-7` to filter 100+ models in milliseconds, with Backspace to edit query and Esc to clear filter.
 
 ### Profile snapshots store redundant config data ("插槽" refactor)
 Each profile stores a full copy of the tool's config file (e.g.
