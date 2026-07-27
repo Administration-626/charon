@@ -64,7 +64,11 @@ func (m *model) loadEditForm() {
 	m.formInputs[0] = newFormInput("e.g. openrouter-fast", m.wiz.name, false)
 	m.formInputs[1] = newFormInput(exampleEndpoint, m.wiz.endpoint, false)
 	m.formInputs[2] = newFormInput("sk-or-v1-xxxxxxxx", m.wiz.key, false)
-	m.formInputs[3] = newFormInput("gpt-4o (press m to pick)", m.wiz.model, false)
+	modelPlaceholder := "e.g. gpt-4o (leave blank for default)"
+	if m.tool != nil && m.tool.Name == "claude" {
+		modelPlaceholder = "e.g. claude-3-7-sonnet (leave blank for default)"
+	}
+	m.formInputs[3] = newFormInput(modelPlaceholder, m.wiz.model, false)
 	m.formInputs[0].Focus()
 }
 
