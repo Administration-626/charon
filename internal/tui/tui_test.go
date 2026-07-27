@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"charon/internal/profile"
 	"charon/internal/tools"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -150,5 +151,34 @@ func TestSkipSeparators(t *testing.T) {
 	m.skipSeparators(before)
 	if got := m.list.Index(); got != 0 {
 		t.Errorf("up: index = %d, want 0 (divider skipped)", got)
+	}
+}
+
+func TestQuitKeyDisabledInPicker(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	st, err := profile.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(st, "v1.0.0")
+	if m.list.KeyMap.Quit.Enabled() {
+		t.Error("Quit key should be disabled after newModel")
+	}
+
+	m.tool = m.allTools[0]
+	m.loadProfiles("")
+	if m.list.KeyMap.Quit.Enabled() {
+		t.Error("Quit key should be disabled after loadProfiles")
+	}
+
+	m.view = viewPickModel
+	m.showModels([]string{"gpt-4o", "claude-3-5-sonnet"})
+	if m.list.KeyMap.Quit.Enabled() {
+		t.Error("Quit key should be disabled after showModels")
+	}
+
+	helpView := m.list.Help.View(m.list)
+	if strings.Contains(helpView, "q quit") {
+		t.Errorf("ShortHelp view contains 'q quit': %q", helpView)
 	}
 }

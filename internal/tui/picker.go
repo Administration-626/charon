@@ -144,7 +144,6 @@ func (m *model) renderModels() {
 	}
 	items = append(items, item{title: skipTitle, desc: "", value: skipModel, active: skipChosen})
 
-	m.list.SetDelegate(themedCompactDelegate())
 	m.list.SetItems(items)
 	// No search: land on the checked row; while searching, the best match is on top.
 	selectedIndex := 0
@@ -176,6 +175,7 @@ func (m *model) renderModels() {
 	}
 	m.list.Title = title
 	m.setHelpKeys(keyChoose, keyFilter, keyRefresh, keyBack)
+	m.setDelegate(themedCompactDelegate())
 }
 
 // updatePickModel drives the picker: printable keys search, ctrl+r refetches,

@@ -35,16 +35,16 @@ type view int
 const (
 	viewTools view = iota
 	viewProfiles
-	viewAddEndpoint   // wizard: enter endpoint
-	viewAddKey        // wizard: enter API key
-	viewFetching      // wizard: fetching models
-	viewPickModel     // wizard: choose a model
+	viewAddEndpoint    // wizard: enter endpoint
+	viewAddKey         // wizard: enter API key
+	viewFetching       // wizard: fetching models
+	viewPickModel      // wizard: choose a model
 	viewAddCustomModel // wizard: enter custom model ID
-	viewAddName       // wizard: name the profile
-	viewDupName       // backup: name the duplicated proxy profile
-	viewEditForm      // edit: field picker (url/name/token/model)
-	viewEditField     // edit: single-field text input
-	viewConfirmDelete // confirm removing a profile (y/n)
+	viewAddName        // wizard: name the profile
+	viewDupName        // backup: name the duplicated proxy profile
+	viewEditForm       // edit: field picker (url/name/token/model)
+	viewEditField      // edit: single-field text input
+	viewConfirmDelete  // confirm removing a profile (y/n)
 )
 
 // statusLevel colors the footer status line by severity.
@@ -207,6 +207,13 @@ func (m *model) setHelpKeys(bindings ...key.Binding) {
 	m.list.AdditionalFullHelpKeys = func() []key.Binding { return bindings }
 }
 
+// setDelegate installs an item delegate while keeping the Quit key disabled.
+// bubbles/list SetDelegate resets KeyMap to DefaultKeyMap(), which re-enables Quit.
+func (m *model) setDelegate(d list.ItemDelegate) {
+	m.list.SetDelegate(d)
+	m.list.KeyMap.Quit.SetEnabled(false)
+}
+
 // inputView reports whether the current view is a text-entry step.
 func (m model) inputView() bool {
 	if m.view == viewEditForm {
@@ -265,11 +272,11 @@ func (m *model) loadTools() {
 			selectedIndex = i
 		}
 	}
-	m.list.SetDelegate(themedDelegate()) // two-line rows show each tool's status
 	m.list.SetItems(items)
 	m.list.Select(selectedIndex)
 	m.list.Title = "Charon — select a tool"
 	m.setHelpKeys(keyOpen)
+	m.setDelegate(themedDelegate()) // two-line rows show each tool's status
 }
 
 // loadProfiles rebuilds the profile list for the current tool. selectName, if
@@ -319,11 +326,11 @@ func (m *model) loadProfiles(selectName string) {
 		items = append(items, item{title: title, desc: m.profileDetail(name), value: name, active: isActive})
 	}
 
-	m.list.SetDelegate(themedDelegate()) // two-line rows show each profile's url and model
 	m.list.SetItems(items)
 	m.list.Select(selectedIndex)
 	m.list.Title = m.tool.Title + " profiles"
 	m.setHelpKeys(keySwitch, keyEdit, keyBackup, keyDelete, keyBack)
+	m.setDelegate(themedDelegate()) // two-line rows show each profile's url and model
 	// Welcome a first-time user who has no profiles for this tool yet.
 	if len(saved) == 0 && m.status == "" && m.tool.ApplyAuth != nil {
 		m.setStatus(statusInfo, `No profiles yet — press enter on "Add new profile" or press 'a' to create one.`)
