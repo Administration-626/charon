@@ -76,8 +76,9 @@ on the fetched `/v1/models` API response.
 Chinese profile names (and other non-ASCII names) work natively.
 
 ### Single-page Form UI refactor for Profile Creation (Add/Edit Flow) ✅ (done)
-Replaced the multi-step wizard with a unified Single-page Form view (reusing `viewEditForm` mechanics) matching mature TUI standards (e.g. Claude Code, GitUI):
-- **Direct typing**: Moving focus (`↑`/`↓`) to Name, URL, Token, or Model allows typing/backspacing directly on the row without pressing extra activation keys (`e`/`Enter`).
+Replaced the multi-step wizard and list-wrapper with a native **Multi-Textinput Form Model** (`[]textinput.Model`) matching mature TUI standards (e.g. Claude Code, LazyGit):
+- **Direct uninhibited typing**: Focus on Name, URL, Token, or Model allows typing, backspacing, and cursor movement directly on the row with zero key-interception by list wrappers.
+- **Seamless focus navigation**: Press `↑`/`↓` or `Tab`/`Shift+Tab` to seamlessly move input focus between fields.
 - **On-demand model fetching**: Press `m` / `Ctrl+M` on the Model row to fetch and pick from `/v1/models`.
 - **Standard Save & Cancel buttons**: Distinct `[ Save Profile ]` and `[ Cancel ]` buttons at the bottom. `Ctrl+S` or `[ Save Profile ]` + `Enter` submits; `Esc` or `[ Cancel ]` + `Enter` cancels and exits.
 
