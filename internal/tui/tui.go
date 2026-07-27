@@ -9,6 +9,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"charon/internal/profile"
@@ -566,21 +567,17 @@ func (m model) onEsc() (tea.Model, tea.Cmd) {
 		m.loadTools()
 		m.resize() // banner returns → shrink the list
 	case viewEditForm:
-		m.editField = ""               // leaving edit expires the field focus → next entry starts on Name
-		return m.finishAdd(m.wiz.name) // back applies edits automatically — no explicit save step
-	case viewPickModel:
-		if m.fromForm {
-			m.fromForm = false
-			m.editField = fieldModel // land back on the Model row
-			m.view = viewEditForm
-			m.loadEditForm()
-		} else {
-			m.view = viewAddKey
-			m.clearStatus()
-			m.startInput("API key", true)
-			m.input.SetValue(m.wiz.key)
-			return m, textinput.Blink
+		m.editField = ""
+		name := strings.TrimSpace(m.wiz.name)
+		if name == "" {
+			m.setStatus(statusErr, "profile name is required")
+			return m, nil
 		}
+		return m.finishAdd(name) // esc applies form fields
+	case viewPickModel:
+		m.view = viewEditForm
+		m.loadEditForm()
+		return m, nil
 	}
 	return m, nil
 }
@@ -609,10 +606,9 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 	case viewProfiles:
 		if it.value == addSentinel {
 			m.wiz = wizard{}
-			m.view = viewAddEndpoint
-			// Placeholder only — never prefill (or reveal) a real endpoint value.
-			m.startInput(exampleEndpoint, false)
-			return m, textinput.Blink
+			m.view = viewEditForm
+			m.loadEditForm()
+			return m, nil
 		}
 		backup, err := m.store.Apply(m.tool, it.value)
 		if err != nil {
@@ -625,16 +621,18 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 		}
 
 	case viewEditForm:
-		// "e" edits the highlighted field; enter is inert (esc saves & backs out).
+		// "e" or enter edits the highlighted field; esc saves & backs out.
+		it, ok := m.list.SelectedItem().(item)
+		if ok {
+			return m.onEditFormSelect(it.value)
+		}
 		return m, nil
 
 	case viewPickModel:
 		if it.value == backModel {
-			m.view = viewAddKey
-			m.clearStatus()
-			m.startInput("API key", true)
-			m.input.SetValue(m.wiz.key)
-			return m, textinput.Blink
+			m.view = viewEditForm
+			m.loadEditForm()
+			return m, nil
 		}
 		if it.value == customModel {
 			m.view = viewAddCustomModel
@@ -650,17 +648,10 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 		} else {
 			m.wiz.model = it.value
 		}
-		if m.fromForm {
-			m.fromForm = false
-			m.editField = ""
-			return m.finishAdd(m.wiz.name) // save immediately — no waiting on esc
-		}
-		if m.wiz.edit {
-			return m.finishAdd(m.wiz.name) // editing keeps the existing name
-		}
-		m.view = viewAddName
-		m.startInput("profile name (e.g. openrouter-fast)", false)
-		return m, textinput.Blink
+		m.editField = fieldModel
+		m.view = viewEditForm
+		m.loadEditForm()
+		return m, nil
 	}
 	return m, nil
 }

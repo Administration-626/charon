@@ -45,34 +45,42 @@ func wizardStep(v view) (n, total int, label string) {
 
 // loadEditForm populates the field picker from the working wizard values.
 func (m *model) loadEditForm() {
-	token := "(none)"
+	token := "(none — required)"
 	if m.wiz.key != "" {
 		token = secret.Mask(m.wiz.key)
 	}
 	modelVal := m.wiz.model
 	if modelVal == "" {
-		modelVal = "(none)"
+		modelVal = "(none — use default)"
 	}
 	endpoint := m.wiz.endpoint
 	if endpoint == "" {
-		endpoint = "(none)"
+		endpoint = "(none — use default)"
+	}
+	nameVal := m.wiz.name
+	if nameVal == "" {
+		nameVal = "(none — required)"
 	}
 	items := []list.Item{
 		item{title: "URL", desc: endpoint, value: fieldURL},
 		item{title: "Token", desc: token, value: fieldToken},
-		item{title: "Model", desc: modelVal + "  (e to fetch & pick)", value: fieldModel},
+		item{title: "Model", desc: modelVal + "  (enter/e to fetch & pick)", value: fieldModel},
 	}
 	if m.wiz.origName != profile.DefaultName {
-		items = append([]list.Item{item{title: "Name", desc: m.wiz.name, value: fieldName}}, items...)
+		items = append([]list.Item{item{title: "Name", desc: nameVal, value: fieldName}}, items...)
 	}
 	m.list.SetDelegate(themedDelegate()) // two-line rows show each field's value
 	m.list.SetItems(items)
-	m.list.Title = fmt.Sprintf("Edit %s / %s", m.tool.Title, m.wiz.name)
-	// Land on the field last visited; a fresh edit falls back to the first row.
+	if m.wiz.edit {
+		m.list.Title = fmt.Sprintf("Edit %s / %s", m.tool.Title, m.wiz.name)
+	} else {
+		m.list.Title = fmt.Sprintf("Add %s profile", m.tool.Title)
+	}
+	// Land on the field last visited; a fresh form falls back to the first row.
 	m.list.Select(0)
 	m.selectByValue(m.editField)
 	m.setHelpKeys(
-		key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit field")),
+		key.NewBinding(key.WithKeys("e", "enter"), key.WithHelp("e/enter", "edit field")),
 		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "save & back")),
 	)
 }
