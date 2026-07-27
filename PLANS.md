@@ -81,6 +81,7 @@ Adopted Option 1 intuitive profile management flow matching mature TUI standards
 - **Zero-interruption `clone` via `c` / `b`**: Pressing `c` (or `b`) instantly duplicates a profile into `<name>-copy` without interrupting the user with prompts. Focus automatically jumps to the newly created clone.
 - **Dual `add` pathways**: Top-level `＋ Add new profile…` list item plus global `a` shortcut instantly opens the native single-column form.
 - **Strict required validation**: Enforces Name, API Base URL, and API Key as mandatory fields upon submission, rendering red status bar errors at the bottom.
+- **Dynamic Model placeholders**: Dynamically renders tool-aware default model placeholders (e.g. `e.g. claude-3-7-sonnet (leave blank for default)` for Claude Code, `e.g. gpt-4o (leave blank for default)` for Codex).
 
 ### Profile snapshots store redundant config data ("插槽" refactor)
 Each profile stores a full copy of the tool's config file (e.g.
