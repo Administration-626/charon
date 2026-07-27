@@ -26,8 +26,8 @@ var (
 )
 
 var (
-	// titleStyle is the screen header: bold text on a brand-teal fill.
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(colorOnDark).Background(colorBrand).Padding(0, 1)
+	// titleStyle is the screen header: clean bold accent text without solid background block.
+	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
 
 	// statusStyle is the muted footer line for neutral/info messages.
 	statusStyle = lipgloss.NewStyle().Foreground(colorMuted).PaddingLeft(1)
