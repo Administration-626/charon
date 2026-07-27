@@ -39,7 +39,10 @@ func (m model) View() string {
 		return body
 	}
 	out := m.list.View()
-	if m.view == viewTools {
+	if m.view == viewEditForm && m.editField != "" {
+		out += "\n\n  Editing " + m.editField[1:] + ":\n  " + m.input.View() +
+			"\n\n" + hintStyle.Render("enter: apply & next · esc: cancel line")
+	} else if m.view == viewTools {
 		out = banner(m.version) + "\n\n" + out // blank line between the banner and the list title
 	}
 	if line := statusRender(m.statusLvl, m.status); line != "" {

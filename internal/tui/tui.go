@@ -207,6 +207,9 @@ func (m *model) setHelpKeys(bindings ...key.Binding) {
 
 // inputView reports whether the current view is a text-entry step.
 func (m model) inputView() bool {
+	if m.view == viewEditForm && m.editField != "" {
+		return true
+	}
 	switch m.view {
 	case viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField, viewAddCustomModel:
 		return true

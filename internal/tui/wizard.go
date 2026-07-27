@@ -94,28 +94,21 @@ func (m model) onEditFormSelect(field string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.editField = field
-		m.view = viewEditField
 		m.startInput("profile name", false)
 		m.input.SetValue(m.wiz.name)
 		return m, textinput.Blink
 	case fieldURL:
 		m.editField = field
-		m.view = viewEditField
 		m.startInput(exampleEndpoint, false)
 		m.input.SetValue(m.wiz.endpoint)
 		return m, textinput.Blink
 	case fieldToken:
 		m.editField = field
-		m.view = viewEditField
 		m.startInput("API key", true)
 		m.input.SetValue(m.wiz.key)
 		return m, textinput.Blink
 	case fieldModel:
 		m.editField = fieldModel
-		if m.wiz.endpoint == "" || m.wiz.key == "" {
-			m.setStatus(statusInfo, "set URL and token first, then fetch models")
-			return m, nil
-		}
 		m.fromForm = true
 		cmd := m.beginFetch()
 		return m, cmd
@@ -126,6 +119,11 @@ func (m model) onEditFormSelect(field string) (tea.Model, tea.Cmd) {
 func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		if m.view == viewEditForm && m.editField != "" {
+			m.editField = ""
+			m.loadEditForm()
+			return m, nil
+		}
 		if m.view == viewEditField {
 			m.view = viewEditForm // cancel a single field → back to the form
 			m.loadEditForm()
@@ -164,8 +162,7 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		val := m.input.Value()
 		switch m.view {
-		case viewEditField:
-			refetch := false
+		case viewEditField, viewEditForm:
 			switch m.editField {
 			case fieldName:
 				val = strings.TrimSpace(val)
@@ -174,36 +171,35 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.wiz.name = val
+				m.editField = fieldURL
+				m.startInput(exampleEndpoint, false)
+				m.input.SetValue(m.wiz.endpoint)
+				m.loadEditForm()
+				return m, textinput.Blink
 			case fieldURL:
 				val = strings.TrimSpace(val)
 				if err := tools.ValidateEndpoint(val); err != nil {
 					m.setStatus(statusErr, err.Error())
 					return m, nil
 				}
-				if m.wiz.endpoint != val {
-					m.wiz.endpoint = val
-					refetch = true
-				}
+				m.wiz.endpoint = val
+				m.editField = fieldToken
+				m.startInput("API key", true)
+				m.input.SetValue(m.wiz.key)
+				m.loadEditForm()
+				return m, textinput.Blink
 			case fieldToken:
 				val = strings.TrimSpace(val)
 				if err := tools.ValidateKey(val); err != nil {
 					m.setStatus(statusErr, err.Error())
 					return m, nil
 				}
-				if m.wiz.key != val {
-					m.wiz.key = val
-					refetch = true
-				}
+				m.wiz.key = val
+				m.editField = ""
+				m.clearStatus()
+				m.loadEditForm()
+				return m, nil
 			}
-			if refetch && m.wiz.endpoint != "" && m.wiz.key != "" {
-				m.fromForm = true
-				cmd := m.beginFetch()
-				return m, cmd
-			}
-			m.clearStatus()
-			m.view = viewEditForm
-			m.loadEditForm()
-			return m, nil
 
 		case viewAddEndpoint:
 			val = strings.TrimSpace(val)
