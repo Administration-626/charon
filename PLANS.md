@@ -9,8 +9,9 @@ Candidate features, ranked by value vs. effort. These lean on the existing
 `charon save <tool>` with no name snapshots the current OAuth login and names the
 profile after its account (Codex `id_token` email, Claude `~/.claude.json`), so a
 user with several ChatGPT/Claude accounts can capture and hop between each. In the
-TUI, **`b`** backs up the highlighted profile: a login is captured under its email
-(non-editable), while an API-proxy profile is duplicated to an editable `name-2`.
+TUI, **`c`** clones the highlighted profile: an OAuth/login snapshot is captured
+under its email (non-editable), while an API-proxy profile is duplicated to an
+editable `name-copy` (then `name-copy-2`, …).
 
 ### More tools
 The whole point of the `Tool`/`Artifact` design is cheap additions. Each new
@@ -72,14 +73,15 @@ allowing users to type any non-standard or unlisted model slug (e.g. `gpt-4o`,
 on the fetched `/v1/models` API response.
 
 ### Profile name rejects Unicode (Chinese characters) ✅ (done)
-`charon add codex --name codex公益站` now supports Unicode letters and digits, so
+`charon add codex --name 测试` now supports Unicode letters and digits, so
 Chinese profile names (and other non-ASCII names) work natively.
 
-### Single-page Form UI & Profile List Refactor ✅ (done)
+### Profile list UX & single-page edit form ✅ (done)
 Adopted Option 1 intuitive profile management flow matching mature TUI standards:
 - **Instant `switch` via Enter**: Hovering over any saved profile and hitting `Enter` immediately activates & applies the profile, marking it with a green `✓`.
-- **Zero-interruption `clone` via `c` / `b`**: Pressing `c` (or `b`) instantly duplicates a profile into `<name>-copy` without interrupting the user with prompts. Focus automatically jumps to the newly created clone.
-- **Dual `add` pathways**: Top-level `＋ Add new profile…` list item plus global `a` shortcut instantly opens the native single-column form.
+- **Zero-interruption `clone` via `c`**: Pressing `c` instantly duplicates a profile into `<name>-copy` without interrupting the user with prompts. Focus automatically jumps to the newly created clone.
+- **Dual `add` pathways**: Top-level `＋ Add new profile…` list item plus global `a` shortcut starts the add wizard (endpoint → key → model → name).
+- **Single-page edit form**: Editing an existing profile (`e`) uses one screen (Name/URL/Token/Model with a Fetch button) plus `[ Save Profile ]` / `[ Cancel ]` actions, not the old field-by-field picker.
 - **Strict required validation**: Enforces Name, API Base URL, and API Key as mandatory fields upon submission, rendering red status bar errors at the bottom.
 - **Dynamic Model placeholders**: Dynamically renders tool-aware default model placeholders (e.g. `e.g. claude-3-7-sonnet (leave blank for default)` for Claude Code, `e.g. gpt-4o (leave blank for default)` for Codex).
 - **Instant type-to-search model filter**: Zero-key trigger instant fuzzy searching (powered by `sahilm/fuzzy`) when picking models from API providers. Type `claude` or `3-7` to filter 100+ models in milliseconds, with Backspace to edit query and Esc to clear filter.

@@ -11,6 +11,10 @@
   <a href="https://github.com/mingtheanlay/charon/issues"><img src="https://img.shields.io/github/issues/mingtheanlay/charon?style=flat-square" alt="Open Issues"></a>
 </p>
 
+<p align="center">
+  <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
+</p>
+
 Charon is a tiny Go CLI that detects the **Codex**, **Claude Code**,
 **OpenCode**, and **Pi** CLIs and switches each one's **endpoint + credentials**
 between named profiles. Every profile is a full snapshot of that tool's auth
@@ -28,7 +32,14 @@ switching away and back is always clean and reversible.
 - **Named profiles.** Snapshot each tool's full auth surface and hop between
   endpoints/keys instantly.
 - **Model discovery.** Add a profile from just an endpoint + key; Charon fetches
-  the model list and lets you pick one.
+  the model list and lets you pick one — or type a custom model slug directly.
+- **Single-page form.** Add or edit a profile on one screen (Name, URL, Token,
+  Model) with direct typing and `[ Save Profile ]` / `[ Cancel ]` buttons — no
+  multi-step wizard, no view-jumping.
+- **Instant clone & search.** Press `c` to duplicate a profile without prompts,
+  and type to fuzzy-filter the model list in real time.
+- **Unicode names.** Profile names accept letters and digits in any script, so
+  Chinese (or other non-ASCII) names work natively.
 - **Safe by default.** Every switch is backed up first, writes are atomic, and an
   auto-captured `default` profile means you can always revert.
 - **Non-destructive.** Charon only ever touches its own `charon` provider entry
@@ -109,6 +120,7 @@ charon                       # interactive arrow-key menu
 charon status                # show each tool's active profile, endpoint, and auth (--json)
 charon ls <tool>             # list saved profiles (--json)
 charon save <tool> [name]    # snapshot current live config (omit name to use the logged-in account)
+charon refresh <tool>        # capture in-session changes (model, effort) into the active profile
 charon models <tool>         # list models offered by an API (--key [--endpoint])
 charon add <tool>            # add + activate a profile (--name --key [--endpoint --model])
 charon edit <tool> <p>       # change a profile's endpoint/key/model (--name to rename)
@@ -120,6 +132,8 @@ charon undo <tool>           # revert to the most recent pre-switch backup
 charon prune <tool>          # delete old backups, keeping the newest (--keep N, default 10)
 charon rm <tool> <p>         # delete a profile
 charon completion <shell>    # print a bash/zsh/fish completion script
+charon update                # upgrade charon to the latest release
+charon uninstall             # remove the installed charon binary
 ```
 
 `status` and `ls` accept `--json` for scripting and editor integrations. `status`
@@ -147,16 +161,23 @@ They complete subcommands, tool names, and — for `switch`/`edit`/`rename`/`cp`
 
 ### From an endpoint + key (with model discovery)
 
-In the menu, drill into a tool and choose **＋ Add new profile…**. The wizard:
+In the menu, drill into a tool and choose **＋ Add new profile…** (or press `a`).
+A single-page form collects everything on one screen:
 
-1. asks for the **API base URL** (leave blank to accept the provider default;
-   real values are never prefilled),
-2. asks for the **API key** (hidden input),
-3. **fetches the model list** from that endpoint (`GET /v1/models`, using
-   `Authorization: Bearer` for OpenAI-style APIs and `x-api-key` for Anthropic),
-4. lets you **pick a model** (or skip), then
-5. names the profile — writing the endpoint/key/model into the tool's live config
-   and switching to it.
+- **Name** — a profile name (letters/digits in any script; Unicode is fine).
+- **API base URL** — leave blank to accept the provider default; a real value is
+  never prefilled.
+- **API key** — masked input.
+- **Model** — a **Fetch** button hits `GET /v1/models` (using `Authorization:
+  Bearer` for OpenAI-style APIs and `x-api-key` for Anthropic) and opens a
+  model picker. You can also type a custom model slug directly, or leave it
+  blank for the tool's default.
+
+In the model picker, just **start typing to fuzzy-filter** the list in real time
+(Backspace edits the query, `Esc` clears it). Tab to **`[ Save Profile ]`** to
+write the endpoint/key/model into the tool's live config and switch to it, or
+**`[ Cancel ]`** to discard. Name, URL, and key are required; a red status bar
+flags anything missing on submit.
 
 ### Backing up a logged-in account
 
@@ -173,29 +194,26 @@ charon save codex        # → saves & activates profile "you@personal.com"
 charon switch codex you@work.com   # hop back instantly
 ```
 
-In the menu, drill into a tool and press **`b`** on a profile to back it up. What
-happens depends on the profile:
+The email is read from the tool's own config — Codex's `id_token`, Claude Code's
+`~/.claude.json` — purely to name the profile; that file is only ever read, never
+modified. These login backups are **not editable** (there's no endpoint/key to
+change); re-running `charon save` refreshes the snapshot. An API-key login has
+no account, so `charon save` still expects an explicit name.
 
-- **A logged-in account** (the `default` login or any OAuth snapshot — no
-  editable endpoint/key) is captured and **named after its account email**
-  automatically. The email is read from the tool's own config — Codex's
-  `id_token`, Claude Code's `~/.claude.json` — purely to name the profile; that
-  file is only ever read, never modified. These login backups are **not editable**
-  (there's no endpoint/key to change); re-running `b` refreshes the snapshot.
-- **An API-proxy profile** (endpoint + key) is **duplicated**: Charon prompts for
-  a name, pre-filled with the next free `name-2`, validates it isn't a duplicate,
-  and the copy is a normal profile you can **edit and delete**.
-
-An API-key login has no account, so `charon save` still expects an explicit name.
+In the menu, press **`c`** on a profile to **clone** it instantly into
+`<name>-copy` with no prompts — focus jumps to the new copy, which is a normal
+editable profile you can rename, edit, or delete.
 
 ### Editing an existing profile
 
 Press **`e`** on a profile to open its edit form, showing the current **Name**,
-**URL**, **Token** (masked), and **Model**. Press **`e`** on any field to change
-it — selecting **Model** re-fetches the endpoint's model list so you can pick a
-new one. Press **`esc`** to save your changes and switch to the profile; renaming
-is handled automatically. The auto-captured **`default`** profile and login
-backups (which have no endpoint/key) are protected and cannot be edited.
+**URL**, **Token** (masked), and **Model** on a single screen. Type directly into
+any field; the **Model** field's **Fetch** button re-fetches the endpoint's model
+list so you can pick a new one (or type a custom slug). Tab to **`[ Save Profile ]`**
+to apply the changes and switch to the profile — renaming is handled
+automatically — or **`[ Cancel ]`** to discard. The auto-captured **`default`**
+profile and login backups (which have no endpoint/key) are protected and cannot
+be edited.
 
 ### Non-interactively
 
@@ -241,17 +259,20 @@ cmd/charon/          entrypoint + subcommands
 internal/artifact/   snapshot/restore primitives (Artifact interface + implementations)
 internal/tools/      per-tool adapters (codex, claude, opencode, pi)
 internal/profile/    snapshot store (split by concern: snapshot, apply, backup, manage)
-internal/tui/        bubbletea interactive menu
+internal/models/     fetch model lists from a provider API (openai/anthropic wire)
+internal/tui/        bubbletea interactive menu (single-page forms, fuzzy model search)
 internal/secret/     masking + macOS keychain access
 ```
 
 ## Development
 
 ```sh
+make build   # build ./charon
 make test    # go vet + go test -race ./...
 make cover   # coverage summary
 make lint    # golangci-lint run
 make fmt     # gofmt -w .
+make run     # build + interactive menu (sandbox HOME first!)
 ```
 
 CI (`.github/workflows/ci.yml`) runs formatting checks, vet, race tests, build,
