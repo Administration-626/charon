@@ -9,10 +9,11 @@ func TestMask(t *testing.T) {
 		want string
 	}{
 		{"empty", "", ""},
-		{"short is fully hidden", "sk-123", "••••"},
-		{"exactly ten hidden", "0123456789", "••••"},
-		{"long keeps prefix and suffix", "sk-or-xyz789012", "sk-or-…9012"},
-		{"anthropic key", "sk-ant-abc123456789", "sk-ant…6789"},
+		{"short keeps min prefix suffix", "sk-123", "sk••••23"},
+		{"very short is fully hidden", "abc", "••••"},
+		{"ten keeps min prefix suffix", "0123456789", "01••••89"},
+		{"long keeps prefix and suffix", "sk-or-v1-xyz789012", "sk-or-••••9012"},
+		{"anthropic key", "sk-ant-api03-abc123456789", "sk-ant••••6789"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
