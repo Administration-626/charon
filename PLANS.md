@@ -75,8 +75,8 @@ on the fetched `/v1/models` API response.
 `charon add codex --name codex公益站` now supports Unicode letters and digits, so
 Chinese profile names (and other non-ASCII names) work natively.
 
-### Single-page Form UI refactor for Profile Creation (Add Flow)
-Replace the multi-step wizard (`viewAddEndpoint` → `viewAddKey` → `viewPickModel` → `viewAddName`) with a unified Single-page Form view (reusing `viewEditForm` mechanics).
+### Single-page Form UI refactor for Profile Creation (Add Flow) ✅ (done)
+Replaced the multi-step wizard with a unified Single-page Form view (reusing `viewEditForm` mechanics).
 - **All fields in one view**: Display `Name`, `URL`, `Token`, `Model` together on a single screen/form list.
 - **Seamless navigation**: Use `↑`/`↓` keys to move freely between fields for edits, eliminating the need for step-by-step back navigation.
 - **On-demand model fetching**: Pressing `e` / `Enter` on the `Model` row triggers fetching & picking from `/v1/models` (or entering a custom model ID), directly updating the form.
