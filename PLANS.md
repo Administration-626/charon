@@ -75,12 +75,12 @@ on the fetched `/v1/models` API response.
 `charon add codex --name codex公益站` now supports Unicode letters and digits, so
 Chinese profile names (and other non-ASCII names) work natively.
 
-### Single-page Form UI refactor for Profile Creation (Add/Edit Flow) ✅ (done)
-Replaced the multi-step wizard and list-wrapper with a native **Multi-Textinput Form Model** (`[]textinput.Model`) featuring a vertical single-column layout:
-- **Vertical single-column focus**: 7 focus items in a single vertical flow (Name → URL → Token → Model → Fetch Button → Save Button → Cancel Button), seamlessly driven by `↑`/`↓` and `Tab`/`Shift+Tab` without interfering with `←`/`→` in-line text cursor.
-- **Tree-indented Fetch button**: `└── [ Fetch & Pick Online Models ]` sits directly under Model Slug as a subordinate action item.
-- **Strict required validation**: Enforces Name, API Base URL, and API Key as mandatory fields upon submission, rendering red status bar errors (`✗ Profile Name is required` / `✗ API Base URL is required` / `✗ API Key is required`) at the absolute bottom of the screen.
-- **Direct typing**: Uninhibited typing/backspacing in text inputs without extra edit keys or letter `m` key-conflicts.
+### Single-page Form UI & Profile List Refactor ✅ (done)
+Adopted Option 1 intuitive profile management flow matching mature TUI standards:
+- **Instant `switch` via Enter**: Hovering over any saved profile and hitting `Enter` immediately activates & applies the profile, marking it with a green `✓`.
+- **Dual `add` pathways**: Top-level `＋ Add new profile…` list item plus global `a` shortcut instantly opens the native single-page form.
+- **Vertical single-column focus**: 7 focus items in a single vertical form flow without interfering with in-line text cursor.
+- **Strict required validation**: Enforces Name, API Base URL, and API Key as mandatory fields upon submission, rendering red status bar errors at the bottom.
 
 ### Profile snapshots store redundant config data ("插槽" refactor)
 Each profile stores a full copy of the tool's config file (e.g.
