@@ -39,9 +39,12 @@ func (m model) View() string {
 		return body
 	}
 	out := m.list.View()
-	if m.view == viewEditForm && m.editField != "" {
-		out += "\n\n  Editing " + m.editField[1:] + ":\n  " + m.input.View() +
-			"\n\n" + hintStyle.Render("enter: apply & next · esc: cancel line")
+	if m.view == viewEditForm {
+		hint := "↑/↓: move field · type/backspace to edit · ctrl+s: save · esc: cancel"
+		if m.editField == fieldModel {
+			hint = "type to edit · press m to fetch & pick models · ctrl+s: save · esc: cancel"
+		}
+		out += "\n\n" + hintStyle.Render(hint)
 	} else if m.view == viewTools {
 		out = banner(m.version) + "\n\n" + out // blank line between the banner and the list title
 	}

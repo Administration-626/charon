@@ -15,10 +15,12 @@ import (
 )
 
 const (
-	fieldName  = "\x00name"
-	fieldURL   = "\x00url"
-	fieldToken = "\x00token"
-	fieldModel = "\x00model"
+	fieldName    = "\x00name"
+	fieldURL     = "\x00url"
+	fieldToken   = "\x00token"
+	fieldModel   = "\x00model"
+	actionSave   = "\x00save"
+	actionCancel = "\x00cancel"
 )
 
 type wizard struct {
@@ -61,33 +63,52 @@ func (m *model) loadEditForm() {
 	if nameVal == "" {
 		nameVal = "(none — required)"
 	}
-	items := []list.Item{
-		item{title: "URL", desc: endpoint, value: fieldURL},
-		item{title: "Token", desc: token, value: fieldToken},
-		item{title: "Model", desc: modelVal + "  (enter/e to fetch & pick)", value: fieldModel},
-	}
+	items := []list.Item{}
 	if m.wiz.origName != profile.DefaultName {
-		items = append([]list.Item{item{title: "Name", desc: nameVal, value: fieldName}}, items...)
+		items = append(items, item{title: "Profile Name", desc: nameVal, value: fieldName})
 	}
+	items = append(items,
+		item{title: "API Base URL", desc: endpoint, value: fieldURL},
+		item{title: "API Key/Token", desc: token, value: fieldToken},
+		item{title: "Model Slug", desc: modelVal + "  (press m to fetch & pick)", value: fieldModel},
+		item{value: sepSentinel},
+		item{title: "[ Save Profile ]", desc: "Submit and save profile (Ctrl+S)", value: actionSave},
+		item{title: "[ Cancel ]", desc: "Discard changes and exit (Esc)", value: actionCancel},
+	)
 	m.list.SetDelegate(themedDelegate()) // two-line rows show each field's value
 	m.list.SetItems(items)
 	if m.wiz.edit {
 		m.list.Title = fmt.Sprintf("Edit %s / %s", m.tool.Title, m.wiz.name)
 	} else {
-		m.list.Title = fmt.Sprintf("Add %s profile", m.tool.Title)
+		m.list.Title = fmt.Sprintf("Add %s Profile", m.tool.Title)
 	}
 	// Land on the field last visited; a fresh form falls back to the first row.
 	m.list.Select(0)
 	m.selectByValue(m.editField)
 	m.setHelpKeys(
-		key.NewBinding(key.WithKeys("e", "enter"), key.WithHelp("e/enter", "edit field")),
-		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "save & back")),
+		key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "move field")),
+		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "edit/select")),
+		key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "save")),
+		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 	)
 }
 
 // onEditFormSelect handles a chosen row in the edit field-picker.
 func (m model) onEditFormSelect(field string) (tea.Model, tea.Cmd) {
 	switch field {
+	case actionSave:
+		name := strings.TrimSpace(m.wiz.name)
+		if name == "" {
+			m.setStatus(statusErr, "profile name is required")
+			return m, nil
+		}
+		return m.finishAdd(name)
+	case actionCancel:
+		m.dupSource = ""
+		m.view = viewProfiles
+		m.setStatus(statusInfo, "cancelled")
+		m.loadProfiles("")
+		return m, nil
 	case fieldName:
 		if m.wiz.origName == profile.DefaultName {
 			m.setStatus(statusInfo, "the default profile can't be renamed")
@@ -117,6 +138,33 @@ func (m model) onEditFormSelect(field string) (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.view == viewEditForm {
+		val := m.input.Value()
+		switch m.editField {
+		case fieldName:
+			m.wiz.name = strings.TrimSpace(val)
+		case fieldURL:
+			m.wiz.endpoint = strings.TrimSpace(val)
+		case fieldToken:
+			m.wiz.key = strings.TrimSpace(val)
+		case fieldModel:
+			m.wiz.model = strings.TrimSpace(val)
+		}
+
+		switch msg.String() {
+		case "ctrl+s":
+			return m.onEditFormSelect(actionSave)
+		case "esc":
+			return m.onEsc()
+		case "m", "ctrl+m":
+			if m.editField == fieldModel {
+				m.fromForm = true
+				cmd := m.beginFetch()
+				return m, cmd
+			}
+		}
+	}
+
 	switch msg.String() {
 	case "esc":
 		if m.view == viewEditForm && m.editField != "" {

@@ -9,7 +9,6 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"charon/internal/profile"
@@ -571,12 +570,11 @@ func (m model) onEsc() (tea.Model, tea.Cmd) {
 		m.resize() // banner returns → shrink the list
 	case viewEditForm:
 		m.editField = ""
-		name := strings.TrimSpace(m.wiz.name)
-		if name == "" {
-			m.setStatus(statusErr, "profile name is required")
-			return m, nil
-		}
-		return m.finishAdd(name) // esc applies form fields
+		m.dupSource = ""
+		m.view = viewProfiles
+		m.setStatus(statusInfo, "cancelled")
+		m.loadProfiles("")
+		return m, nil
 	case viewPickModel:
 		m.view = viewEditForm
 		m.loadEditForm()
