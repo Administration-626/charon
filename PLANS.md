@@ -76,10 +76,11 @@ on the fetched `/v1/models` API response.
 Chinese profile names (and other non-ASCII names) work natively.
 
 ### Single-page Form UI refactor for Profile Creation (Add/Edit Flow) ✅ (done)
-Replaced the multi-step wizard and list-wrapper with a native **Multi-Textinput Form Model** (`[]textinput.Model`) with **Option C high-contrast styling** & **defensive pre-checks**:
-- **Option C High-Contrast UI**: Active field features a bold accent bar (`▌`), bold label, and bright text input, while inactive fields remain subtly muted for maximum contrast and focus clarity.
-- **Pre-fetch defensive checks**: Intercepts `m` key model fetching if API Base URL is missing, rendering a gentle status hint instead of crashing with 401 errors. Supports local endpoints (e.g. `localhost`).
-- **URL & String normalization**: Automatically trims whitespace and trailing slashes `/` on submission to prevent path-resolution issues.
+Replaced the multi-step wizard and list-wrapper with a native **Multi-Textinput Form Model** (`[]textinput.Model`) featuring a vertical single-column layout:
+- **Vertical single-column focus**: 7 focus items in a single vertical flow (Name → URL → Token → Model → Fetch Button → Save Button → Cancel Button), seamlessly driven by `↑`/`↓` and `Tab`/`Shift+Tab` without interfering with `←`/`→` in-line text cursor.
+- **Tree-indented Fetch button**: `└── [ Fetch & Pick Online Models ]` sits directly under Model Slug as a subordinate action item.
+- **Defensive pre-checks**: Intercepts Fetch button if API URL or Key is missing, displaying concise status hints (`✗ API URL required` / `✗ API Key required`).
+- **Direct typing**: Uninhibited typing/backspacing in text inputs without extra edit keys or letter `m` key-conflicts.
 
 ### Profile snapshots store redundant config data ("插槽" refactor)
 Each profile stores a full copy of the tool's config file (e.g.
