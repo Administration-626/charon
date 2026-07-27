@@ -286,7 +286,23 @@ func (m *model) loadProfiles(selectName string) {
 	if target == "" {
 		target = active
 	}
+
+	if m.tool.ApplyAuth != nil {
+		items = append(items, item{title: "＋ Add new profile…", desc: "Create a new custom endpoint & API key profile (or press 'a')", value: addSentinel})
+		if len(saved) > 0 {
+			items = append(items, item{value: sepSentinel}) // gap between add button and profile list
+		}
+	}
+
 	selectedIndex := 0
+	offset := 0
+	if m.tool.ApplyAuth != nil {
+		offset = 1
+		if len(saved) > 0 {
+			offset = 2 // 1 item + 1 separator
+		}
+	}
+
 	for i, name := range saved {
 		// ✓ marks the active profile; url and model show on the line below.
 		title := name
@@ -298,17 +314,11 @@ func (m *model) loadProfiles(selectName string) {
 			}
 		}
 		if name == target {
-			selectedIndex = i
+			selectedIndex = i + offset
 		}
 		items = append(items, item{title: title, desc: m.profileDetail(name), value: name, active: isActive})
 	}
-	// The add row sits below the profiles, set off by a thin divider.
-	if m.tool.ApplyAuth != nil {
-		if len(saved) > 0 {
-			items = append(items, item{value: sepSentinel}) // gap between profiles and actions
-		}
-		items = append(items, item{title: "＋ Add new profile…", value: addSentinel})
-	}
+
 	m.list.SetDelegate(themedDelegate()) // two-line rows show each profile's url and model
 	m.list.SetItems(items)
 	m.list.Select(selectedIndex)
@@ -316,7 +326,7 @@ func (m *model) loadProfiles(selectName string) {
 	m.setHelpKeys(keySwitch, keyEdit, keyBackup, keyDelete, keyBack)
 	// Welcome a first-time user who has no profiles for this tool yet.
 	if len(saved) == 0 && m.status == "" && m.tool.ApplyAuth != nil {
-		m.setStatus(statusInfo, `No profiles yet — press enter on "Add new profile" to create one.`)
+		m.setStatus(statusInfo, `No profiles yet — press enter on "Add new profile" or press 'a' to create one.`)
 	}
 }
 
