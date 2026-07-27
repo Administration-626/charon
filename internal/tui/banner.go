@@ -26,6 +26,5 @@ func banner(version string) string {
 		tag += "  ·  v" + version
 	}
 	return bannerStyle.Render(bannerArt) + "\n" +
-		taglineStyle.Render(tag) + "  " +
-		hintStyle.Render("· ↑/↓ move · ? help · ctrl+c quit")
+		taglineStyle.Render(tag)
 }
