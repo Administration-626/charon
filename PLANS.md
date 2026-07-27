@@ -58,9 +58,10 @@ to encrypted local export — no network sync.
 
 ## Known issues
 
-### TUI wizard: step-by-step back navigation across all wizard steps (API URL, Key, Model, Name) ✅ (done)
-In the profile creation wizard, users need the ability to step back at any stage (API Endpoint → API Key → Model Selection → Profile Name) without losing previously typed input:
-- **`Esc` key back navigation**: Pressing `Esc` at any step (`viewAddKey`, `viewPickModel`, `viewAddCustomModel`, `viewAddName`) steps back to the previous input step while preserving all already-entered data (URL, Key, Model), with footer hints updated to `enter: continue · esc: back`.
+### TUI wizard: step-by-step back navigation & explicit Options UI across all wizard steps (API URL, Key, Model, Name) ✅ (done)
+In the profile creation wizard, users need clear Option guidance and back navigation at every stage:
+- **Explicit Options UI block**: Rendered directly in every input step (`viewAddEndpoint`, `viewAddKey`, `viewAddCustomModel`, `viewAddName`), displaying clear action items (e.g. `• [ Enter ] Continue to Fetch Models` / `• [ Esc ] ← Back to API Base URL`).
+- **`Esc` key back navigation**: Pressing `Esc` at any step steps back to the previous input step while preserving all already-entered data (URL, Key, Model).
 - **`← Back` list item**: Placed prominently at the top of the model-picker list (`viewPickModel`), allowing immediate keyboard navigation back to the API Key step.
 
 ### TUI model picker: manual custom model ID entry ✅ (done)
