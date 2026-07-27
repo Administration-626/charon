@@ -66,6 +66,13 @@ while preserving the already-entered endpoint and key. Similarly, text-input
 steps (`viewAddKey`, `viewAddName`) support stepping back with `esc` without
 losing progress.
 
+### TUI model picker: manual custom model ID entry ✅ (done)
+The model-picker step (`viewPickModel`) now includes a **`✎ Enter custom model ID...`**
+selectable item. Selecting it opens a text input step (`viewAddCustomModel`),
+allowing users to type any non-standard or unlisted model slug (e.g. `gpt-4o`,
+`claude-3-7-sonnet`, `glm-4-flash-custom`) directly in the TUI without relying solely
+on the fetched `/v1/models` API response.
+
 ### Profile name rejects Unicode (Chinese characters) ✅ (done)
 `charon add codex --name codex公益站` now supports Unicode letters and digits, so
 Chinese profile names (and other non-ASCII names) work natively.
