@@ -113,3 +113,28 @@ func copyDir(src, dst string) error {
 	}
 	return nil
 }
+
+// NextDuplicateName computes a smart, non-colliding duplicate name (e.g. "work-copy", "work-copy-2").
+func NextDuplicateName(existing []string, src string) string {
+	base := sanitizeProfileName(src + "-copy")
+	if base == "" {
+		base = "copy"
+	}
+	exists := func(name string) bool {
+		for _, e := range existing {
+			if e == name {
+				return true
+			}
+		}
+		return false
+	}
+	if !exists(base) {
+		return base
+	}
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%d", base, i)
+		if !exists(candidate) {
+			return candidate
+		}
+	}
+}

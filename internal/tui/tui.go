@@ -83,7 +83,7 @@ func (i item) FilterValue() string { return i.title }
 var (
 	keySwitch = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "switch"))
 	keyEdit   = key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit"))
-	keyBackup = key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "backup"))
+	keyBackup = key.NewBinding(key.WithKeys("c", "b"), key.WithHelp("c", "clone"))
 	keyDelete = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete"))
 	keyBack   = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back"))
 	keyOpen   = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open"))
@@ -444,7 +444,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == viewProfiles && m.tool.ApplyAuth != nil {
 				return m.onEditKey()
 			}
-		case "b":
+		case "c", "b":
 			if m.view == viewProfiles {
 				if it, ok := m.selectedProfile(); ok {
 					return m.startBackup(it.value)
@@ -517,18 +517,19 @@ func (m model) onDeleteKey() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// startBackup routes the "b" shortcut by profile type: an OAuth/original login is
-// snapshotted straight away, named after its account (non-editable); an API-proxy
-// profile opens a name prompt to make an editable, deletable duplicate.
+// startBackup routes the "c"/"b" shortcut: clones API profiles instantly with an auto-incremented
+// name without interrupting the user with a prompt, and focuses on the newly created clone.
 func (m model) startBackup(name string) (tea.Model, tea.Cmd) {
 	if _, ok := m.store.GetSpec(m.tool.Name, name); ok || name == profile.DefaultName {
-		// API proxy or default → duplicate with a numbered name the user can adjust.
-		m.dupSource = name
-		m.view = viewDupName
-		m.startInput("new profile name", false)
-		m.input.SetValue(m.nextCopyName(name))
-		m.clearStatus()
-		return m, textinput.Blink
+		saved := m.store.List(m.tool.Name)
+		newName := profile.NextDuplicateName(saved, name)
+		if err := m.store.Duplicate(m.tool.Name, name, newName); err != nil {
+			m.setStatus(statusErr, err.Error())
+			return m, nil
+		}
+		m.loadProfiles(newName)
+		m.setStatus(statusOK, fmt.Sprintf("Cloned %s as %s", name, newName))
+		return m, nil
 	}
 	// OAuth / original login → capture the current account, named by its email.
 	saved, err := m.store.SaveCurrentAccount(m.tool)
@@ -537,8 +538,7 @@ func (m model) startBackup(name string) (tea.Model, tea.Cmd) {
 	} else {
 		m.setStatus(statusOK, "Backed up login as "+saved)
 	}
-	// Stay on the original row rather than jumping to the new backup.
-	m.loadProfiles(name)
+	m.loadProfiles(saved)
 	return m, nil
 }
 
