@@ -71,6 +71,29 @@ Data lives under `~/.config/charon/` (`$XDG_CONFIG_HOME` respected):
 `profiles/<tool>/<name>/` (snapshot files + `manifest.json`),
 `backups/<tool>/<timestamp>/`, and `config.json` (active profile per tool).
 
+### Store locking and platform notes
+
+- **Mutations are serialized by an advisory lock.** Every mutating `Store` method
+  (`Apply`, `Undo`, `Refresh`, `Save`, `SaveWithSpec`, `SaveCurrentAccount`,
+  `AddProfile`, `EditProfile`, `EnsureDefault`, `PruneBackups`, `SetActiveName`,
+  `Remove`, `Rename`, `Duplicate`) takes an exclusive flock on
+  `~/.config/charon/.lock` (via `golang.org/x/sys/unix` on Linux/macOS; a no-op
+  elsewhere). The lock is held only for the duration of the mutation and is
+  reentrant within a process (a depth counter in `Store`), so nested calls (e.g.
+  `AddProfile` → `backup` → `setActive`) can't deadlock or release early. A second
+  `charon` process racing the same store receives `ErrStoreLocked` rather than
+  corrupting it. Don't remove or bypass this lock, and don't add a mutating method
+  without wrapping it the same way.
+- **The OS keychain is macOS-only.** `secret.KeychainSupported()` reports whether
+  keychain entries can actually be read/written (true on macOS). On other platforms
+  `KeychainRead`/`KeychainWrite`/`KeychainDelete` are no-ops and `Detected`/OAuth
+  logic degrades gracefully — tools that rely on a keychain artifact (Claude's
+  OAuth) are simply inert there. `cmd status` prints a note when such a tool is
+  seen on an unsupported platform so the user isn't misled. Never assume keychain
+  features work off macOS, and keep keychain artifacts `Preservable` (see the
+  `Preservable` capability in `internal/artifact`) — charon must never delete a real
+  OAuth login it doesn't own, so `restoreFrom` skips `Remove` for them.
+
 ### How to add a new tool
 
 1. Add `internal/tools/<tool>.go` returning a `*Tool` with: `Name`, `Title`,

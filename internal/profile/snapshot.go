@@ -45,6 +45,10 @@ func snapshot(t *tools.Tool, dir string, label, note, account, active string, sp
 
 // Save snapshots the tool's current live config as a named profile.
 func (s *Store) Save(t *tools.Tool, name, label, note string) error {
+	if err := s.lock(); err != nil {
+		return err
+	}
+	defer s.unlock()
 	if err := validateNewName(name); err != nil {
 		return err
 	}
@@ -56,6 +60,10 @@ func (s *Store) Save(t *tools.Tool, name, label, note string) error {
 
 // SaveWithSpec is Save plus the endpoint/key/model the profile was built from, for editing.
 func (s *Store) SaveWithSpec(t *tools.Tool, name string, spec Spec) error {
+	if err := s.lock(); err != nil {
+		return err
+	}
+	defer s.unlock()
 	if err := validateNewName(name); err != nil {
 		return err
 	}
@@ -66,6 +74,10 @@ func (s *Store) SaveWithSpec(t *tools.Tool, name string, spec Spec) error {
 // the logged-in account (its email), marks it active, and returns that name. It
 // errors when no OAuth account is detected, so the caller can ask for a name.
 func (s *Store) SaveCurrentAccount(t *tools.Tool) (string, error) {
+	if err := s.lock(); err != nil {
+		return "", err
+	}
+	defer s.unlock()
 	if t.Describe == nil {
 		return "", fmt.Errorf("%s cannot report an account", t.Title)
 	}
@@ -92,6 +104,10 @@ func (s *Store) SaveCurrentAccount(t *tools.Tool) (string, error) {
 // into the tool's own config so its native model picker can offer more than just spec.Model;
 // it is never persisted into the profile's Spec.
 func (s *Store) AddProfile(t *tools.Tool, name string, spec Spec, allModels ...string) error {
+	if err := s.lock(); err != nil {
+		return err
+	}
+	defer s.unlock()
 	if t.ApplyAuth == nil {
 		return fmt.Errorf("%s does not support add", t.Title)
 	}
@@ -128,6 +144,10 @@ func (s *Store) AddProfile(t *tools.Tool, name string, spec Spec, allModels ...s
 // silently switches which profile is in effect. Shared by the CLI `edit` command
 // and the TUI edit form so this can't drift between them.
 func (s *Store) EditProfile(t *tools.Tool, oldName, newName string, spec Spec, allModels ...string) error {
+	if err := s.lock(); err != nil {
+		return err
+	}
+	defer s.unlock()
 	if newName == "" {
 		newName = oldName
 	}
@@ -182,6 +202,10 @@ func (s *Store) GetSpec(tool, name string) (Spec, bool) {
 // EnsureDefault captures a clean official default the first time a tool is seen.
 // A live custom provider is imported as a normal editable profile and left active.
 func (s *Store) EnsureDefault(t *tools.Tool) error {
+	if err := s.lock(); err != nil {
+		return err
+	}
+	defer s.unlock()
 	if s.Exists(t.Name, DefaultName) {
 		if _, custom := s.GetSpec(t.Name, DefaultName); custom && t.UseOfficialAuth != nil {
 			return s.splitCustomDefault(t)

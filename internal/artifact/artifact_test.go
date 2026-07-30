@@ -166,3 +166,16 @@ func TestAtomicWriteReplaces(t *testing.T) {
 		t.Errorf("got %q, want v2", data)
 	}
 }
+
+// KeychainArtifact must declare itself Preservable so restoreFrom never deletes the
+// user's real OAuth login when a profile's snapshot omits it.
+func TestKeychainArtifactPreserves(t *testing.T) {
+	var a Artifact = NewKeychain("credentials", "Claude Code-credentials", "user")
+	p, ok := a.(Preservable)
+	if !ok {
+		t.Fatal("KeychainArtifact should implement Preservable")
+	}
+	if !p.Preserve() {
+		t.Error("KeychainArtifact.Preserve() = false, want true")
+	}
+}

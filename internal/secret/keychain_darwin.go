@@ -12,6 +12,10 @@ import (
 // ErrKeychainMissing is returned when the requested item does not exist.
 var ErrKeychainMissing = errors.New("keychain item not found")
 
+// KeychainSupported reports that the OS keychain is available, so OAuth entries
+// (e.g. Claude Code's login) can be read, written, and restored. True on macOS.
+func KeychainSupported() bool { return true }
+
 // KeychainRead returns the value under service, or ErrKeychainMissing if absent.
 func KeychainRead(service string) (string, error) {
 	cmd := exec.Command("security", "find-generic-password", "-s", service, "-w")

@@ -11,11 +11,13 @@ package profile
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -48,7 +50,17 @@ type Manifest struct {
 // Store is rooted at ~/.config/charon.
 type Store struct {
 	Root string
+
+	// lockFd/lockMu serialize mutations across processes (advisory flock on a
+	// .lock file) and within a process (depth counter for reentrant callers).
+	lockFile  *os.File
+	lockMu    sync.Mutex
+	lockDepth int
 }
+
+// ErrStoreLocked is returned when another charon process holds the store lock,
+// so this invocation must not race it.
+var ErrStoreLocked = errors.New("store is locked by another charon instance")
 
 type config struct {
 	Active           map[string]string `json:"active"`                     // tool name -> profile name
@@ -69,7 +81,40 @@ func Open() (*Store, error) {
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, err
 	}
-	return &Store{Root: root}, nil
+	s := &Store{Root: root}
+	if err := s.openLock(); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// lock acquires the store lock for a mutation: an exclusive OS advisory lock on
+// the first (outermost) call, plus a depth counter so nested mutating methods
+// (e.g. AddProfile calling backup/setActive) don't deadlock or release early.
+func (s *Store) lock() error {
+	s.lockMu.Lock()
+	defer s.lockMu.Unlock()
+	if s.lockDepth == 0 {
+		if err := s.acquireOSLock(); err != nil {
+			return ErrStoreLocked
+		}
+	}
+	s.lockDepth++
+	return nil
+}
+
+// unlock releases one level of the store lock, dropping the OS advisory lock
+// only when the outermost caller returns.
+func (s *Store) unlock() {
+	s.lockMu.Lock()
+	defer s.lockMu.Unlock()
+	if s.lockDepth == 0 {
+		return
+	}
+	s.lockDepth--
+	if s.lockDepth == 0 {
+		_ = s.releaseOSLock()
+	}
 }
 
 func (s *Store) toolDir(tool string) string    { return filepath.Join(s.Root, "profiles", tool) }
@@ -118,7 +163,13 @@ func (s *Store) setActive(tool, name string) error {
 }
 
 // SetActiveName marks a profile active without applying files (used right after Save).
-func (s *Store) SetActiveName(tool, name string) error { return s.setActive(tool, name) }
+func (s *Store) SetActiveName(tool, name string) error {
+	if err := s.lock(); err != nil {
+		return err
+	}
+	defer s.unlock()
+	return s.setActive(tool, name)
+}
 
 // lastOAuthFingerprint returns the OAuth credential fingerprint last recorded for a
 // tool, or "" if none has been seen yet.

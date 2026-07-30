@@ -13,6 +13,10 @@ import (
 
 // Apply restores a stored profile over the live config (backing up current first) and marks it active.
 func (s *Store) Apply(t *tools.Tool, name string) (backupDir string, err error) {
+	if err := s.lock(); err != nil {
+		return "", err
+	}
+	defer s.unlock()
 	if err := validateName(name); err != nil {
 		return "", err
 	}
@@ -26,6 +30,10 @@ func (s *Store) Apply(t *tools.Tool, name string) (backupDir string, err error) 
 // (e.g., model/effort changed via /model or /effort in the tool). Does nothing
 // if no profile is active.
 func (s *Store) Refresh(t *tools.Tool) error {
+	if err := s.lock(); err != nil {
+		return err
+	}
+	defer s.unlock()
 	s.refreshMergerArtifacts(t)
 	return nil
 }
@@ -33,6 +41,10 @@ func (s *Store) Refresh(t *tools.Tool) error {
 // Undo reverts a tool to its most recent backup (the pre-switch state), snapshotting
 // the current state first so the undo is itself reversible. Returns the restored dir.
 func (s *Store) Undo(t *tools.Tool) (restoredFrom string, err error) {
+	if err := s.lock(); err != nil {
+		return "", err
+	}
+	defer s.unlock()
 	target, prevActive, err := s.latestBackup(t.Name)
 	if err != nil {
 		return "", err
@@ -99,6 +111,13 @@ func (s *Store) restoreFrom(t *tools.Tool, dir string) error {
 			}
 		} else {
 			// The snapshot had no such artifact; match it by removing the live one.
+			// Skip removal for an artifact charon doesn't own (e.g. a real OAuth entry
+			// in the OS keychain): applying a profile that was captured without it must
+			// never delete the user's live login — the one destructive act the design
+			// forbids. See artifact.Preservable.
+			if p, ok := a.(artifact.Preservable); ok && p.Preserve() {
+				continue
+			}
 			if rerr := a.Remove(); rerr != nil {
 				return rerr
 			}

@@ -57,6 +57,19 @@ type Peeker interface {
 	Peek(data []byte) (model, effort string)
 }
 
+// Preservable is implemented by an artifact that charon does not own and must be
+// left untouched on restore even when its stored snapshot is absent — e.g. an OS
+// keychain entry holding the user's real OAuth login. restoreFrom skips the
+// absent-artifact Remove() for such artifacts (see below), so applying a profile
+// can never silently delete a credential charon never managed — the one destructive
+// operation the rest of the design is built to forbid. (charon-owned rotating files,
+// by contrast, are not Preservable and are restored/removed normally.)
+type Preservable interface {
+	// Preserve reports whether restoreFrom must never remove this artifact when its
+	// snapshot is missing.
+	Preserve() bool
+}
+
 // FileArtifact is a config or credential file owned by a tool.
 type FileArtifact struct {
 	id       string
@@ -295,6 +308,12 @@ func (k *KeychainArtifact) ID() string { return k.id }
 // Rotates reports that a keychain entry's contents (e.g. an OAuth token) can change
 // outside of any profile switch, so the store should keep its snapshot refreshed.
 func (k *KeychainArtifact) Rotates() bool { return true }
+
+// Preserve reports that the keychain entry holds a real OAuth login charon never
+// writes, so restoreFrom must not delete it when a profile's snapshot omits it.
+// charon only reads/refreshes the entry (to keep a profile's stored copy fresh);
+// it must never destroy the user's live login to match a snapshot that lacked one.
+func (k *KeychainArtifact) Preserve() bool { return true }
 
 func (k *KeychainArtifact) Read() ([]byte, bool, error) {
 	v, err := secret.KeychainRead(k.Service)

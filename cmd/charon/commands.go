@@ -9,6 +9,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"charon/internal/artifact"
 	"charon/internal/models"
 	"charon/internal/profile"
 	"charon/internal/secret"
@@ -72,6 +73,11 @@ func cmdStatus(store *profile.Store, args []string) error {
 		return err
 	}
 
+	// Track whether any keychain-backed tool (e.g. Claude) is active on a platform
+	// where the OS keychain is unavailable, so we can flag it instead of silently
+	// no-op'ing its OAuth handling.
+	keychainUnsupported := false
+
 	var rows []statusRow
 	for _, t := range tools.All() {
 		r := statusRow{Tool: t.Name, Title: t.Title}
@@ -86,6 +92,14 @@ func cmdStatus(store *profile.Store, args []string) error {
 			r.Account = info.Account
 			r.Secret = secret.Mask(info.Secret)
 			r.Modified, _ = store.Drift(t)
+		}
+		for _, a := range t.Artifacts {
+			if _, ok := a.(*artifact.KeychainArtifact); ok {
+				if !secret.KeychainSupported() {
+					keychainUnsupported = true
+				}
+				break
+			}
 		}
 		rows = append(rows, r)
 	}
@@ -117,7 +131,13 @@ func cmdStatus(store *profile.Store, args []string) error {
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Title, active, r.AuthMode, r.Endpoint, model, effort, r.Secret)
 	}
-	return w.Flush()
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	if keychainUnsupported {
+		fmt.Fprintln(os.Stdout, "\nnote: keychain-backed features (e.g. Claude OAuth) require macOS; on this platform they are inactive.")
+	}
+	return nil
 }
 
 type profileRow struct {

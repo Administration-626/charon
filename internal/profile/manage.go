@@ -8,6 +8,10 @@ import (
 
 // Remove deletes a stored profile (the default cannot be removed).
 func (s *Store) Remove(tool, name string) error {
+	if err := s.lock(); err != nil {
+		return err
+	}
+	defer s.unlock()
 	if name == DefaultName {
 		return fmt.Errorf("the default profile cannot be removed")
 	}
@@ -29,6 +33,10 @@ func (s *Store) Remove(tool, name string) error {
 // Rename moves a stored profile, updating the active pointer and a name-mirroring
 // label to match. The default profile and name collisions are rejected.
 func (s *Store) Rename(tool, old, dst string) error {
+	if err := s.lock(); err != nil {
+		return err
+	}
+	defer s.unlock()
 	if old == DefaultName {
 		return fmt.Errorf("the default profile cannot be renamed")
 	}
@@ -59,6 +67,10 @@ func (s *Store) Rename(tool, old, dst string) error {
 // the live config and active pointer untouched. The default name is reserved and
 // an existing target is rejected, so the copy is always a distinct, editable profile.
 func (s *Store) Duplicate(tool, src, dst string) error {
+	if err := s.lock(); err != nil {
+		return err
+	}
+	defer s.unlock()
 	if err := validateName(src); err != nil {
 		return err
 	}

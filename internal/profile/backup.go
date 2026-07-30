@@ -102,6 +102,10 @@ func (s *Store) pruneBackups(tool string, keep int) error {
 
 // PruneBackups removes all but the newest keep backups for a tool (keep<0 uses the default).
 func (s *Store) PruneBackups(tool string, keep int) (int, error) {
+	if err := s.lock(); err != nil {
+		return 0, err
+	}
+	defer s.unlock()
 	if keep < 0 {
 		keep = backupKeep
 	}
