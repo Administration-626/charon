@@ -120,10 +120,11 @@ func themedDelegate() charonDelegate {
 	return charonDelegate{DefaultDelegate: baseDelegate()}
 }
 
-// themedCompactDelegate is the same styling with single-line rows (no description),
-// keeping the one-line row gap so spacing stays consistent with the other screens.
+// themedCompactDelegate is the same styling with single-line rows (no description)
+// and zero row gap for a denser model list.
 func themedCompactDelegate() charonDelegate {
 	d := baseDelegate()
+	d.SetSpacing(0)
 	d.ShowDescription = false
 	return charonDelegate{DefaultDelegate: d}
 }
