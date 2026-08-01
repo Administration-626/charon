@@ -44,7 +44,6 @@ const (
 	viewDupName        // backup: name the duplicated proxy profile
 	viewEditForm       // edit: field picker (url/name/token/model)
 	viewEditField      // edit: single-field text input
-	viewConfirmDelete  // confirm removing a profile (y/n)
 )
 
 // statusLevel colors the footer status line by severity.
@@ -97,17 +96,18 @@ var (
 const exampleEndpoint = "https://api.example.com/v1"
 
 type model struct {
-	store     *profile.Store
-	allTools  []*tools.Tool // registry built once; reused across renders
-	view      view
-	list      list.Model
-	input     textinput.Model
-	tool      *tools.Tool
-	wiz       wizard
-	editField string // which field the single-field editor is editing
-	fromForm  bool   // model picker/fetch was launched from the edit form
-	delTarget string // profile name pending delete confirmation
-	dupSource string // profile being duplicated by the backup flow
+	store       *profile.Store
+	allTools    []*tools.Tool // registry built once; reused across renders
+	view        view
+	list        list.Model
+	input       textinput.Model
+	tool        *tools.Tool
+	wiz         wizard
+	editField   string // which field the single-field editor is editing
+	fromForm    bool   // model picker/fetch was launched from the edit form
+	delTarget   string // profile name pending delete confirmation
+	dupSource   string // profile being duplicated by the backup flow
+	showConfirm bool   // when true, render a confirmation dialog over the profile list
 
 	formInputs []textinput.Model // native form inputs for Name, URL, Token, Model
 	formFocus  int               // index of focused form element (0: Name, 1: URL, 2: Token, 3: Model, 4: Save, 5: Cancel)
@@ -429,8 +429,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.inputView() {
 			return m.updateInput(msg)
 		}
-		if m.view == viewConfirmDelete {
-			return m.updateConfirmDelete(msg)
+		if m.showConfirm {
+			return m.handleConfirmDelete(msg)
 		}
 		if m.view == viewPickModel {
 			return m.updatePickModel(msg)
@@ -519,7 +519,7 @@ func (m model) onDeleteKey() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.delTarget = it.value
-	m.view = viewConfirmDelete
+	m.showConfirm = true
 	m.clearStatus()
 	return m, nil
 }

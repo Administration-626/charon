@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"charon/internal/secret"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // statusRender styles a status line for the level (glyph-prefixed); "" for an empty message.
@@ -24,11 +26,6 @@ func statusRender(level statusLevel, msg string) string {
 
 func (m model) View() string {
 	switch m.view {
-	case viewConfirmDelete:
-		body := "\n" + titleStyle.Render(m.tool.Title+" · delete profile") +
-			"\n\n" + warnStyle.Render(fmt.Sprintf("Delete profile %q? This can't be undone.", m.delTarget)) +
-			"\n\n" + hintStyle.Render("y: delete · n / esc: cancel")
-		return body
 	case viewFetching:
 		return m.wizardHeader() +
 			promptStyle.Render(m.spinner.View()+m.loadingMsg) +
@@ -107,6 +104,9 @@ func (m model) View() string {
 		return body
 	}
 
+	if m.showConfirm {
+		return m.confirmDialog()
+	}
 	out := m.list.View()
 	if m.view == viewPickModel {
 		tip := `💡 Tip: Type directly to search models (e.g. "claude", "deepseek", "3.5")`
@@ -184,4 +184,23 @@ func (m model) optionsHelp() string {
 	default:
 		return ""
 	}
+}
+
+// confirmDialog renders a centered confirmation box covering the full screen.
+func (m model) confirmDialog() string {
+	if !m.showConfirm || m.delTarget == "" {
+		return ""
+	}
+	dialogStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorWarn).
+		Padding(1, 2).
+		Width(min(44, m.width-4))
+
+	content := warnStyle.Render("Delete profile "+m.delTarget+"?") + "\n" +
+		"This can't be undone.\n\n" +
+		hintStyle.Render("enter: delete · esc: cancel")
+
+	dialog := dialogStyle.Render(content)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
 }

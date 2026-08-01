@@ -23,7 +23,7 @@ var (
 func banner(version string) string {
 	tag := "⛴  ferry your AI tools between endpoints"
 	if version != "" {
-		tag += "  ·  v" + version
+		tag += "  ·  " + version
 	}
 	return bannerStyle.Render(bannerArt) + "\n" +
 		taglineStyle.Render(tag)

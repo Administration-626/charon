@@ -59,7 +59,7 @@ func TestWizardStep(t *testing.T) {
 		{viewProfiles, 0, 0, ""},
 		{viewEditForm, 0, 0, ""},
 		{viewEditField, 0, 0, ""},
-		{viewConfirmDelete, 0, 0, ""},
+		{viewEditField, 0, 0, ""},
 	}
 	for _, tt := range tests {
 		n, total, label := wizardStep(tt.view)
@@ -215,7 +215,7 @@ func TestInputView(t *testing.T) {
 		}
 	}
 	// Non-input views report false.
-	for _, v := range []view{viewTools, viewProfiles, viewFetching, viewPickModel, viewConfirmDelete} {
+	for _, v := range []view{viewTools, viewProfiles, viewFetching, viewPickModel} {
 		m.view = v
 		if m.inputView() {
 			t.Errorf("inputView() = true for view %v, want false", v)
@@ -254,7 +254,7 @@ func TestNewSpinner(t *testing.T) {
 
 func TestBannerContainsVersion(t *testing.T) {
 	got := banner("1.2.3")
-	if !strings.Contains(got, "v1.2.3") {
+	if !strings.Contains(got, "1.2.3") {
 		t.Errorf("banner output does not contain version: %q", got)
 	}
 	if !strings.Contains(got, "ferry your AI tools") {

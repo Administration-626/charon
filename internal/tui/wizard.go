@@ -400,13 +400,13 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// updateConfirmDelete handles the y/n prompt guarding profile deletion.
-func (m model) updateConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+// handleConfirmDelete handles the enter/esc prompt on the confirmation dialog overlay.
+func (m model) handleConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "y", "Y":
+	case "enter":
 		name := m.delTarget
 		m.delTarget = ""
-		m.view = viewProfiles
+		m.showConfirm = false
 		if m.store.Active(m.tool.Name) == name {
 			if _, err := m.store.Apply(m.tool, profile.DefaultName); err != nil {
 				m.setStatus(statusErr, err.Error())
@@ -422,10 +422,10 @@ func (m model) updateConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.loadProfiles("") // the row is gone; fall back to the active profile
 		}
 		return m, nil
-	case "n", "N", "esc":
+	case "esc":
 		name := m.delTarget
 		m.delTarget = ""
-		m.view = viewProfiles
+		m.showConfirm = false
 		m.setStatus(statusInfo, "cancelled")
 		m.loadProfiles(name)
 		return m, nil
