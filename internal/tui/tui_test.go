@@ -182,3 +182,101 @@ func TestQuitKeyDisabledInPicker(t *testing.T) {
 		t.Errorf("ShortHelp view contains 'q quit': %q", helpView)
 	}
 }
+
+func TestIsSentinel(t *testing.T) {
+	tests := []struct {
+		value string
+		want  bool
+	}{
+		{addSentinel, true},
+		{skipModel, true},
+		{customModel, true},
+		{backModel, true},
+		{sepSentinel, true},
+		{"work", false},
+		{"default", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run("sentinel_"+tt.value, func(t *testing.T) {
+			if got := isSentinel(tt.value); got != tt.want {
+				t.Errorf("isSentinel(%q) = %v, want %v", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInputView(t *testing.T) {
+	m := model{}
+	for _, v := range []view{viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField, viewAddCustomModel} {
+		m.view = v
+		if !m.inputView() {
+			t.Errorf("inputView() = false for view %v, want true", v)
+		}
+	}
+	// Non-input views report false.
+	for _, v := range []view{viewTools, viewProfiles, viewFetching, viewPickModel, viewConfirmDelete} {
+		m.view = v
+		if m.inputView() {
+			t.Errorf("inputView() = true for view %v, want false", v)
+		}
+	}
+	// EditForm with a focused field is an input view.
+	m.view = viewEditForm
+	m.formFocus = 0
+	if !m.inputView() {
+		t.Error("inputView() = false for viewEditForm with formFocus=0, want true")
+	}
+	m.formFocus = 4 // Save button, not an input field
+	if m.inputView() {
+		t.Error("inputView() = true for viewEditForm with formFocus=4, want false")
+	}
+}
+
+func TestFindTool(t *testing.T) {
+	m := model{allTools: tools.All()}
+	for _, tool := range tools.All() {
+		if got := m.findTool(tool.Name); got == nil {
+			t.Errorf("findTool(%q) = nil, want tool", tool.Name)
+		} else if got.Name != tool.Name {
+			t.Errorf("findTool(%q).Name = %q, want %q", tool.Name, got.Name, tool.Name)
+		}
+	}
+	if got := m.findTool("nonexistent"); got != nil {
+		t.Errorf("findTool(nonexistent) = %v, want nil", got)
+	}
+}
+
+func TestNewSpinner(t *testing.T) {
+	s := newSpinner()
+	_ = s // spinner is created without panic; structural check is sufficient
+}
+
+func TestBannerContainsVersion(t *testing.T) {
+	got := banner("1.2.3")
+	if !strings.Contains(got, "v1.2.3") {
+		t.Errorf("banner output does not contain version: %q", got)
+	}
+	if !strings.Contains(got, "ferry your AI tools") {
+		t.Errorf("banner output does not contain tagline: %q", got)
+	}
+}
+
+func TestBannerWithoutVersion(t *testing.T) {
+	got := banner("")
+	if !strings.Contains(got, "ferry your AI tools") {
+		t.Errorf("banner output does not contain tagline: %q", got)
+	}
+}
+
+func TestSetStatusAndClearStatus(t *testing.T) {
+	m := model{}
+	m.setStatus(statusOK, "done")
+	if m.status != "done" || m.statusLvl != statusOK {
+		t.Errorf("after setStatus: status=%q lvl=%v, want done/OK", m.status, m.statusLvl)
+	}
+	m.clearStatus()
+	if m.status != "" || m.statusLvl != statusInfo {
+		t.Errorf("after clearStatus: status=%q lvl=%v, want empty/info", m.status, m.statusLvl)
+	}
+}

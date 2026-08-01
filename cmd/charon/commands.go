@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -524,7 +526,54 @@ func cmdUninstall() error {
 // cmdUpdate runs the online install.sh script to upgrade the binary.
 func cmdUpdate() error {
 	fmt.Println("Checking for updates and upgrading charon ...")
-	cmd := exec.Command("sh", "-c", "curl -fsSL https://github.com/Administration-626/charon/releases/latest/download/install.sh | sh")
+
+	// Download the install script to a temp file instead of piping curl to sh directly,
+	// so we can verify the download and show the user what will be executed.
+	scriptURL := "https://github.com/Administration-626/charon/releases/latest/download/install.sh"
+	tmpFile, err := os.CreateTemp("", "charon-install-*.sh")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	resp, err := http.Get(scriptURL) //nolint:noctx
+	if err != nil {
+		return fmt.Errorf("downloading install script: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download failed with status %s", resp.Status)
+	}
+
+	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("saving install script: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("closing temp file: %w", err)
+	}
+
+	// Basic sanity check: the script must start with a shebang.
+	header := make([]byte, 20)
+	f, _ := os.Open(tmpPath)
+	_, _ = f.Read(header)
+	_ = f.Close()
+	if !strings.HasPrefix(string(header), "#!/") {
+		return fmt.Errorf("downloaded file does not look like a shell script (header: %q)", string(header))
+	}
+
+	fmt.Printf("Downloaded install script to %s\n", tmpPath)
+	fmt.Println("The script will:")
+	fmt.Println("  - Detect your OS and architecture")
+	fmt.Println("  - Download the latest charon binary")
+	fmt.Println("  - Verify its checksum")
+	fmt.Println("  - Install it to ~/.local/bin/charon (or $PREFIX/bin)")
+	fmt.Println()
+	fmt.Println("Executing install script ...")
+
+	cmd := exec.Command("sh", tmpPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

@@ -173,6 +173,33 @@ func TestEditProfileLeavesInactiveProfileNotActive(t *testing.T) {
 
 // TestEditProfileRenameOfInactiveProfileStaysInactive is the rename variant of
 // the above: renaming an inactive profile must not activate its new name either.
+func TestNextDuplicateName(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing []string
+		src      string
+		want     string
+	}{
+		{"simple copy", []string{"work", "personal"}, "work", "work-copy"},
+		{"avoids collision", []string{"work", "work-copy"}, "work", "work-copy-2"},
+		{"increments counter", []string{"work", "work-copy", "work-copy-2", "work-copy-3"}, "work", "work-copy-4"},
+		{"empty existing", nil, "default", "default-copy"},
+		{"sanitizes name", []string{}, "测试", "测试-copy"},
+		{"handles double-copy", []string{"a-copy", "a-copy-2", "a-copy-3"}, "a", "a-copy-4"},
+		{"skip gap in numbering", []string{"a-copy", "a-copy-3"}, "a", "a-copy-2"},
+		{"empty source falls back to copy", []string{}, "", "copy"},
+		{"empty source with collisions", []string{"copy", "copy-2", "copy-3"}, "", "copy-4"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NextDuplicateName(tt.existing, tt.src)
+			if got != tt.want {
+				t.Errorf("NextDuplicateName(%v, %q) = %q, want %q", tt.existing, tt.src, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEditProfileRenameOfInactiveProfileStaysInactive(t *testing.T) {
 	dir := t.TempDir()
 	tool, cfg := applyTool(dir)

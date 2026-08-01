@@ -184,3 +184,126 @@ func TestRunStatusAndVersion(t *testing.T) {
 		t.Errorf("version: %v", err)
 	}
 }
+
+func TestRunRefreshUpdatesActiveProfile(t *testing.T) {
+	home := sandbox(t)
+	seedCodex(t, home)
+
+	if err := run([]string{"add", "codex", "--name", "work", "--key", "sk-test", "--endpoint", "https://example.com/v1"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	// Refresh without an explicit active profile should work after add.
+	if err := run([]string{"refresh", "codex"}); err != nil {
+		t.Errorf("refresh: %v", err)
+	}
+}
+
+func TestRunRefreshErrorsOnUnknownTool(t *testing.T) {
+	sandbox(t)
+	if err := run([]string{"refresh", "nosuchtool"}); err == nil || !strings.Contains(err.Error(), "unknown tool") {
+		t.Errorf("refresh unknown tool: %v, want unknown-tool error", err)
+	}
+}
+
+func TestRunPruneRequiresTool(t *testing.T) {
+	sandbox(t)
+	if err := run([]string{"prune"}); err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Errorf("prune without args: %v, want usage error", err)
+	}
+}
+
+func TestRunPruneOnDetectedTool(t *testing.T) {
+	home := sandbox(t)
+	seedCodex(t, home)
+
+	// Add a profile to create some state, then prune.
+	if err := run([]string{"add", "codex", "--name", "work", "--key", "sk-test", "--endpoint", "https://example.com/v1"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := run([]string{"prune", "codex"}); err != nil {
+		t.Errorf("prune codex: %v", err)
+	}
+}
+
+func TestRunPruneWithKeepFlag(t *testing.T) {
+	home := sandbox(t)
+	seedCodex(t, home)
+
+	if err := run([]string{"add", "codex", "--name", "work", "--key", "sk-test", "--endpoint", "https://example.com/v1"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := run([]string{"prune", "codex", "--keep", "5"}); err != nil {
+		t.Errorf("prune codex --keep 5: %v", err)
+	}
+}
+
+func TestRunCompletionBash(t *testing.T) {
+	sandbox(t)
+	if err := run([]string{"completion", "bash"}); err != nil {
+		t.Errorf("completion bash: %v", err)
+	}
+}
+
+func TestRunCompletionZsh(t *testing.T) {
+	sandbox(t)
+	if err := run([]string{"completion", "zsh"}); err != nil {
+		t.Errorf("completion zsh: %v", err)
+	}
+}
+
+func TestRunCompletionFish(t *testing.T) {
+	sandbox(t)
+	if err := run([]string{"completion", "fish"}); err != nil {
+		t.Errorf("completion fish: %v", err)
+	}
+}
+
+func TestRunCompletionUnsupportedShell(t *testing.T) {
+	sandbox(t)
+	if err := run([]string{"completion", "powershell"}); err == nil || !strings.Contains(err.Error(), "unsupported shell") {
+		t.Errorf("completion powershell: %v, want unsupported-shell error", err)
+	}
+}
+
+func TestRunProfilesListsProfileNames(t *testing.T) {
+	home := sandbox(t)
+	seedCodex(t, home)
+
+	if err := run([]string{"add", "codex", "--name", "work", "--key", "sk-test", "--endpoint", "https://example.com/v1"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	// __profiles is a hidden command for shell completion.
+	if err := run([]string{"__profiles", "codex"}); err != nil {
+		t.Errorf("__profiles codex: %v", err)
+	}
+}
+
+func TestRunSaveRequiresTool(t *testing.T) {
+	sandbox(t)
+	if err := run([]string{"save"}); err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Errorf("save without args: %v, want usage error", err)
+	}
+}
+
+func TestRunSaveWithName(t *testing.T) {
+	home := sandbox(t)
+	seedCodex(t, home)
+
+	if err := run([]string{"save", "codex", "snapshot1"}); err != nil {
+		t.Errorf("save codex snapshot1: %v", err)
+	}
+}
+
+func TestRunModelsRequiresKey(t *testing.T) {
+	sandbox(t)
+	if err := run([]string{"models", "codex"}); err == nil {
+		t.Error("models without --key succeeded, want error")
+	}
+}
+
+func TestRunModelsWithInvalidEndpoint(t *testing.T) {
+	sandbox(t)
+	if err := run([]string{"models", "codex", "--key", "sk-test", "--endpoint", "not a url"}); err == nil {
+		t.Error("models with invalid endpoint succeeded, want error")
+	}
+}
