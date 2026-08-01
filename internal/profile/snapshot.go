@@ -116,7 +116,9 @@ func (s *Store) AddProfile(t *tools.Tool, name string, spec Spec, allModels ...s
 		return err
 	}
 	// Back up the current live config first so the write is reversible via undo.
-	if t.Detected != nil && t.Detected() {
+	// Only needed when no profile is active — the active profile already captures
+	// the live state (refreshed below), so a backup would be redundant.
+	if t.Detected != nil && t.Detected() && s.Active(t.Name) == "" {
 		s.refreshKeychainArtifacts(t)
 		s.refreshMergerArtifacts(t)
 		if _, err := s.backup(t, "auto-backup before adding "+name); err != nil {
