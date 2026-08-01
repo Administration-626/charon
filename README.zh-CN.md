@@ -47,23 +47,13 @@ API-key 登录，也适用于 OAuth/ChatGPT 会话——切换出去再切回来
 | 工具 | Endpoint | 凭据 |
 |------|----------|------|
 | **Codex** | `~/.codex/config.toml`（`model_provider` → `base_url`） | `~/.codex/config.toml`（`experimental_bearer_token`） |
-| **Claude Code** | `~/.claude/settings.json`（`env.ANTHROPIC_BASE_URL`） | `settings.json` 的 env key **或** macOS Keychain `Claude Code-credentials` |
+| **Claude Code** | `~/.claude/settings.json`（`env.ANTHROPIC_BASE_URL`） | `settings.json` 的 env key |
 | **OpenCode** | `~/.config/opencode/opencode.jsonc`（`provider.*.options.baseURL`） | `opencode.jsonc`（`provider.charon.options.apiKey`） |
 | **Pi** | `~/.pi/agent/extensions/charon.ts`（`baseUrl`） | `~/.pi/agent/extensions/charon.ts`（`apiKey`） |
 
-## 支持的平台
-
-| 系统 | 状态 | 说明 |
-|------|------|------|
-| **macOS** (darwin) | ✅ 完全支持 | 通过 macOS Keychain（`security`）读写 Claude Code 的 OAuth token。主要测试平台。 |
-| **Linux** | ✅ 支持 | 所有工具的基于文件的 profile 均可用。Keychain 访问为空操作——Claude 的 OAuth 凭据改从 `~/.claude` 文件读取。 |
-| **Windows** | ⚠️ 未测试 | 可编译；路径会在 `%USERPROFILE%` 下解析。Keychain 为空操作。尚未验证。 |
-
-Keychain 支持按平台编译（`keychain_darwin.go` 与 `keychain_other.go`），非 macOS 构建会直接跳过。
-
 ## 安装
 
-### curl（Linux 与 macOS）
+### curl（Linux）
 
 无需 Go——下载对应平台的预编译二进制、校验 checksum，并安装到 `~/.local/bin`：
 
@@ -77,11 +67,11 @@ curl -fsSL https://github.com/Administration-626/charon/releases/latest/download
 <summary><b>其它方式</b> · 手动二进制 · 从源码构建</summary>
 
 **预编译二进制** —— 从 [Releases 页面](https://github.com/Administration-626/charon/releases/latest)
-下载你平台对应的压缩包（`charon_{darwin,linux}_{amd64,arm64}.tar.gz`），并对照随包
+下载你平台对应的压缩包（`charon_linux_{amd64,arm64}.tar.gz`），并对照随包
 附带的 `checksums.txt` 校验：
 
 ```sh
-curl -L https://github.com/Administration-626/charon/releases/latest/download/charon_darwin_arm64.tar.gz | tar xz
+curl -L https://github.com/Administration-626/charon/releases/latest/download/charon_linux_amd64.tar.gz | tar xz
 sudo mv charon /usr/local/bin/
 ```
 
@@ -224,8 +214,7 @@ charon add    codex --name openrouter --endpoint https://openrouter.ai/api/v1 \
 
 ## 安全
 
-profile 以**未加密**形式存于磁盘（权限 `0600`），包括从 macOS Keychain 拷出的
-OAuth token。请保持 `~/.config/charon` 私有；未来版本可能把密钥推回 Keychain。
+profile 以**未加密**形式存于磁盘（权限 `0600`）。请保持 `~/.config/charon` 私有。
 
 ## 项目结构
 
@@ -236,7 +225,7 @@ internal/tools/      各工具适配器（codex、claude、opencode、pi）
 internal/profile/    快照存储（按关注点拆分：snapshot、apply、backup、manage）
 internal/models/     从 provider API 拉取模型列表（openai/anthropic 协议）
 internal/tui/        bubbletea 交互式菜单（单页表单、模糊模型搜索）
-internal/secret/     掩码 + macOS keychain 访问
+internal/secret/     掩码 + 平台 keychain 访问
 ```
 
 ## 开发
@@ -250,14 +239,13 @@ make fmt     # gofmt -w .
 make run     # 构建 + 交互式菜单（先 sandbox HOME！）
 ```
 
-CI（`.github/workflows/ci.yml`）在 Linux 和 macOS 上运行格式检查、vet、race 测试、
+CI（`.github/workflows/ci.yml`）在 Linux 上运行格式检查、vet、race 测试、
 构建与 golangci-lint。贡献者与 Agent 约定（包括**测试时务必 sandbox `HOME` 以免触碰
 真实凭据**这条规则）见 [AGENTS.md](AGENTS.md)。
 
 ## 路线图
 
 - 可选的 `--verify`：切换后做鉴权 ping 以确认凭据确实可用。
-- Windows Keychain / Credential Manager 支持。
 - 支持更多 AI CLI 工具。
 
 ## 贡献

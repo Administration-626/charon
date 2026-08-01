@@ -50,24 +50,13 @@ switching away and back is always clean and reversible.
 | Tool | Endpoint | Credentials |
 |------|----------|-------------|
 | **Codex** | `~/.codex/config.toml` (`model_provider` → `base_url`) | `~/.codex/config.toml` (`experimental_bearer_token`) |
-| **Claude Code** | `~/.claude/settings.json` (`env.ANTHROPIC_BASE_URL`) | `settings.json` env key **or** macOS Keychain `Claude Code-credentials` |
+| **Claude Code** | `~/.claude/settings.json` (`env.ANTHROPIC_BASE_URL`) | `settings.json` env key |
 | **OpenCode** | `~/.config/opencode/opencode.jsonc` (`provider.*.options.baseURL`) | `opencode.jsonc` (`provider.charon.options.apiKey`) |
 | **Pi** | `~/.pi/agent/extensions/charon.ts` (`baseUrl`) | `~/.pi/agent/extensions/charon.ts` (`apiKey`) |
 
-## Supported platforms
-
-| OS | Status | Notes |
-|----|--------|-------|
-| **macOS** (darwin) | ✅ Fully supported | Reads/writes Claude Code's OAuth token via the macOS Keychain (`security`). Primary tested platform. |
-| **Linux** | ✅ Supported | File-based profiles for all tools work. Keychain access is a no-op — Claude OAuth credentials are read from `~/.claude` files instead. |
-| **Windows** | ⚠️ Untested | Builds; paths resolve under `%USERPROFILE%`. Keychain is a no-op. Not yet verified. |
-
-Keychain support is compiled in per-platform (`keychain_darwin.go` vs.
-`keychain_other.go`), so non-macOS builds simply skip it.
-
 ## Installation
 
-### curl (Linux & macOS)
+### curl
 
 No Go needed — downloads the prebuilt binary for your platform, verifies its
 checksum, and installs to `~/.local/bin`:
@@ -83,11 +72,11 @@ curl -fsSL https://github.com/Administration-626/charon/releases/latest/download
 
 **Pre-built binary** — grab your platform's archive from the
 [Releases page](https://github.com/Administration-626/charon/releases/latest)
-(`charon_{darwin,linux}_{amd64,arm64}.tar.gz`) and verify it against the included
+(`charon_linux_{amd64,arm64}.tar.gz`) and verify it against the included
 `checksums.txt`:
 
 ```sh
-curl -L https://github.com/Administration-626/charon/releases/latest/download/charon_darwin_arm64.tar.gz | tar xz
+curl -L https://github.com/Administration-626/charon/releases/latest/download/charon_linux_amd64.tar.gz | tar xz
 sudo mv charon /usr/local/bin/
 ```
 
@@ -241,9 +230,7 @@ different endpoint/key, `charon save codex proxy`; then hop between them with
 
 ## Security
 
-Profiles are stored **unencrypted** on disk (mode `0600`), including any OAuth
-token copied out of the macOS Keychain. Keep `~/.config/charon` private; a future
-version may push secrets back into the Keychain instead.
+Profiles are stored **unencrypted** on disk (mode `0600`). Keep `~/.config/charon` private.
 
 ## Project layout
 
@@ -254,7 +241,7 @@ internal/tools/      per-tool adapters (codex, claude, opencode, pi)
 internal/profile/    snapshot store (split by concern: snapshot, apply, backup, manage)
 internal/models/     fetch model lists from a provider API (openai/anthropic wire)
 internal/tui/        bubbletea interactive menu (single-page forms, fuzzy model search)
-internal/secret/     masking + macOS keychain access
+internal/secret/     masking + platform keychain access
 ```
 
 ## Development
@@ -269,14 +256,13 @@ make run     # build + interactive menu (sandbox HOME first!)
 ```
 
 CI (`.github/workflows/ci.yml`) runs formatting checks, vet, race tests, build,
-and golangci-lint on Linux and macOS. Contributor and agent conventions —
+and golangci-lint on Linux. Contributor and agent conventions —
 including the rule to **always sandbox `HOME` when testing so real credentials
 are never touched** — live in [AGENTS.md](AGENTS.md).
 
 ## Roadmap
 
 - Optional `--verify` post-switch auth ping to confirm credentials actually work.
-- Windows Keychain / Credential Manager support.
 - Support for more AI CLI tools.
 
 ## Contributing
