@@ -210,11 +210,15 @@ charon add    codex --name openrouter --endpoint https://openrouter.ai/api/v1 \
     回到最新的；每个工具保留最近 10 份（可用 `charon prune <tool> --keep N` 调整）。
   - `config.json` —— 每个工具的当前 profile。
 - **`default`** 在检测到某工具时自动捕获，因此随时可回滚，且永不被覆盖。
-- 写入是**原子**的（临时文件 → `rename`），凭据文件/目录权限为 `0600`/`0700`。
+- 写入是**原子**的（临时文件 → `rename`）。
 
 ## 安全
 
-profile 以**未加密**形式存于磁盘（权限 `0600`）。请保持 `~/.config/charon` 私有。
+profile 以**未加密**形式存于磁盘（文件 `0600`，目录 `0700`——目录上的 `x` 位表示"进入"而非"执行"，所以 `0700` 才是正确的做法）。这与各工具自身所用的权限模型一致
+（`~/.codex/config.toml`、`~/.claude/settings.json` 等）——如果攻击者能读
+`~/.config/charon`，那也能读这些文件。相比之下，**shell 配置文件**
+（`~/.bashrc`、`~/.zshrc`）默认权限为 `0644`（所有人可读），把 API key 存在那里
+要危险得多。请保持 `~/.config/charon` 私有。写入是**原子**的（临时文件 → `rename`）。
 
 ## 项目结构
 

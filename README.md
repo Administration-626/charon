@@ -225,12 +225,18 @@ different endpoint/key, `charon save codex proxy`; then hop between them with
   - `config.json` — active profile per tool.
 - **`default`** is captured automatically the first time a detected tool is seen,
   so reverting is always possible and it is never overwritten.
-- Writes are **atomic** (temp file → `rename`), and credential files/dirs are
-  mode `0600`/`0700`.
+- Writes are **atomic** (temp file → `rename`).
 
 ## Security
 
-Profiles are stored **unencrypted** on disk (mode `0600`). Keep `~/.config/charon` private.
+Profiles are stored **unencrypted** on disk (`0600` for files, `0700` for
+directories — the `x` bit on directories means "enter", not "execute", so
+`0700` is the correct way to allow access). This is the same permission model
+used by the tools themselves (`~/.codex/config.toml`, `~/.claude/settings.json`,
+etc.) — if an attacker can read `~/.config/charon`, they can also read those
+files. **Shell config files** (`~/.bashrc`, `~/.zshrc`), by contrast, default to
+`0644` (world-readable), so storing API keys there is considerably less secure.
+Keep `~/.config/charon` private. Writes are **atomic** (temp file → `rename`).
 
 ## Project layout
 
