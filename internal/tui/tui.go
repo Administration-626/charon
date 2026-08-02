@@ -84,7 +84,8 @@ var (
 	keyEdit   = key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit"))
 	keyBackup = key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "clone"))
 	keyDelete = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete"))
-	keyBack   = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back"))
+	keyBack   = key.NewBinding(key.WithKeys("esc", "q"), key.WithHelp("esc", "back"))
+	keyQuit   = key.NewBinding(key.WithKeys("q", "esc"), key.WithHelp("q/esc", "quit"))
 	keyOpen   = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open"))
 	keyChoose = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "choose"))
 	// keyFilter never matches a real press; it only advertises type-to-search.
@@ -275,7 +276,7 @@ func (m *model) loadTools() {
 	m.list.SetItems(items)
 	m.list.Select(selectedIndex)
 	m.list.Title = "Charon — select a tool"
-	m.setHelpKeys(keyOpen)
+	m.setHelpKeys(keyOpen, keyQuit)
 	m.setDelegate(themedDelegate()) // two-line rows show each tool's status
 }
 
@@ -438,6 +439,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc":
 			return m.onEsc()
+		case "q":
+			if m.view == viewTools || m.view == viewProfiles {
+				return m.onEsc()
+			}
 		case "enter":
 			return m.onEnter()
 		case "e":
@@ -586,11 +591,14 @@ func (m *model) startInput(placeholder string, password bool) {
 
 func (m model) onEsc() (tea.Model, tea.Cmd) {
 	switch m.view {
+	case viewTools:
+		return m, tea.Quit
 	case viewProfiles:
 		m.view = viewTools
 		m.clearStatus()
 		m.loadTools()
 		m.resize() // banner returns → shrink the list
+		return m, nil
 	case viewEditForm:
 		m.editField = ""
 		m.dupSource = ""

@@ -8,6 +8,7 @@ import (
 	"charon/internal/tools"
 
 	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestStatusRender(t *testing.T) {
@@ -278,5 +279,48 @@ func TestSetStatusAndClearStatus(t *testing.T) {
 	m.clearStatus()
 	if m.status != "" || m.statusLvl != statusInfo {
 		t.Errorf("after clearStatus: status=%q lvl=%v, want empty/info", m.status, m.statusLvl)
+	}
+}
+
+func TestEscAndQKeyNavigation(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	st, err := profile.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(st, "v1.0.0")
+
+	testKeys := []struct {
+		name string
+		msg  tea.KeyMsg
+	}{
+		{"esc", tea.KeyMsg{Type: tea.KeyEsc}},
+		{"q", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}}},
+	}
+
+	// In viewTools, esc or q key should return tea.Quit.
+	for _, tk := range testKeys {
+		m.view = viewTools
+		m2, cmd := m.Update(tk.msg)
+		if cmd == nil {
+			t.Errorf("Update with %q in viewTools returned nil cmd, want tea.Quit", tk.name)
+		} else {
+			msg := cmd()
+			if _, ok := msg.(tea.QuitMsg); !ok {
+				t.Errorf("Update with %q in viewTools cmd = %v, want tea.QuitMsg", tk.name, msg)
+			}
+		}
+		_ = m2
+	}
+
+	// In viewProfiles, esc or q key should back out to viewTools.
+	m.tool = m.allTools[0]
+	for _, tk := range testKeys {
+		m.view = viewProfiles
+		m2, _ := m.Update(tk.msg)
+		updatedModel := m2.(model)
+		if updatedModel.view != viewTools {
+			t.Errorf("Update with %q in viewProfiles view = %v, want viewTools", tk.name, updatedModel.view)
+		}
 	}
 }
