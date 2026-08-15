@@ -49,7 +49,22 @@ func Fetch(provider Provider, endpoint, key string) ([]string, error) {
 		req.Header.Set("anthropic-version", "2023-06-01")
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	// A custom client lets us drop the auth headers on any redirect to a different
+	// host, so a redirect issued by the endpoint can't forward the user's API key to
+	// a third party. http.DefaultClient would carry Authorization (and always carries
+	// the non-standard x-api-key) along to whatever host it lands on.
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) > 0 && req.URL.Host != via[0].URL.Host {
+				req.Header.Del("Authorization")
+				req.Header.Del("x-api-key")
+				req.Header.Del("anthropic-version")
+			}
+			return nil
+		},
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}

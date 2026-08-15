@@ -556,10 +556,13 @@ func cmdUpdate() error {
 	}
 
 	// Basic sanity check: the script must start with a shebang.
-	header := make([]byte, 20)
-	f, _ := os.Open(tmpPath)
-	_, _ = f.Read(header)
-	_ = f.Close()
+	header, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return fmt.Errorf("reading downloaded script: %w", err)
+	}
+	if len(header) > 20 {
+		header = header[:20]
+	}
 	if !strings.HasPrefix(string(header), "#!/") {
 		return fmt.Errorf("downloaded file does not look like a shell script (header: %q)", string(header))
 	}
