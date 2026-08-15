@@ -71,6 +71,19 @@ func TestFetchAnthropic(t *testing.T) {
 	}
 }
 
+func TestFetchAnthropicBearerProxy(t *testing.T) {
+	srv := httptest.NewServer(modelsHandler(t, "Authorization", "Bearer sk-ant"))
+	defer srv.Close()
+
+	got, err := Fetch(Anthropic, srv.URL+"/v1", "sk-ant")
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("expected 2 models, got %v", got)
+	}
+}
+
 func TestFetchHTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "nope", http.StatusUnauthorized)

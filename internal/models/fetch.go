@@ -41,12 +41,12 @@ func Fetch(provider Provider, endpoint, key string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	switch provider {
-	case Anthropic:
-		req.Header.Set("x-api-key", key)
+	// Always provide Bearer authorization so that custom/third-party OpenAI-compatible
+	// relays and gateways work seamlessly regardless of the selected CLI tool.
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("x-api-key", key)
+	if provider == Anthropic {
 		req.Header.Set("anthropic-version", "2023-06-01")
-	default:
-		req.Header.Set("Authorization", "Bearer "+key)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
