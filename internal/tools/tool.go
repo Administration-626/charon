@@ -44,6 +44,7 @@ type Tool struct {
 	Artifacts        []artifact.Artifact
 	Provider         string               // model-list wire format: "openai" or "anthropic"
 	DefaultEndpoint  string               // prefilled when adding a profile
+	ModelMenu        string               // the tool's own model-switching command (e.g. "/model") when it can be given a list of models to offer; "" when the tool's config has no place to register one (Codex)
 	Detected         func() bool          // is the tool installed/configured?
 	Describe         func() (Info, error) // read live config into an Info
 	ApplyAuth        func(AuthSpec) error // write endpoint/key/model into live config

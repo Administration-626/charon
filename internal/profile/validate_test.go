@@ -3,6 +3,7 @@ package profile
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -20,7 +21,7 @@ func applyTool(dir string) (*tools.Tool, string) {
 		Detected:  func() bool { _, err := os.Stat(cfg); return err == nil },
 		Artifacts: []artifact.Artifact{artifact.NewFile("config", cfg, 0o600)},
 		ApplyAuth: func(a tools.AuthSpec) error {
-			return os.WriteFile(cfg, []byte(a.Endpoint+"|"+a.Key+"|"+a.Model), 0o600)
+			return os.WriteFile(cfg, []byte(a.Endpoint+"|"+a.Key+"|"+a.Model+"|"+strings.Join(a.AllModels, ",")), 0o600)
 		},
 	}, cfg
 }
@@ -109,7 +110,7 @@ func TestEditProfileRenames(t *testing.T) {
 	if s.Active(tool.Name) != "new" {
 		t.Errorf("active = %q, want new", s.Active(tool.Name))
 	}
-	if got, _ := os.ReadFile(cfg); string(got) != "https://b|k2|m" {
+	if got, _ := os.ReadFile(cfg); string(got) != "https://b|k2|m|" {
 		t.Errorf("live config = %q, want the edited spec applied", got)
 	}
 }
@@ -162,7 +163,7 @@ func TestEditProfileLeavesInactiveProfileNotActive(t *testing.T) {
 	if s.Active(tool.Name) != "work" {
 		t.Errorf("active = %q, want work (editing an inactive profile must not switch)", s.Active(tool.Name))
 	}
-	if got, _ := os.ReadFile(cfg); string(got) != "https://work|k-work|" {
+	if got, _ := os.ReadFile(cfg); string(got) != "https://work|k-work||" {
 		t.Errorf("live config = %q, want work's config restored", got)
 	}
 	sp, ok := s.GetSpec(tool.Name, "other")
@@ -229,7 +230,99 @@ func TestEditProfileRenameOfInactiveProfileStaysInactive(t *testing.T) {
 	if s.Active(tool.Name) != "work" {
 		t.Errorf("active = %q, want work (renaming an inactive profile must not switch)", s.Active(tool.Name))
 	}
-	if got, _ := os.ReadFile(cfg); string(got) != "https://work|k-work|" {
+	if got, _ := os.ReadFile(cfg); string(got) != "https://work|k-work||" {
 		t.Errorf("live config = %q, want work's config restored", got)
+	}
+}
+
+func TestSpecModelIDs(t *testing.T) {
+	cases := []struct {
+		name string
+		spec Spec
+		want string
+	}{
+		{"curated list kept in order", Spec{Models: []string{"kimi-k2", "glm-4.6"}}, "kimi-k2,glm-4.6"},
+		{"default appended when not in the list", Spec{Model: "deepseek-v3", Models: []string{"kimi-k2"}}, "kimi-k2,deepseek-v3"},
+		{"default not duplicated", Spec{Model: "kimi-k2", Models: []string{"kimi-k2", "glm-4.6"}}, "kimi-k2,glm-4.6"},
+		{"blanks and duplicates dropped", Spec{Models: []string{"", "  ", "a", "a"}}, "a"},
+		{"model alone still registers", Spec{Model: "gpt-5.5"}, "gpt-5.5"},
+		{"nothing known stays empty", Spec{}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := strings.Join(tc.spec.ModelIDs(), ","); got != tc.want {
+				t.Errorf("ModelIDs() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAddProfilePromotesFirstModelWhenNoDefault covers `--models a,b,c` with no
+// --model: a tool has to have one model selected to route requests at all, so the
+// first curated id becomes the default rather than leaving the tool unconfigured.
+func TestAddProfilePromotesFirstModelWhenNoDefault(t *testing.T) {
+	dir := t.TempDir()
+	tool, cfg := applyTool(dir)
+	write(t, cfg, "seed")
+	s := newStore(t)
+
+	if err := s.AddProfile(tool, "gw", Spec{Endpoint: "https://gw", Key: "k", Models: []string{"kimi-k2", "glm-4.6"}}); err != nil {
+		t.Fatal(err)
+	}
+	sp, ok := s.GetSpec(tool.Name, "gw")
+	if !ok || sp.Model != "kimi-k2" {
+		t.Errorf("spec = %+v, want Model promoted to kimi-k2", sp)
+	}
+	if got, _ := os.ReadFile(cfg); string(got) != "https://gw|k|kimi-k2|kimi-k2,glm-4.6" {
+		t.Errorf("live config = %q, want the whole curated list applied", got)
+	}
+}
+
+// TestEditProfileKeepsCuratedModelsAcrossRename is the regression this whole
+// Spec.Models change exists for: an edit that doesn't re-fetch (rename, key
+// rotation, --model) must not collapse the tool's own picker to one row.
+func TestEditProfileKeepsCuratedModelsAcrossRename(t *testing.T) {
+	dir := t.TempDir()
+	tool, cfg := applyTool(dir)
+	write(t, cfg, "seed")
+	s := newStore(t)
+
+	curated := []string{"kimi-k2", "glm-4.6", "deepseek-v3"}
+	if err := s.AddProfile(tool, "gw", Spec{Endpoint: "https://gw", Key: "k1", Model: "glm-4.6", Models: curated}); err != nil {
+		t.Fatal(err)
+	}
+	// A rename + key rotation carrying the stored spec forward, as the CLI and TUI both do.
+	sp, _ := s.GetSpec(tool.Name, "gw")
+	sp.Key = "k2"
+	if err := s.EditProfile(tool, "gw", "gw-renamed", sp); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := s.GetSpec(tool.Name, "gw-renamed")
+	if !ok {
+		t.Fatal("renamed profile has no spec")
+	}
+	if !reflect.DeepEqual(got.Models, curated) {
+		t.Errorf("Models = %v, want %v preserved across the edit", got.Models, curated)
+	}
+	if live, _ := os.ReadFile(cfg); string(live) != "https://gw|k2|glm-4.6|kimi-k2,glm-4.6,deepseek-v3" {
+		t.Errorf("live config = %q, want the curated list re-applied", live)
+	}
+}
+
+// TestAddProfileWithoutModelsLeavesAllModelsEmpty guards the tools-side fallback:
+// a profile that curates no list must not send a one-entry AllModels, or each tool
+// would overwrite the list it already has registered with just the default model.
+func TestAddProfileWithoutModelsLeavesAllModelsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	tool, cfg := applyTool(dir)
+	write(t, cfg, "seed")
+	s := newStore(t)
+
+	if err := s.AddProfile(tool, "p", Spec{Endpoint: "https://gw", Key: "k", Model: "kimi-k2"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(cfg); string(got) != "https://gw|k|kimi-k2|" {
+		t.Errorf("live config = %q, want an empty AllModels field", got)
 	}
 }

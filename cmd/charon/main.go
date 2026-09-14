@@ -109,8 +109,8 @@ Usage:
                              (omit name to auto-name after the logged-in account)
   charon refresh <tool>      capture in-session changes (model, effort) into active profile
   charon models <tool>       list models from an API (--key, --endpoint)
-  charon add <tool>          add+activate a profile (--name --key [--endpoint --model])
-  charon edit <tool> <p>     change a profile's endpoint/key/model/name
+  charon add <tool>          add+activate a profile (--name --key [--endpoint --model --models])
+  charon edit <tool> <p>     change a profile's endpoint/key/model/models/name
   charon rename <tool> <o> <n>  rename a saved profile
   charon cp <tool> <src> <dst>  duplicate a saved profile
   charon switch <tool> <p>   apply a saved profile (backs up current first)

@@ -9,6 +9,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"charon/internal/profile"
@@ -59,13 +60,15 @@ const (
 	addSentinel = "\x00add"         // the "add new" list row
 	skipModel   = "\x00nomodel"     // the "skip model" list row
 	customModel = "\x00custommodel" // the "custom model" list row
+	doneModels  = "\x00donemodels"  // the "finish curating the model list" row
 	backModel   = "\x00back"        // the "back to previous step" list row
 	sepSentinel = "\x00sep"         // a blank divider row (inert; cursor skips it)
 )
 
 // isSentinel reports whether v is a synthetic action row rather than a profile.
 func isSentinel(v string) bool {
-	return v == addSentinel || v == skipModel || v == customModel || v == backModel || v == sepSentinel
+	return v == addSentinel || v == skipModel || v == customModel ||
+		v == doneModels || v == backModel || v == sepSentinel
 }
 
 type item struct {
@@ -80,14 +83,16 @@ func (i item) FilterValue() string { return i.title }
 
 // Contextual key bindings shown in the list's help footer (and "?"-expanded).
 var (
-	keySwitch = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "switch"))
-	keyEdit   = key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit"))
-	keyBackup = key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "clone"))
-	keyDelete = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete"))
-	keyBack   = key.NewBinding(key.WithKeys("esc", "q"), key.WithHelp("esc", "back"))
-	keyQuit   = key.NewBinding(key.WithKeys("q", "esc"), key.WithHelp("q/esc", "quit"))
-	keyOpen   = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open"))
-	keyChoose = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "choose"))
+	keySwitch    = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "switch"))
+	keyEdit      = key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit"))
+	keyBackup    = key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "clone"))
+	keyDelete    = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete"))
+	keyBack      = key.NewBinding(key.WithKeys("esc", "q"), key.WithHelp("esc", "back"))
+	keyQuit      = key.NewBinding(key.WithKeys("q", "esc"), key.WithHelp("q/esc", "quit"))
+	keyOpen      = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open"))
+	keyChoose    = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "choose"))
+	keyToggle    = key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "select"))
+	keyToggleAll = key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "select all"))
 	// keyFilter never matches a real press; it only advertises type-to-search.
 	keyFilter  = key.NewBinding(key.WithKeys("\x00filter"), key.WithHelp("type", "search"))
 	keyRefresh = key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl+r", "refresh"))
@@ -218,7 +223,7 @@ func (m *model) setDelegate(d list.ItemDelegate) {
 // inputView reports whether the current view is a text-entry step.
 func (m model) inputView() bool {
 	if m.view == viewEditForm {
-		return m.formFocus < 4
+		return m.formFocus < formInputCount
 	}
 	switch m.view {
 	case viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField, viewAddCustomModel:
@@ -445,6 +450,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			return m.onEnter()
+		case "a":
+			if m.view == viewProfiles {
+				m.wiz = wizard{}
+				m.view = viewEditForm
+				m.clearStatus()
+				m.loadEditForm()
+				return m, nil
+			}
 		case "e":
 			if m.view == viewEditForm {
 				// Inside the edit form, "e" opens the highlighted field for editing.
@@ -504,7 +517,7 @@ func (m model) onEditKey() (tea.Model, tea.Cmd) {
 		}
 	}
 	m.wiz = wizard{name: it.value, origName: it.value, edit: true,
-		endpoint: sp.Endpoint, key: sp.Key, model: model}
+		endpoint: sp.Endpoint, key: sp.Key, model: model, models: sp.Models}
 	m.editField = "" // fresh edit starts on the first field
 	m.view = viewEditForm
 	m.clearStatus()
@@ -666,24 +679,43 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 			m.loadEditForm()
 			return m, nil
 		}
+		if it.value == doneModels {
+			// Finish curating without changing the default: an unset default is filled in
+			// from the first checked id when the profile is saved (Spec.normalized).
+			return m.leavePicker()
+		}
 		if it.value == customModel {
 			m.view = viewAddCustomModel
 			m.clearStatus()
-			m.startInput("custom model ID (e.g. gpt-4o, claude-3-7-sonnet)", false)
-			if m.wiz.model != "" {
+			m.startInput("model ids, e.g. gpt-4o, kimi-k2, deepseek-v3", false)
+			if prefill := strings.Join(m.wiz.models, ", "); prefill != "" {
+				m.input.SetValue(prefill)
+			} else if m.wiz.model != "" {
 				m.input.SetValue(m.wiz.model)
 			}
 			return m, textinput.Blink
 		}
 		if it.value == skipModel {
 			m.wiz.model = ""
+			m.wiz.models = nil // no model at all means nothing to register either
 		} else {
 			m.wiz.model = it.value
+			// Picking a default implies wanting it available, so it joins the selection
+			// rather than sitting outside the list that gets registered.
+			if len(m.wiz.models) > 0 && !m.modelSelected(it.value) {
+				m.toggleModel(it.value)
+			}
 		}
-		m.editField = fieldModel
-		m.view = viewEditForm
-		m.loadEditForm()
-		return m, nil
+		return m.leavePicker()
 	}
+	return m, nil
+}
+
+// leavePicker returns from the model picker to the profile form, keeping the wizard's
+// model choice and selection as they stand.
+func (m model) leavePicker() (tea.Model, tea.Cmd) {
+	m.editField = fieldModel
+	m.view = viewEditForm
+	m.loadEditForm()
 	return m, nil
 }

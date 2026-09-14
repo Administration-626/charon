@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"charon/internal/artifact"
@@ -767,12 +768,12 @@ func TestSaveWithSpecAndGetSpec(t *testing.T) {
 	write(t, cfg, "c")
 
 	s := newStore(t)
-	want := Spec{Endpoint: "https://x/v1", Key: "sk-123", Model: "m1"}
+	want := Spec{Endpoint: "https://x/v1", Key: "sk-123", Model: "m1", Models: []string{"m1", "m2"}}
 	if err := s.SaveWithSpec(tool, "p", want); err != nil {
 		t.Fatal(err)
 	}
 	got, ok := s.GetSpec("fake", "p")
-	if !ok || got != want {
+	if !ok || !reflect.DeepEqual(got, want) {
 		t.Errorf("GetSpec = %+v, ok=%v; want %+v", got, ok, want)
 	}
 	// A plain Save records no spec.

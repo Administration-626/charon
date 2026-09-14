@@ -9,6 +9,31 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// modelMenuNote explains where a list of model ids ends up for the selected tool: its
+// own in-session menu, or — for a tool that can't be given a list — that only the first
+// id takes effect, so nobody types five ids expecting a menu that will never appear.
+func (m model) modelMenuNote() string {
+	if m.tool == nil {
+		return ""
+	}
+	if m.tool.ModelMenu == "" {
+		return m.tool.Title + " can't be given a model list, so only the first id is used." +
+			" Add a profile per model to switch between them."
+	}
+	return "All of them are offered in " + m.tool.Title + "'s own " + m.tool.ModelMenu +
+		", so you can switch model without leaving your session."
+}
+
+// modelActionRow renders one of the tree-indented buttons under the Model Slug field,
+// keeping the focused and unfocused variants aligned to the same column.
+func modelActionRow(label string, focused bool) string {
+	const indent = "                   "
+	if focused {
+		return promptStyle.Render(indent[:len(indent)-2] + "▌ " + label)
+	}
+	return hintStyle.Render(indent + label)
+}
+
 // statusRender styles a status line for the level (glyph-prefixed); "" for an empty message.
 func statusRender(level statusLevel, msg string) string {
 	if msg == "" {
@@ -35,6 +60,9 @@ func (m model) View() string {
 			promptStyle.Render(m.prompt()) +
 			"\n\n  " + m.input.View() +
 			"\n\n" + hintStyle.Render(m.optionsHelp())
+		if m.view == viewAddCustomModel {
+			body += "\n\n" + hintStyle.Render(m.modelMenuNote())
+		}
 		if line := statusRender(m.statusLvl, m.status); line != "" {
 			body += "\n" + line
 		}
@@ -49,7 +77,7 @@ func (m model) View() string {
 		labels := []string{"Profile Name ", "API Base URL ", "API Key/Token", "Model Slug   "}
 		var formLines []string
 
-		for i := 0; i < 4; i++ {
+		for i := 0; i < formInputCount; i++ {
 			if m.formFocus == i {
 				// Focused Row: Bold accent bar, bold label, clear input
 				bar := promptStyle.Render("▌ ")
@@ -63,39 +91,39 @@ func (m model) View() string {
 				inputVal := m.formInputs[i].Value()
 				if inputVal == "" {
 					inputVal = m.formInputs[i].Placeholder
-				} else if i == 2 { // Partial masking for API Key
+				} else if i == focusToken { // Partial masking for API Key
 					inputVal = secret.Mask(inputVal)
 				}
 				inputStr := hintStyle.Render(inputVal)
 				formLines = append(formLines, bar+labelStr+inputStr)
 			}
-			if i == 3 {
-				// Add tree-indented Fetch & Pick button under Model Slug
-				fetchBtn := "                   └── [ Fetch & Pick Online Models ]"
-				if m.formFocus == 4 {
-					fetchBtn = promptStyle.Render("                 ▌ └── [ Fetch & Pick Online Models ]")
-				} else {
-					fetchBtn = hintStyle.Render(fetchBtn)
+			if i == focusModel {
+				// Tree-indented model actions under Model Slug: fetch the endpoint's list,
+				// or type ids by hand for an endpoint that serves no /v1/models.
+				formLines = append(formLines,
+					modelActionRow("├── [ Fetch & Pick Online Models ]", m.formFocus == focusFetch),
+					modelActionRow("└── [ Type Model IDs Manually ]", m.formFocus == focusManual))
+				if note := m.pickerNote(); note != "" {
+					formLines = append(formLines, hintStyle.Render("                       "+note))
 				}
-				formLines = append(formLines, fetchBtn)
 			}
 		}
 
 		saveBtn := "  [ Save Profile ]"
 		cancelBtn := "  [ Cancel ]"
-		if m.formFocus == 5 {
+		if m.formFocus == focusSave {
 			saveBtn = promptStyle.Render("▌ [ Save Profile ]")
 		} else {
 			saveBtn = hintStyle.Render("  [ Save Profile ]")
 		}
-		if m.formFocus == 6 {
+		if m.formFocus == focusCancel {
 			cancelBtn = promptStyle.Render("▌ [ Cancel ]")
 		} else {
 			cancelBtn = hintStyle.Render("  [ Cancel ]")
 		}
 
 		btnLine := "\n  " + saveBtn + "\n  " + cancelBtn
-		hint := "\n\n" + hintStyle.Render("Shortcuts: ↑/↓: move · tab: switch · esc: cancel")
+		hint := "\n\n" + hintStyle.Render("Shortcuts: ↑/↓: move · tab: switch · ctrl+s: save · esc: cancel")
 
 		body := header + strings.Join(formLines, "\n") + "\n" + btnLine + hint
 		if line := statusRender(m.statusLvl, m.status); line != "" {
@@ -109,7 +137,15 @@ func (m model) View() string {
 	}
 	out := m.list.View()
 	if m.view == viewPickModel {
-		tip := `💡 Tip: Type directly to search models (e.g. "claude", "deepseek", "3.5")`
+		tip := `💡 Tip: type to search · enter sets the default model`
+		if m.tool != nil {
+			if m.tool.ModelMenu != "" {
+				tip = `💡 Tip: space selects · ctrl+a selects all for ` + m.tool.ModelMenu +
+					` · enter sets default & returns`
+			} else {
+				tip = `💡 Tip: enter chooses a model · type to search (` + m.tool.Title + ` only supports a single model)`
+			}
+		}
 		if m.modelFilter != "" {
 			tip = fmt.Sprintf(`🔍 Filter: %q (%d matches) · Esc: clear filter`, m.modelFilter, len(m.list.Items())-2)
 		}
@@ -156,7 +192,7 @@ func (m model) prompt() string {
 	case viewAddName:
 		return "Name this profile (e.g. work, openrouter-fast):"
 	case viewAddCustomModel:
-		return "Enter custom model ID (e.g. gpt-4o, claude-3-7-sonnet):"
+		return "Enter model IDs — comma-separated registers them all (first is the default):"
 	case viewDupName:
 		return "Name the duplicate of " + m.dupSource + ":"
 	default:
@@ -171,7 +207,7 @@ func (m model) optionsHelp() string {
 	case viewAddKey:
 		return "Options:\n  • [ Enter ] Continue to Fetch Models\n  • [ Esc   ] ← Back to API Base URL"
 	case viewAddCustomModel:
-		return "Options:\n  • [ Enter ] Use Custom Model ID\n  • [ Esc   ] ← Back to Model List"
+		return "Options:\n  • [ Enter ] Register These Model IDs\n  • [ Esc   ] ← Back"
 	case viewAddName:
 		if len(m.allModels) > 0 {
 			return "Options:\n  • [ Enter ] Save Profile\n  • [ Esc   ] ← Back to Model Selection"

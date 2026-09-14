@@ -23,15 +23,22 @@ func newClaude() *Tool {
 		Name:            "claude",
 		Title:           "Claude Code",
 		Provider:        "anthropic",
+		ModelMenu:       "/model",
 		DefaultEndpoint: "https://api.anthropic.com",
 		Artifacts: []artifact.Artifact{
-			// theme is a display preference, not per-profile auth — preserved live. model and
-			// effortLevel switch with the profile, so each account remembers its own choice.
-			artifact.NewMergedJSONFile("settings.json", settingsPath, 0o600, "env", "customApiKeyResponses", "model", "effortLevel").
+			// theme is a display preference, not per-profile auth — preserved live. model,
+			// effortLevel and modelPicker switch with the profile, so each account remembers
+			// its own choice — and a gateway's model list never leaks into the official
+			// account's /model menu (Merge deletes an owned key the snapshot doesn't have).
+			artifact.NewMergedJSONFile("settings.json", settingsPath, 0o600, "env", "customApiKeyResponses", "model", "effortLevel", "modelPicker").
 				WithDisplay("model", "effortLevel"),
 			artifact.NewKeychain("credentials", claudeKeychainService, os.Getenv("USER")),
 		},
 		ApplyAuth: func(a AuthSpec) error {
+			// Preserve the previously-registered list when this call brings none (rename,
+			// key rotation, CLI --model), so /model doesn't collapse to a single row —
+			// the same fallback opencode.go and pi.go make.
+			existingModels := claudeExistingModels(settingsPath)
 			s, err := loadJSONMap(settingsPath)
 			if err != nil {
 				return err
@@ -59,13 +66,29 @@ func newClaude() *Tool {
 					// adds this one model to the picker regardless of its id shape.
 					env["ANTHROPIC_CUSTOM_MODEL_OPTION"] = a.Model
 				}
+				// A gateway serves models from many vendors under one endpoint, so curate the
+				// whole fetched list into /model via modelPicker — the same "register every
+				// model, not just the chosen one" move opencode.go and pi.go already make.
+				// Without it /model holds one row (ANTHROPIC_CUSTOM_MODEL_OPTION above) and
+				// switching model means going back through charon.
+				ids := a.AllModels
+				if len(ids) == 0 {
+					ids = existingModels
+				}
+				if picker := claudeModelPicker(ids, a.Model); picker != nil {
+					s["modelPicker"] = picker
+				} else {
+					delete(s, "modelPicker")
+				}
 			} else {
 				// Anthropic's own API uses x-api-key. Leave ANTHROPIC_BASE_URL unset: pointing it
 				// at the default endpoint makes Claude Code treat it as a gateway and break connectors.
 				env["ANTHROPIC_API_KEY"] = a.Key
 				// Pre-approve the key (and un-disable it) so a prior "No" can't leave it ignored.
 				approveClaudeAPIKey(s, a.Key)
-				// Stock models are in the catalog, so the top-level selector is preferred.
+				// Stock models are in the catalog, so the top-level selector is preferred. Any
+				// gateway's modelPicker must go first, or the official account inherits its list.
+				delete(s, "modelPicker")
 				if a.Model != "" {
 					s["model"] = a.Model
 				}
@@ -88,6 +111,7 @@ func newClaude() *Tool {
 			delete(env, "ANTHROPIC_MODEL")
 			delete(env, "ANTHROPIC_CUSTOM_MODEL_OPTION")
 			delete(s, "model")
+			delete(s, "modelPicker")
 			return writeJSONMap(settingsPath, s, 0o600)
 		},
 		OAuthFingerprint: func() string {
@@ -171,6 +195,68 @@ func normalizeClaudeBaseURL(ep string) string {
 	ep = strings.TrimRight(ep, "/")
 	ep = strings.TrimSuffix(ep, "/v1")
 	return strings.TrimRight(ep, "/")
+}
+
+// claudeExistingModels reads the model ids currently registered in settings.json's
+// modelPicker, so a write that brings no list of its own can keep them. nil when the
+// file is absent, unreadable, or has no picker.
+func claudeExistingModels(settingsPath string) []string {
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return nil
+	}
+	var s struct {
+		ModelPicker struct {
+			Options []struct {
+				Model string `json:"model"`
+			} `json:"options"`
+		} `json:"modelPicker"`
+	}
+	if json.Unmarshal(data, &s) != nil {
+		return nil
+	}
+	ids := make([]string, 0, len(s.ModelPicker.Options))
+	for _, o := range s.ModelPicker.Options {
+		if o.Model != "" {
+			ids = append(ids, o.Model)
+		}
+	}
+	return ids
+}
+
+// claudeModelPicker builds the settings.json "modelPicker" value that curates Claude
+// Code's /model menu: one row per gateway model, labeled with its own id, plus
+// replaceBuiltInOptions so Claude Code's built-in lineup is hidden — a gateway rarely
+// serves those ids, so offering them only yields failed requests. Returns nil when
+// there is nothing to register, so the caller deletes any stale modelPicker rather
+// than writing an empty one (which would blank the menu).
+func claudeModelPicker(allModels []string, model string) map[string]any {
+	ids := claudeModelIDs(allModels, model)
+	if len(ids) == 0 {
+		return nil
+	}
+	options := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		options = append(options, map[string]any{"model": id, "label": id})
+	}
+	return map[string]any{"options": options, "replaceBuiltInOptions": true}
+}
+
+// claudeModelIDs returns the model ids to register, in first-seen order: every fetched
+// id, then the configured model as a fallback for callers that brought no list (the
+// CLI's --model flag). Blank and duplicate ids are dropped.
+func claudeModelIDs(allModels []string, model string) []string {
+	seen := make(map[string]bool, len(allModels)+1)
+	var ids []string
+	for _, id := range append(append([]string{}, allModels...), model) {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 // claudeKeyIDLen is how many trailing characters of a key Claude Code uses as its ID.

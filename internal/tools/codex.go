@@ -32,9 +32,11 @@ func newCodex() *Tool {
 	authPath := filepath.Join(dir, "auth.json")
 
 	return &Tool{
-		Name:            "codex",
-		Title:           "Codex",
-		Provider:        "openai",
+		Name:     "codex",
+		Title:    "Codex",
+		Provider: "openai",
+		// No ModelMenu: model_providers.<id> has no field for a model list, so Codex's
+		// /model only ever lists its built-in presets. A Codex profile carries one model.
 		DefaultEndpoint: "https://api.openai.com/v1",
 		Artifacts: []artifact.Artifact{
 			// Other config.toml settings (sandbox mode, approval policy, ...) are CLI

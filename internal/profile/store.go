@@ -33,6 +33,59 @@ type Spec struct {
 	Endpoint string `json:"endpoint,omitempty"`
 	Key      string `json:"key,omitempty"`
 	Model    string `json:"model,omitempty"`
+	// Models is the curated list registered in the tool's own model picker (Claude's
+	// modelPicker, OpenCode's provider models map, pi's extension), so switching model
+	// mid-session never needs a round trip through charon. Model is the default pick and
+	// is always offered even when absent here.
+	Models []string `json:"models,omitempty"`
+}
+
+// ModelIDs returns the model ids this profile registers with its tool, in first-seen
+// order: Models as curated, with Model appended when it isn't already in the list.
+// Blank and duplicate ids are dropped.
+func (sp Spec) ModelIDs() []string {
+	seen := make(map[string]bool, len(sp.Models)+1)
+	ids := make([]string, 0, len(sp.Models)+1)
+	for _, id := range append(append([]string{}, sp.Models...), sp.Model) {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// authSpec converts a Spec into what a tool's ApplyAuth needs to write. AllModels is
+// left nil when the profile curates no list, so each tool keeps whatever it already
+// has registered rather than collapsing its picker down to the single default model.
+func (sp Spec) authSpec() tools.AuthSpec {
+	a := tools.AuthSpec{Endpoint: sp.Endpoint, Key: sp.Key, Model: sp.Model}
+	if len(sp.Models) > 0 {
+		a.AllModels = sp.ModelIDs()
+	}
+	return a
+}
+
+// normalized cleans a Spec up before it is applied and stored: Models loses blank and
+// duplicate ids, and a curated list with no explicit default promotes its first entry
+// to Model — a tool needs one model selected to route requests at all.
+func (sp Spec) normalized() Spec {
+	var models []string
+	seen := map[string]bool{}
+	for _, id := range sp.Models {
+		if id = strings.TrimSpace(id); id != "" && !seen[id] {
+			seen[id] = true
+			models = append(models, id)
+		}
+	}
+	sp.Models = models
+	sp.Model = strings.TrimSpace(sp.Model)
+	if sp.Model == "" && len(models) > 0 {
+		sp.Model = models[0]
+	}
+	return sp
 }
 
 // Manifest records a stored profile's metadata and which artifacts it contained

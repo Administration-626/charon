@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -305,5 +306,116 @@ func TestRunModelsWithInvalidEndpoint(t *testing.T) {
 	sandbox(t)
 	if err := run([]string{"models", "codex", "--key", "sk-test", "--endpoint", "not a url"}); err == nil {
 		t.Error("models with invalid endpoint succeeded, want error")
+	}
+}
+
+// seedClaude fakes an installed Claude Code (settings.json makes it "detected").
+func seedClaude(t *testing.T, home string) {
+	t.Helper()
+	dir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(dir, "settings.json"), `{"theme":"dark"}`)
+}
+
+// claudePickerIDs reads the model ids registered in the sandboxed settings.json.
+func claudePickerIDs(t *testing.T, home string) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s struct {
+		ModelPicker struct {
+			Options []struct {
+				Model string `json:"model"`
+			} `json:"options"`
+		} `json:"modelPicker"`
+	}
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, o := range s.ModelPicker.Options {
+		ids = append(ids, o.Model)
+	}
+	return ids
+}
+
+// TestRunAddWithModelsRegistersPickerList covers `--models a,b,c`: the ids reach the
+// tool's own model menu (so switching model mid-session needs no charon round trip)
+// and are stored on the profile, with the first one taken as the default model.
+func TestRunAddWithModelsRegistersPickerList(t *testing.T) {
+	home := sandbox(t)
+	seedClaude(t, home)
+
+	args := []string{"add", "claude", "--name", "gw", "--key", "sk-gw-123456789",
+		"--endpoint", "https://gateway.example/v1", "--models", "kimi-k2, glm-4.6 ,deepseek-v3,"}
+	if err := run(args); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	if got := strings.Join(claudePickerIDs(t, home), ","); got != "kimi-k2,glm-4.6,deepseek-v3" {
+		t.Errorf("modelPicker ids = %q, want the whole --models list", got)
+	}
+	store, err := profile.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp, ok := store.GetSpec("claude", "gw")
+	if !ok {
+		t.Fatal("profile has no spec")
+	}
+	if strings.Join(sp.Models, ",") != "kimi-k2,glm-4.6,deepseek-v3" {
+		t.Errorf("spec.Models = %v, want the --models list persisted", sp.Models)
+	}
+	if sp.Model != "kimi-k2" {
+		t.Errorf("spec.Model = %q, want the first --models id promoted to default", sp.Model)
+	}
+}
+
+// TestRunEditKeepsPickerListWithoutModelsFlag is the regression guard: an edit that
+// only rotates the key must leave the tool's model menu intact.
+func TestRunEditKeepsPickerListWithoutModelsFlag(t *testing.T) {
+	home := sandbox(t)
+	seedClaude(t, home)
+
+	if err := run([]string{"add", "claude", "--name", "gw", "--key", "sk-gw-123456789",
+		"--endpoint", "https://gateway.example/v1", "--models", "kimi-k2,glm-4.6"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := run([]string{"edit", "claude", "gw", "--key", "sk-gw-987654321"}); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+
+	if got := strings.Join(claudePickerIDs(t, home), ","); got != "kimi-k2,glm-4.6" {
+		t.Errorf("modelPicker ids = %q, want the list to survive a key rotation", got)
+	}
+	store, err := profile.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sp, _ := store.GetSpec("claude", "gw"); strings.Join(sp.Models, ",") != "kimi-k2,glm-4.6" {
+		t.Errorf("spec.Models = %v, want the list preserved", sp.Models)
+	}
+}
+
+// TestRunEditModelsFlagReplacesPickerList: passing --models explicitly curates the
+// menu down, which is how you drop models you no longer want offered.
+func TestRunEditModelsFlagReplacesPickerList(t *testing.T) {
+	home := sandbox(t)
+	seedClaude(t, home)
+
+	if err := run([]string{"add", "claude", "--name", "gw", "--key", "sk-gw-123456789",
+		"--endpoint", "https://gateway.example/v1", "--models", "kimi-k2,glm-4.6,deepseek-v3"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := run([]string{"edit", "claude", "gw", "--models", "glm-4.6", "--model", "glm-4.6"}); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+
+	if got := strings.Join(claudePickerIDs(t, home), ","); got != "glm-4.6" {
+		t.Errorf("modelPicker ids = %q, want the curated-down list", got)
 	}
 }

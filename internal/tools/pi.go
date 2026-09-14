@@ -135,6 +135,7 @@ func newPi() *Tool {
 		Name:            "pi",
 		Title:           "Pi",
 		Provider:        "openai",
+		ModelMenu:       "/model",
 		DefaultEndpoint: "https://api.openai.com/v1",
 		Artifacts: []artifact.Artifact{
 			// Other settings.json fields (theme, extensions list, shell, ...) are CLI

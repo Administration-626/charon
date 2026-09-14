@@ -33,6 +33,10 @@ switching away and back is always clean and reversible.
   endpoints/keys instantly.
 - **Model discovery.** Add a profile from just an endpoint + key; Charon fetches
   the model list and lets you pick one — or type a custom model slug directly.
+- **Switch models inside the tool.** Check off the models you actually use and
+  Charon registers them in the tool's own picker (Claude Code's `/model`, OpenCode's
+  `/models`, Pi's `/model`), so changing model mid-session never means going back
+  through Charon.
 - **Single-page form.** Add or edit a profile on one screen (Name, URL, Token,
   Model) with direct typing and `[ Save Profile ]` / `[ Cancel ]` buttons — no
   multi-step wizard, no view-jumping.
@@ -105,8 +109,8 @@ charon ls <tool>             # list saved profiles (--json)
 charon save <tool> [name]    # snapshot current live config (omit name to use the logged-in account)
 charon refresh <tool>        # capture in-session changes (model, effort) into the active profile
 charon models <tool>         # list models offered by an API (--key [--endpoint])
-charon add <tool>            # add + activate a profile (--name --key [--endpoint --model])
-charon edit <tool> <p>       # change a profile's endpoint/key/model (--name to rename)
+charon add <tool>            # add + activate a profile (--name --key [--endpoint --model --models])
+charon edit <tool> <p>       # change a profile's endpoint/key/model/models (--name to rename)
 charon rename <tool> <o> <n> # rename a saved profile
 charon cp <tool> <src> <dst> # duplicate a saved profile
 charon switch <tool> <p>     # apply a saved profile (backs up current first)
@@ -150,16 +154,44 @@ A single-page form collects everything on one screen:
 - **API base URL** — leave blank to accept the provider default; a real value is
   never prefilled.
 - **API key** — masked input.
-- **Model** — a **Fetch** button hits `GET /v1/models` (using `Authorization:
-  Bearer` for OpenAI-style APIs and `x-api-key` for Anthropic) and opens a
-  model picker. You can also type a custom model slug directly, or leave it
-  blank for the tool's default.
+- **Model** — two action buttons underneath give you full control:
+  - **`[ Fetch & Pick Online Models ]`** hits `GET /v1/models` (using `Authorization:
+    Bearer` for OpenAI-style APIs and `x-api-key` for Anthropic) and opens the
+    model picker.
+  - **`[ Type Model IDs Manually ]`** lets you type model IDs directly (comma-separated,
+    e.g. `kimi-k2, deepseek-v3`) for endpoints or gateways that do not expose
+    `/v1/models`. If an online fetch fails, Charon falls back to this manual screen
+    automatically with existing IDs prefilled.
+  You can also type a model slug directly into the field, or leave it blank for the
+  tool's default.
 
 In the model picker, just **start typing to fuzzy-filter** the list in real time
-(Backspace edits the query, `Esc` clears it). Tab to **`[ Save Profile ]`** to
-write the endpoint/key/model into the tool's live config and switch to it, or
-**`[ Cancel ]`** to discard. Name, URL, and key are required; a red status bar
-flags anything missing on submit.
+(Backspace edits the query, `Esc` clears it):
+- **`Space`** checks/unchecks a model (marked `•`) into the curated list registered
+  with the tool.
+- **`Ctrl+A`** selects or deselects all models (or all matching search results).
+- Once models are checked, a **`✔ Done — register these N model(s)`** row appears at the
+  top (showing the active default model). Press **`Enter`** on it to return to the
+  form without re-picking the default.
+- Press **`Enter`** on any model row to set it as the default (marked `✓`),
+  automatically adding it to the registered list if not already checked, and return
+  to the form.
+- Press **`Enter`** on **`(skip — no model override)`** to clear all selections and
+  revert to no override.
+- Check nothing and the whole fetched list is registered.
+Tab to **`[ Save Profile ]`** to write the endpoint/key/model into the tool's live
+config and switch to it, or **`[ Cancel ]`** to discard. Name, URL, and key are
+required; a red status bar flags anything missing on submit.
+
+### Switching model inside the tool
+
+The models a profile registers land in the tool's own menu, so you can change model
+without leaving your session: Claude Code's `/model` (via `modelPicker`), OpenCode's
+`/models` (via the `charon` provider's model map), and Pi's `/model` (via the
+generated extension). The list travels with the profile — switch profiles and the
+menu switches too, so a gateway's models never leak into your official account's
+picker. Codex is the exception: its config has no place to register extra models, so
+its model still comes from the profile (`charon edit codex <p> --model ...`).
 
 ### Backing up a logged-in account
 
@@ -190,8 +222,12 @@ editable profile you can rename, edit, or delete.
 
 Press **`e`** on a profile to open its edit form, showing the current **Name**,
 **URL**, **Token** (masked), and **Model** on a single screen. Type directly into
-any field; the **Model** field's **Fetch** button re-fetches the endpoint's model
-list so you can pick a new one (or type a custom slug). Tab to **`[ Save Profile ]`**
+any field; the **Model** field's **`[ Fetch & Pick Online Models ]`** and
+**`[ Type Model IDs Manually ]`** buttons let you update or re-fetch the registered
+models. The models already registered with the tool (and the tool's menu, e.g.
+`/model` or `/models`) are noted under the action buttons and are kept as-is unless
+you curate a new list, so a rename or key rotation never empties the tool's own
+picker. Tab to **`[ Save Profile ]`**
 to apply the changes and switch to the profile — renaming is handled
 automatically — or **`[ Cancel ]`** to discard. The auto-captured **`default`**
 profile and login backups (which have no endpoint/key) are protected and cannot
@@ -203,6 +239,18 @@ be edited.
 charon models codex --endpoint https://openrouter.ai/api/v1 --key sk-...
 charon add    codex --name openrouter --endpoint https://openrouter.ai/api/v1 \
                     --key sk-... --model openai/gpt-5.5
+```
+
+`--models` registers a list in the tool's own picker, so you can switch between them
+from inside the tool. The first id becomes the default when `--model` is omitted, and
+the list is stored with the profile, so a later `edit` that doesn't pass `--models`
+leaves it intact:
+
+```sh
+charon add  claude --name gateway --endpoint https://gateway.example/v1 --key sk-... \
+                   --models kimi-k2,glm-4.6,deepseek-v3
+charon edit claude gateway --key sk-rotated   # picker list survives untouched
+charon edit claude gateway --models glm-4.6   # curate the menu down
 ```
 
 Each tool gets a dedicated `charon` provider entry written into its own config

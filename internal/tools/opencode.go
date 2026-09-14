@@ -34,6 +34,7 @@ func newOpenCode() *Tool {
 		Name:            "opencode",
 		Title:           "OpenCode",
 		Provider:        "openai",
+		ModelMenu:       "/models",
 		DefaultEndpoint: "https://api.openai.com/v1",
 		Artifacts: []artifact.Artifact{
 			// The config holds provider options.apiKey, so keep it private. Other top-level

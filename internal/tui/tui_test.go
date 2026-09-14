@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -10,6 +11,9 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// errFetchFailed stands in for a models-endpoint failure (404, auth, no such route).
+var errFetchFailed = errors.New("API returned 404 Not Found (check endpoint and key)")
 
 func TestStatusRender(t *testing.T) {
 	tests := []struct {
@@ -322,5 +326,599 @@ func TestEscAndQKeyNavigation(t *testing.T) {
 		if updatedModel.view != viewTools {
 			t.Errorf("Update with %q in viewProfiles view = %v, want viewTools", tk.name, updatedModel.view)
 		}
+	}
+}
+
+func TestEnterKeyInToolsAndProfiles(t *testing.T) {
+	st, err := profile.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(st, "v0.0.0")
+	m.width = 100
+	m.height = 30
+	m.resize()
+
+	// 1. Enter on a detected tool in viewTools opens viewProfiles.
+	m.view = viewTools
+	detectedIdx := -1
+	for i, it := range m.list.Items() {
+		if row, ok := it.(item); ok {
+			tl := m.findTool(row.value)
+			if tl != nil && tl.Detected != nil && tl.Detected() {
+				detectedIdx = i
+				break
+			}
+		}
+	}
+	if detectedIdx >= 0 {
+		m.list.Select(detectedIdx)
+		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated := m2.(model)
+		if updated.view != viewProfiles {
+			t.Errorf("Enter on tool in viewTools = %v, want viewProfiles", updated.view)
+		}
+
+		// 2. Enter on '＋ Add new profile…' in viewProfiles opens viewEditForm.
+		addIdx := -1
+		for i, it := range updated.list.Items() {
+			if row, ok := it.(item); ok && row.value == addSentinel {
+				addIdx = i
+				break
+			}
+		}
+		if addIdx >= 0 {
+			updated.list.Select(addIdx)
+			m3, _ := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			updatedForm := m3.(model)
+			if updatedForm.view != viewEditForm {
+				t.Errorf("Enter on Add in viewProfiles = %v, want viewEditForm", updatedForm.view)
+			}
+		}
+	}
+}
+
+func TestAKeyInProfilesOpensAddForm(t *testing.T) {
+	st, err := profile.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(st, "v0.0.0")
+	m.tool = m.allTools[0]
+	m.view = viewProfiles
+
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	updated := m2.(model)
+	if updated.view != viewEditForm {
+		t.Errorf("pressing 'a' in viewProfiles view = %v, want viewEditForm", updated.view)
+	}
+	if updated.wiz.edit {
+		t.Error("wiz.edit should be false for a new profile")
+	}
+}
+
+// pickerModel builds a picker-view model over a fetched list, sandboxed so no real
+// config is touched. The tool is one that can be given a model list (ModelMenu set),
+// since that's what the curation keys are for.
+func pickerModel(t *testing.T, fetched []string) *model {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	st, err := profile.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(st, "v0.0.0")
+	m.tool = toolWithModelMenu(t, &m)
+	m.view = viewPickModel
+	m.showModels(fetched)
+	return &m
+}
+
+// toolWithModelMenu returns the first registered tool whose config can hold a model list.
+func toolWithModelMenu(t *testing.T, m *model) *tools.Tool {
+	t.Helper()
+	for _, tool := range m.allTools {
+		if tool.ModelMenu != "" {
+			return tool
+		}
+	}
+	t.Fatal("no registered tool exposes a model menu")
+	return nil
+}
+
+func TestToggleModelBuildsCuratedListInOrder(t *testing.T) {
+	m := pickerModel(t, []string{"kimi-k2", "glm-4.6", "deepseek-v3"})
+
+	m.toggleModel("glm-4.6")
+	m.toggleModel("kimi-k2")
+	if got := strings.Join(m.wiz.models, ","); got != "glm-4.6,kimi-k2" {
+		t.Errorf("models = %q, want first-seen order glm-4.6,kimi-k2", got)
+	}
+	if !m.modelSelected("kimi-k2") || m.modelSelected("deepseek-v3") {
+		t.Error("modelSelected disagrees with the toggled list")
+	}
+
+	// Toggling again unchecks, leaving the rest of the list untouched.
+	m.toggleModel("glm-4.6")
+	if got := strings.Join(m.wiz.models, ","); got != "kimi-k2" {
+		t.Errorf("models after untoggle = %q, want kimi-k2", got)
+	}
+}
+
+// TestPickerModelsFallsBackToFetchedList locks in the pre-existing behavior: picking
+// one model without checking any rows still registers everything the endpoint offers,
+// so /model inside the tool isn't reduced to a single row.
+func TestPickerModelsFallsBackToFetchedList(t *testing.T) {
+	fetched := []string{"kimi-k2", "glm-4.6"}
+	m := pickerModel(t, fetched)
+
+	if got := strings.Join(m.pickerModels(), ","); got != strings.Join(fetched, ",") {
+		t.Errorf("pickerModels() = %q, want the whole fetched list %q", got, fetched)
+	}
+	m.toggleModel("glm-4.6")
+	if got := strings.Join(m.pickerModels(), ","); got != "glm-4.6" {
+		t.Errorf("pickerModels() = %q, want just the curated selection", got)
+	}
+}
+
+// TestShowModelsDropsCheckedIDsNoLongerOffered guards a re-fetch against a different
+// endpoint: a checked id the new catalog doesn't list must not stay in the curated set,
+// or the tool would be handed a model its gateway can't serve.
+func TestShowModelsDropsCheckedIDsNoLongerOffered(t *testing.T) {
+	m := pickerModel(t, []string{"kimi-k2", "glm-4.6"})
+	m.toggleModel("kimi-k2")
+	m.toggleModel("glm-4.6")
+
+	m.showModels([]string{"glm-4.6", "qwen3-max"})
+	if got := strings.Join(m.wiz.models, ","); got != "glm-4.6" {
+		t.Errorf("models after re-fetch = %q, want only the still-offered glm-4.6", got)
+	}
+}
+
+func TestSpaceTogglesHighlightedModelWithoutMovingCursor(t *testing.T) {
+	m := pickerModel(t, []string{"kimi-k2", "glm-4.6", "deepseek-v3"})
+
+	// Land on a real model row rather than an action row or the trailing skip row.
+	target := ""
+	for i, it := range m.list.Items() {
+		if row, ok := it.(item); ok && !isSentinel(row.value) {
+			m.list.Select(i)
+			target = row.value
+			break
+		}
+	}
+	if target == "" {
+		t.Fatal("no model row in the picker")
+	}
+	before := m.list.Index()
+
+	next, _ := m.updatePickModel(tea.KeyMsg{Type: tea.KeySpace})
+	got, ok := next.(model)
+	if !ok {
+		t.Fatalf("updatePickModel returned %T, want model", next)
+	}
+	if !got.modelSelected(target) {
+		t.Errorf("space did not check %q into the curated list (models=%v)", target, got.wiz.models)
+	}
+	if got.list.Index() != before {
+		t.Errorf("cursor moved to %d, want it to stay on %d", got.list.Index(), before)
+	}
+	// Space must not leak into the search query, or the list would filter to nothing.
+	if got.modelFilter != "" {
+		t.Errorf("modelFilter = %q, want space to toggle rather than search", got.modelFilter)
+	}
+}
+
+func TestSetModelFieldParsesCommaSeparatedIDs(t *testing.T) {
+	var w wizard
+
+	w.setModelField("gpt-4o")
+	if w.model != "gpt-4o" || w.models != nil {
+		t.Errorf("single id: model=%q models=%v, want gpt-4o with no curated list", w.model, w.models)
+	}
+
+	w.setModelField(" kimi-k2 , glm-4.6 ,, ")
+	if w.model != "kimi-k2" || strings.Join(w.models, ",") != "kimi-k2,glm-4.6" {
+		t.Errorf("list: model=%q models=%v, want kimi-k2 default over [kimi-k2 glm-4.6]", w.model, w.models)
+	}
+
+	// Narrowing to one id changes the default without discarding the curated list —
+	// that's what the picker's checkboxes are for.
+	w.setModelField("glm-4.6")
+	if w.model != "glm-4.6" || strings.Join(w.models, ",") != "kimi-k2,glm-4.6" {
+		t.Errorf("re-default: model=%q models=%v, want glm-4.6 over the same list", w.model, w.models)
+	}
+
+	w.setModelField("  ")
+	if w.model != "" {
+		t.Errorf("blank: model=%q, want empty", w.model)
+	}
+}
+
+func TestModelRowTitleMarksDefaultAndCheckedRows(t *testing.T) {
+	cases := []struct {
+		name               string
+		isDefault, checked bool
+		want               string
+	}{
+		{"default model", true, false, "✓ m"},
+		{"checked into picker", false, true, "• m"},
+		{"default wins over checked", true, true, "✓ m"},
+		{"plain row stays aligned", false, false, "  m"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := modelRowTitle("m", tc.isDefault, tc.checked); got != tc.want {
+				t.Errorf("modelRowTitle = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestFailedFetchFallsBackToManualEntry is the whole point of the manual path: an
+// endpoint that serves chat but no /v1/models must still let you register model ids,
+// instead of dropping the model override and moving on.
+func TestFailedFetchFallsBackToManualEntry(t *testing.T) {
+	m := pickerModel(t, nil)
+	m.wiz = wizard{endpoint: "https://relay.example/v1", key: "sk-x", model: "kimi-k2",
+		models: []string{"kimi-k2", "glm-4.6"}}
+
+	next, _ := m.applyFetched(fetchedMsg{err: errFetchFailed})
+	got, ok := next.(model)
+	if !ok {
+		t.Fatalf("applyFetched returned %T, want model", next)
+	}
+	if got.view != viewAddCustomModel {
+		t.Errorf("view = %v, want the manual model-id entry screen", got.view)
+	}
+	if got.statusLvl != statusErr || !strings.Contains(got.status, "type the model ids") {
+		t.Errorf("status = %q (level %v), want the error to point at manual entry", got.status, got.statusLvl)
+	}
+	// The already-registered ids are prefilled so an edit needn't retype them.
+	if v := got.input.Value(); v != "kimi-k2, glm-4.6" {
+		t.Errorf("input = %q, want the profile's current ids prefilled", v)
+	}
+}
+
+// TestManualEntryRegistersTypedIDs covers the typed-list path end to end: every id is
+// registered and the first becomes the default model.
+func TestManualEntryRegistersTypedIDs(t *testing.T) {
+	m := pickerModel(t, nil)
+	m.wiz = wizard{endpoint: "https://relay.example/v1", key: "sk-x", name: "relay", edit: true}
+	m.view = viewAddCustomModel
+	m.input.SetValue("glm-4.6, kimi-k2 ,, deepseek-v3")
+
+	next, _ := m.updateInput(tea.KeyMsg{Type: tea.KeyEnter})
+	got, ok := next.(model)
+	if !ok {
+		t.Fatalf("updateInput returned %T, want model", next)
+	}
+	if got.wiz.model != "glm-4.6" {
+		t.Errorf("default model = %q, want the first typed id", got.wiz.model)
+	}
+	if strings.Join(got.wiz.models, ",") != "glm-4.6,kimi-k2,deepseek-v3" {
+		t.Errorf("models = %v, want every typed id registered", got.wiz.models)
+	}
+}
+
+// TestSpaceRejectedForToolWithoutModelMenu guards the honest-UI rule: Codex's config
+// has nowhere to put a model list, so checking rows must say so rather than silently
+// collecting ids that would be dropped on save.
+func TestSpaceRejectedForToolWithoutModelMenu(t *testing.T) {
+	m := pickerModel(t, []string{"gpt-5.5", "gpt-5.4"})
+	for _, tool := range m.allTools {
+		if tool.ModelMenu == "" {
+			m.tool = tool
+			break
+		}
+	}
+	if m.tool.ModelMenu != "" {
+		t.Skip("every registered tool exposes a model menu")
+	}
+	m.renderModels()
+	for i, it := range m.list.Items() {
+		if row, ok := it.(item); ok && !isSentinel(row.value) {
+			m.list.Select(i)
+			break
+		}
+	}
+
+	next, _ := m.updatePickModel(tea.KeyMsg{Type: tea.KeySpace})
+	got, ok := next.(model)
+	if !ok {
+		t.Fatalf("updatePickModel returned %T, want model", next)
+	}
+	if len(got.wiz.models) != 0 {
+		t.Errorf("models = %v, want no curation for a tool that can't register a list", got.wiz.models)
+	}
+	if !strings.Contains(got.status, "can't be given a model list") {
+		t.Errorf("status = %q, want an explanation instead of silent collection", got.status)
+	}
+}
+
+func TestCodexPickerDoesNotShowDoneRowOrBullets(t *testing.T) {
+	m := pickerModel(t, []string{"gpt-5.5", "gpt-5.4"})
+	m.tool = &tools.Tool{Title: "Codex", ModelMenu: ""}
+	m.wiz.models = []string{"gpt-5.5", "gpt-5.4"}
+	m.wiz.model = "gpt-5.5"
+	m.renderModels()
+
+	for _, it := range m.list.Items() {
+		if row, ok := it.(item); ok {
+			if row.value == doneModels {
+				t.Error("Codex picker must not show Done row")
+			}
+			if strings.HasPrefix(row.title, "• ") {
+				t.Errorf("Codex picker must not show bullet mark on %q", row.title)
+			}
+		}
+	}
+	if strings.Contains(m.list.Title, "in picker") {
+		t.Errorf("Codex picker title %q must not show 'in picker'", m.list.Title)
+	}
+}
+
+func TestModelMenuNote(t *testing.T) {
+	m := pickerModel(t, nil)
+	if note := m.modelMenuNote(); !strings.Contains(note, m.tool.ModelMenu) {
+		t.Errorf("note = %q, want it to name the tool's own menu %q", note, m.tool.ModelMenu)
+	}
+	m.tool = &tools.Tool{Title: "Codex"}
+	if note := m.modelMenuNote(); !strings.Contains(note, "only the first id is used") {
+		t.Errorf("note = %q, want it to warn that the list is ignored", note)
+	}
+}
+
+func TestPickerNote(t *testing.T) {
+	m := pickerModel(t, nil)
+	if note := m.pickerNote(); note != "" {
+		t.Errorf("pickerNote() with no models = %q, want empty", note)
+	}
+
+	m.wiz.models = []string{"kimi-k2", "glm-4.6"}
+	m.tool = &tools.Tool{Title: "Claude", ModelMenu: "/model"}
+	if got := m.pickerNote(); got != "2 model(s) offered in /model" {
+		t.Errorf("pickerNote() = %q, want %q", got, "2 model(s) offered in /model")
+	}
+
+	m.tool = &tools.Tool{Title: "Codex", ModelMenu: ""}
+	if got := m.pickerNote(); got != "2 model(s) offered in the tool's own picker" {
+		t.Errorf("pickerNote() for tool without menu = %q, want %q", got, "2 model(s) offered in the tool's own picker")
+	}
+}
+
+func TestPickerDoneRow(t *testing.T) {
+	m := pickerModel(t, []string{"kimi-k2", "glm-4.6", "deepseek-v3"})
+
+	// Initially no models are checked, so no Done row should exist.
+	for _, it := range m.list.Items() {
+		if row, ok := it.(item); ok && row.value == doneModels {
+			t.Fatal("found Done row before any model was checked")
+		}
+	}
+
+	// Checking models should surface the Done row at the top.
+	m.toggleModel("glm-4.6")
+	m.toggleModel("kimi-k2")
+	m.renderModels()
+
+	items := m.list.Items()
+	if len(items) == 0 {
+		t.Fatal("picker items empty")
+	}
+	top, ok := items[0].(item)
+	if !ok || top.value != doneModels {
+		t.Fatalf("first item = %+v, want Done row", items[0])
+	}
+	if !strings.Contains(top.title, "register these 2 model(s)") {
+		t.Errorf("Done row title = %q, want it to count 2 models", top.title)
+	}
+	// Without an explicit default, the first checked model is labeled as default.
+	if !strings.Contains(top.desc, "Default: glm-4.6") {
+		t.Errorf("Done row desc = %q, want it to name first checked model glm-4.6", top.desc)
+	}
+
+	// With an explicit default, that default is described.
+	m.wiz.model = "kimi-k2"
+	m.renderModels()
+	top = m.list.Items()[0].(item)
+	if !strings.Contains(top.desc, "Default: kimi-k2") {
+		t.Errorf("Done row desc with explicit default = %q, want Default: kimi-k2", top.desc)
+	}
+
+	// Pressing Enter on the Done row returns to edit form without modifying choices.
+	m.list.Select(0)
+	next, _ := m.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
+	got, ok := next.(model)
+	if !ok {
+		t.Fatalf("updatePickModel returned %T, want model", next)
+	}
+	if got.view != viewEditForm {
+		t.Errorf("view after Enter on Done = %v, want viewEditForm", got.view)
+	}
+	if got.wiz.model != "kimi-k2" {
+		t.Errorf("model = %q, want unchanged kimi-k2", got.wiz.model)
+	}
+	if strings.Join(got.wiz.models, ",") != "glm-4.6,kimi-k2" {
+		t.Errorf("models = %v, want glm-4.6,kimi-k2 preserved", got.wiz.models)
+	}
+}
+
+func TestPickerLandingRules(t *testing.T) {
+	m := pickerModel(t, []string{"kimi-k2", "glm-4.6", "deepseek-v3"})
+
+	// Rule 1: landingValue defaults to skip when nothing is chosen.
+	m.wiz.model = ""
+	m.wiz.models = nil
+	m.renderModels()
+	if got := m.landingValue(); got != skipModel {
+		t.Errorf("landingValue() = %q, want %q", got, skipModel)
+	}
+	if sel, ok := m.list.SelectedItem().(item); !ok || sel.value != skipModel {
+		t.Errorf("selected item = %+v, want skip row", m.list.SelectedItem())
+	}
+
+	// Rule 2: when models are checked but no explicit default is set, land on Done row (not skip).
+	m.toggleModel("glm-4.6")
+	m.renderModels()
+	if got := m.landingValue(); got != doneModels {
+		t.Errorf("landingValue() = %q, want %q", got, doneModels)
+	}
+	if sel, ok := m.list.SelectedItem().(item); !ok || sel.value != doneModels {
+		t.Errorf("selected item = %+v, want Done row", m.list.SelectedItem())
+	}
+
+	// Rule 3: when a default model is chosen, land on that model row.
+	m.wiz.model = "deepseek-v3"
+	m.renderModels()
+	if got := m.landingValue(); got != "deepseek-v3" {
+		t.Errorf("landingValue() = %q, want %q", got, "deepseek-v3")
+	}
+	if sel, ok := m.list.SelectedItem().(item); !ok || sel.value != "deepseek-v3" {
+		t.Errorf("selected item = %+v, want deepseek-v3 row", m.list.SelectedItem())
+	}
+
+	// Rule 4: when filtering, selection stays on the first row (index 0).
+	m.modelFilter = "kimi"
+	m.renderModels()
+	if idx := m.list.Index(); idx != 0 {
+		t.Errorf("list.Index() during filter = %d, want 0", idx)
+	}
+}
+
+func TestPickerSkipClearsSelection(t *testing.T) {
+	m := pickerModel(t, []string{"kimi-k2", "glm-4.6"})
+	m.wiz.models = []string{"kimi-k2", "glm-4.6"}
+	m.wiz.model = "kimi-k2"
+	m.renderModels()
+
+	skipIdx := -1
+	for i, it := range m.list.Items() {
+		if row, ok := it.(item); ok && row.value == skipModel {
+			skipIdx = i
+			break
+		}
+	}
+	if skipIdx < 0 {
+		t.Fatal("no skip row in picker")
+	}
+	m.list.Select(skipIdx)
+
+	next, _ := m.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
+	got, ok := next.(model)
+	if !ok {
+		t.Fatalf("updatePickModel returned %T, want model", next)
+	}
+	if got.view != viewEditForm {
+		t.Errorf("view = %v, want viewEditForm", got.view)
+	}
+	if got.wiz.model != "" {
+		t.Errorf("model = %q, want empty after skip", got.wiz.model)
+	}
+	if len(got.wiz.models) != 0 {
+		t.Errorf("models = %v, want cleared after skip", got.wiz.models)
+	}
+}
+
+func TestPickerEnterOnModelSelectsAsDefaultAndAddsToSelection(t *testing.T) {
+	m := pickerModel(t, []string{"kimi-k2", "glm-4.6", "deepseek-v3"})
+	m.wiz.models = []string{"kimi-k2"}
+	m.wiz.model = "kimi-k2"
+	m.renderModels()
+
+	// Select glm-4.6 which is not yet in m.wiz.models
+	idx := -1
+	for i, it := range m.list.Items() {
+		if row, ok := it.(item); ok && row.value == "glm-4.6" {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatal("glm-4.6 not found in picker")
+	}
+	m.list.Select(idx)
+
+	next, _ := m.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
+	got, ok := next.(model)
+	if !ok {
+		t.Fatalf("updatePickModel returned %T, want model", next)
+	}
+	if got.view != viewEditForm {
+		t.Errorf("view = %v, want viewEditForm", got.view)
+	}
+	if got.wiz.model != "glm-4.6" {
+		t.Errorf("model = %q, want glm-4.6", got.wiz.model)
+	}
+	if gotStr := strings.Join(got.wiz.models, ","); gotStr != "kimi-k2,glm-4.6" {
+		t.Errorf("models = %q, want glm-4.6 joined into [kimi-k2 glm-4.6]", gotStr)
+	}
+}
+
+func TestPickerCtrlATogglesAllModels(t *testing.T) {
+	all := []string{"kimi-k2", "glm-4.6", "deepseek-v3"}
+	m := pickerModel(t, all)
+
+	// 1. None selected -> Ctrl+A selects all models.
+	next, _ := m.updatePickModel(tea.KeyMsg{Type: tea.KeyCtrlA})
+	got := next.(model)
+	if strings.Join(got.wiz.models, ",") != strings.Join(all, ",") {
+		t.Errorf("models after ctrl+a = %v, want all models %v", got.wiz.models, all)
+	}
+
+	// 2. All selected -> Ctrl+A clears the selection.
+	next, _ = got.updatePickModel(tea.KeyMsg{Type: tea.KeyCtrlA})
+	got = next.(model)
+	if len(got.wiz.models) != 0 {
+		t.Errorf("models after second ctrl+a = %v, want empty", got.wiz.models)
+	}
+
+	// 3. Partially selected -> Ctrl+A selects all remaining models.
+	got.wiz.models = []string{"glm-4.6"}
+	got.renderModels()
+	next, _ = got.updatePickModel(tea.KeyMsg{Type: tea.KeyCtrlA})
+	got = next.(model)
+	if len(got.wiz.models) != len(all) {
+		t.Errorf("models after partial ctrl+a = %v, want all %d models", got.wiz.models, len(all))
+	}
+	for _, id := range all {
+		if !got.modelSelected(id) {
+			t.Errorf("model %q missing from selection %v", id, got.wiz.models)
+		}
+	}
+
+	// 4. Filter active -> Ctrl+A only toggles matching models.
+	got.wiz.models = []string{"deepseek-v3"}
+	got.modelFilter = "k" // matches kimi-k2 and deepseek-v3
+	got.renderModels()
+
+	// Both kimi-k2 and deepseek-v3 match. Only deepseek-v3 is selected, so ctrl+a should select kimi-k2.
+	next, _ = got.updatePickModel(tea.KeyMsg{Type: tea.KeyCtrlA})
+	got = next.(model)
+	if !got.modelSelected("kimi-k2") || !got.modelSelected("deepseek-v3") {
+		t.Errorf("models after filtered ctrl+a = %v, want both matching models selected", got.wiz.models)
+	}
+
+	// Now all matches are selected. Pressing Ctrl+A should deselect the matching subset.
+	next, _ = got.updatePickModel(tea.KeyMsg{Type: tea.KeyCtrlA})
+	got = next.(model)
+	if got.modelSelected("kimi-k2") || got.modelSelected("deepseek-v3") {
+		t.Errorf("models after second filtered ctrl+a = %v, want matching models deselected", got.wiz.models)
+	}
+}
+
+func TestPickerCtrlARejectedForToolWithoutModelMenu(t *testing.T) {
+	m := pickerModel(t, []string{"gpt-5.5", "gpt-5.4"})
+	m.tool = &tools.Tool{Title: "Codex", ModelMenu: ""}
+	m.renderModels()
+
+	next, _ := m.updatePickModel(tea.KeyMsg{Type: tea.KeyCtrlA})
+	got := next.(model)
+	if len(got.wiz.models) != 0 {
+		t.Errorf("models = %v, want no curation for tool without model menu", got.wiz.models)
+	}
+	if !strings.Contains(got.status, "can't be given a model list") {
+		t.Errorf("status = %q, want explanation that tool can't be given model list", got.status)
 	}
 }

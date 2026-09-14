@@ -350,9 +350,32 @@ func cmdModels(args []string) error {
 	return nil
 }
 
+// splitModels parses a --models value ("a, b ,c") into ids, dropping blanks so a
+// trailing comma or an empty flag yields no list rather than an empty-string id.
+func splitModels(list string) []string {
+	var ids []string
+	for _, id := range strings.Split(list, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// describeModels summarizes a spec's model choice for the command's confirmation line.
+func describeModels(spec profile.Spec) string {
+	if spec.Model == "" {
+		return "no model override"
+	}
+	if extra := len(spec.ModelIDs()) - 1; extra > 0 {
+		return fmt.Sprintf("%s +%d more in the tool's picker", spec.Model, extra)
+	}
+	return spec.Model
+}
+
 func cmdAdd(store *profile.Store, args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: charon add <tool> --name <p> --key <k> [--endpoint <url>] [--model <m>]")
+		return fmt.Errorf("usage: charon add <tool> --name <p> --key <k> [--endpoint <url>] [--model <m>] [--models <a,b,c>]")
 	}
 	t, err := requireTool(args[0])
 	if err != nil {
@@ -362,6 +385,7 @@ func cmdAdd(store *profile.Store, args []string) error {
 	endpoint := fs.String("endpoint", "", "API base URL")
 	key := fs.String("key", "", "API key")
 	model := fs.String("model", "", "model id")
+	modelList := fs.String("models", "", "comma-separated model ids to offer in the tool's own picker")
 	name := fs.String("name", "", "profile name")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -379,16 +403,20 @@ func cmdAdd(store *profile.Store, args []string) error {
 		return err
 	}
 	ep := t.ResolveEndpoint(*endpoint)
-	if err := store.AddProfile(t, *name, profile.Spec{Endpoint: ep, Key: *key, Model: *model}); err != nil {
+	spec := profile.Spec{Endpoint: ep, Key: *key, Model: *model, Models: splitModels(*modelList)}
+	if err := store.AddProfile(t, *name, spec); err != nil {
 		return err
 	}
-	fmt.Printf("Added and activated %s profile %q (%s · %s)\n", t.Title, *name, ep, *model)
+	// AddProfile normalizes the spec (a bare --models promotes its first id to the
+	// default model), so report what was stored rather than what was typed.
+	stored, _ := store.GetSpec(t.Name, *name)
+	fmt.Printf("Added and activated %s profile %q (%s · %s)\n", t.Title, *name, ep, describeModels(stored))
 	return nil
 }
 
 func cmdEdit(store *profile.Store, args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: charon edit <tool> <profile> [--endpoint --key --model --name]")
+		return fmt.Errorf("usage: charon edit <tool> <profile> [--endpoint --key --model --models --name]")
 	}
 	t, err := requireTool(args[0])
 	if err != nil {
@@ -404,6 +432,7 @@ func cmdEdit(store *profile.Store, args []string) error {
 	endpoint := fs.String("endpoint", sp.Endpoint, "API base URL")
 	key := fs.String("key", sp.Key, "API key")
 	model := fs.String("model", sp.Model, "model id")
+	modelList := fs.String("models", strings.Join(sp.Models, ","), "comma-separated model ids to offer in the tool's own picker")
 	newName := fs.String("name", "", "rename the profile")
 	if err := fs.Parse(args[2:]); err != nil {
 		return err
@@ -418,10 +447,12 @@ func cmdEdit(store *profile.Store, args []string) error {
 	if err := tools.ValidateEndpoint(*endpoint); err != nil {
 		return err
 	}
-	if err := store.EditProfile(t, name, target, profile.Spec{Endpoint: *endpoint, Key: *key, Model: *model}); err != nil {
+	spec := profile.Spec{Endpoint: *endpoint, Key: *key, Model: *model, Models: splitModels(*modelList)}
+	if err := store.EditProfile(t, name, target, spec); err != nil {
 		return err
 	}
-	fmt.Printf("Updated %s profile %q (%s · %s)\n", t.Title, target, t.ResolveEndpoint(*endpoint), *model)
+	stored, _ := store.GetSpec(t.Name, target)
+	fmt.Printf("Updated %s profile %q (%s · %s)\n", t.Title, target, t.ResolveEndpoint(*endpoint), describeModels(stored))
 	return nil
 }
 

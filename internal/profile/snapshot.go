@@ -100,10 +100,10 @@ func (s *Store) SaveCurrentAccount(t *tools.Tool) (string, error) {
 
 // AddProfile applies spec via ApplyAuth, snapshots it as the named profile, and marks it
 // active. Shared by the CLI `add` command and the interactive add/edit flow so they can't drift.
-// allModels is an optional full model list (e.g. from the TUI wizard's picker fetch) embedded
-// into the tool's own config so its native model picker can offer more than just spec.Model;
-// it is never persisted into the profile's Spec.
-func (s *Store) AddProfile(t *tools.Tool, name string, spec Spec, allModels ...string) error {
+// spec.Models is the curated list embedded into the tool's own config so its native model
+// picker can offer more than just spec.Model; it is persisted with the profile, so a later
+// edit that doesn't re-fetch (rename, key rotation, --model) keeps the same list.
+func (s *Store) AddProfile(t *tools.Tool, name string, spec Spec) error {
 	if err := s.lock(); err != nil {
 		return err
 	}
@@ -115,6 +115,7 @@ func (s *Store) AddProfile(t *tools.Tool, name string, spec Spec, allModels ...s
 	if err := validateNewName(name); err != nil {
 		return err
 	}
+	spec = spec.normalized()
 	// Back up the current live config first so the write is reversible via undo.
 	// Only needed when no profile is active — the active profile already captures
 	// the live state (refreshed below), so a backup would be redundant.
@@ -125,7 +126,7 @@ func (s *Store) AddProfile(t *tools.Tool, name string, spec Spec, allModels ...s
 			return fmt.Errorf("backup failed, aborting: %w", err)
 		}
 	}
-	if err := t.ApplyAuth(tools.AuthSpec{Endpoint: spec.Endpoint, Key: spec.Key, Model: spec.Model, AllModels: allModels}); err != nil {
+	if err := t.ApplyAuth(spec.authSpec()); err != nil {
 		return err
 	}
 	if err := s.SaveWithSpec(t, name, spec); err != nil {
@@ -145,7 +146,7 @@ func (s *Store) AddProfile(t *tools.Tool, name string, spec Spec, allModels ...s
 // config and active pointer are restored to what they were, so an edit never
 // silently switches which profile is in effect. Shared by the CLI `edit` command
 // and the TUI edit form so this can't drift between them.
-func (s *Store) EditProfile(t *tools.Tool, oldName, newName string, spec Spec, allModels ...string) error {
+func (s *Store) EditProfile(t *tools.Tool, oldName, newName string, spec Spec) error {
 	if err := s.lock(); err != nil {
 		return err
 	}
@@ -153,6 +154,7 @@ func (s *Store) EditProfile(t *tools.Tool, oldName, newName string, spec Spec, a
 	if newName == "" {
 		newName = oldName
 	}
+	spec = spec.normalized()
 	if oldName == DefaultName {
 		if newName != DefaultName {
 			return fmt.Errorf("the default profile cannot be renamed")
@@ -168,7 +170,7 @@ func (s *Store) EditProfile(t *tools.Tool, oldName, newName string, spec Spec, a
 				return fmt.Errorf("backup failed, aborting: %w", err)
 			}
 		}
-		if err := t.ApplyAuth(tools.AuthSpec{Endpoint: spec.Endpoint, Key: spec.Key, Model: spec.Model, AllModels: allModels}); err != nil {
+		if err := t.ApplyAuth(spec.authSpec()); err != nil {
 			return err
 		}
 		return snapshot(t, s.profDir(t.Name, DefaultName), "Default (auto-captured custom provider)", "", "", "", &spec)
@@ -176,7 +178,7 @@ func (s *Store) EditProfile(t *tools.Tool, oldName, newName string, spec Spec, a
 	prevActive := s.Active(t.Name)
 	wasActive := prevActive == oldName
 
-	if err := s.AddProfile(t, newName, spec, allModels...); err != nil {
+	if err := s.AddProfile(t, newName, spec); err != nil {
 		return err
 	}
 	if oldName != newName {

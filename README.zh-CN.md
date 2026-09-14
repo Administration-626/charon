@@ -31,6 +31,9 @@ API-key 登录，也适用于 OAuth/ChatGPT 会话——切换出去再切回来
 - **命名 profile。** 对工具完整的鉴权状态做快照，在 endpoint/key 之间即时切换。
 - **模型发现。** 只给一个 endpoint + key 就能添加 profile；Charon 会拉取模型列表
   供你挑选——也可以直接手输自定义模型 slug。
+- **在工具内切换模型。** 勾选你常用的那几个模型，Charon 会把它们注册进工具自身的
+  选择器（Claude Code 的 `/model`、OpenCode 的 `/models`、Pi 的 `/model`），会话中
+  换模型不必再回到 Charon。
 - **单页表单。** 在同一屏完成 profile 的新增或编辑（Name、URL、Token、Model），
   直接键入，配 `[ Save Profile ]` / `[ Cancel ]` 按钮——没有多步向导、不跳页。
 - **即时克隆与搜索。** 按 `c` 无需提示即可复制 profile；在模型列表里直接打字做
@@ -100,8 +103,8 @@ charon ls <tool>             # 列出已保存的 profile（--json）
 charon save <tool> [name]    # 对当前实时配置做快照（省略 name 则用登录账号命名）
 charon refresh <tool>        # 把会话内的变更（model、effort）写回当前 profile
 charon models <tool>         # 列出某个 API 提供的模型（--key [--endpoint]）
-charon add <tool>            # 添加并激活一个 profile（--name --key [--endpoint --model]）
-charon edit <tool> <p>       # 修改某 profile 的 endpoint/key/model（--name 可改名）
+charon add <tool>            # 添加并激活一个 profile（--name --key [--endpoint --model --models]）
+charon edit <tool> <p>       # 修改某 profile 的 endpoint/key/model/models（--name 可改名）
 charon rename <tool> <o> <n> # 重命名已保存的 profile
 charon cp <tool> <src> <dst> # 复制已保存的 profile
 charon switch <tool> <p>     # 应用某 profile（先备份当前配置）
@@ -144,14 +147,31 @@ profile 名。
 - **Name** —— profile 名（任意脚本的字母/数字；Unicode 亦可）。
 - **API base URL** —— 留空即采用该 provider 的默认值；真实值永远不会预填。
 - **API key** —— 掩码输入。
-- **Model** —— **Fetch** 按钮会请求 `GET /v1/models`（OpenAI 系 API 用
-  `Authorization: Bearer`，Anthropic 用 `x-api-key`）并打开模型选择器。你也可以
-  直接手输自定义 slug，或留空采用工具默认值。
+- **Model**：字段下方提供两个操作按钮：
+  - **`[ Fetch & Pick Online Models ]`**：请求 `GET /v1/models`（OpenAI 系 API 用
+    `Authorization: Bearer`，Anthropic 用 `x-api-key`）并打开模型选择器。
+  - **`[ Type Model IDs Manually ]`**：直接手动输入模型 ID（逗号分隔，如
+    `kimi-k2, deepseek-v3`），适合未暴露 `/v1/models` 的中转站或私有网关。若在线
+    拉取失败，Charon 也会自动降级到该手动录入界面并预填已有 ID。
+  你也可以直接在该输入框键入 slug，或留空采用工具默认值。
 
-在模型选择器里，**直接打字即可实时模糊过滤**列表（Backspace 编辑查询，`Esc`
-清空）。Tab 到 **`[ Save Profile ]`** 即把 endpoint/key/model 写入工具实时配置并
-切换，或 **`[ Cancel ]`** 放弃。Name、URL、key 为必填；提交时如有缺失会在底部
-红色状态栏标出。
+在模型选择器里，**直接打字即可实时模糊过滤**列表（Backspace 编辑查询，`Esc` 清空）：
+- **`Space`**：勾选或取消勾选某个模型（标记为 `•`），加入注册给工具的候选列表。
+- **`Ctrl+A`**：全选或取消全选所有模型（处于搜索过滤状态时仅作用于匹配结果）。
+- 勾选模型后，列表顶部会出现 **`✔ Done — register these N model(s)`** 选项（副标题显示当前默认模型）。在 Done 行按 **`Enter`** 即可确认并返回表单，无需改动默认模型。
+- 在任意模型行按 **`Enter`**：将其设为默认模型（标记为 `✓`，若尚未勾选会自动加入列表），并返回表单。
+- 在底部的 **`(skip — no model override)`** 行按 **`Enter`**：清空所有已选模型及默认模型设置并返回表单。
+- 若一个都不勾选直接选定默认模型，整份拉取到的列表都会被注册给工具。
+Tab 到 **`[ Save Profile ]`** 即把 endpoint/key/model 写入工具实时配置并切换，或
+**`[ Cancel ]`** 放弃。Name、URL、key 为必填；提交时如有缺失会在底部红色状态栏标出。
+
+### 在工具内切换模型
+
+profile 注册的模型会出现在工具自身的菜单里，不必离开当前会话即可换模型：Claude Code
+的 `/model`（走 `modelPicker`）、OpenCode 的 `/models`（走 `charon` provider 的模型
+映射）、Pi 的 `/model`（走生成的扩展）。列表跟着 profile 走——切换 profile 时菜单也
+随之切换，所以中转站的模型不会串进官方账号的选择器。Codex 是例外：它的配置里没有
+注册额外模型的位置，模型仍来自 profile（`charon edit codex <p> --model ...`）。
 
 ### 备份已登录账号
 
@@ -179,9 +199,11 @@ endpoint/key 可改）；重新执行 `charon save` 会刷新快照。API-key �
 ### 编辑已有 profile
 
 在某 profile 上按 **`e`** 打开编辑表单，同屏显示当前的 **Name**、**URL**、
-**Token**（掩码）与 **Model**。直接在任意字段里键入；**Model** 字段的 **Fetch**
-按钮会重新拉取该 endpoint 的模型列表供你挑选（或手输 slug）。Tab 到
-**`[ Save Profile ]`** 应用改动并切换到该 profile（改名自动处理），或
+**Token**（掩码）与 **Model**。直接在任意字段里键入；**Model** 字段下的
+**`[ Fetch & Pick Online Models ]`** 与 **`[ Type Model IDs Manually ]`**
+按钮支持重新拉取或手动调整模型。已注册给工具的模型数量及对应的菜单（如
+`/model` 或 `/models`）会显示在操作按钮下方，除非你重新调整，否则保持不变，改名或换 key
+都不会清空工具自身的选择器。Tab 到 **`[ Save Profile ]`** 应用改动并切换到该 profile（改名自动处理），或
 **`[ Cancel ]`** 放弃。自动捕获的 **`default`** profile 与登录备份（无
 endpoint/key）受保护，不可编辑。
 
@@ -191,6 +213,17 @@ endpoint/key）受保护，不可编辑。
 charon models codex --endpoint https://openrouter.ai/api/v1 --key sk-...
 charon add    codex --name openrouter --endpoint https://openrouter.ai/api/v1 \
                     --key sk-... --model openai/gpt-5.5
+```
+
+`--models` 会把一份列表注册进工具自身的选择器，之后就能在工具内部切换。省略
+`--model` 时，列表里的第一个 id 会作为默认模型；列表随 profile 存储，后续 `edit`
+不传 `--models` 时保持不变：
+
+```sh
+charon add  claude --name gateway --endpoint https://gateway.example/v1 --key sk-... \
+                   --models kimi-k2,glm-4.6,deepseek-v3
+charon edit claude gateway --key sk-rotated   # 选择器列表原样保留
+charon edit claude gateway --models glm-4.6   # 把菜单收窄
 ```
 
 每个工具都会在它自己的配置格式里写入一个专属的 `charon` provider 条目

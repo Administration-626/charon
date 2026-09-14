@@ -61,32 +61,31 @@ func (m *model) beginFetch() tea.Cmd {
 	return tea.Batch(m.spinner.Tick, fetchModelsCmd(m.tool.Provider, m.wiz.endpoint, m.wiz.key))
 }
 
-// applyFetched moves to the model picker on success, or recovers gracefully on error.
+// applyFetched moves to the model picker on success. On failure it falls through to
+// manual entry rather than giving up on models: plenty of endpoints (self-hosted
+// relays, gateways behind auth) serve chat fine but expose no /v1/models, and their
+// model ids are exactly what the user needs registered.
 func (m model) applyFetched(msg fetchedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		if m.fromForm {
-			// Stay on the edit form; keep the existing model value.
-			m.fromForm = false
-			m.setStatus(statusErr, msg.err.Error())
-			m.view = viewEditForm
-			m.loadEditForm()
-			return m, nil
-		}
-		// Model list unavailable; proceed without a model override.
-		m.wiz.model = ""
-		if m.wiz.edit {
-			m.setStatus(statusErr, msg.err.Error())
-			return m.finishAdd(m.wiz.name)
-		}
-		m.setStatus(statusErr, msg.err.Error()+" — you can name it without a model")
-		m.view = viewAddName
-		m.startInput("profile name", false)
-		return m, textinput.Blink
+		m.setStatus(statusErr, msg.err.Error()+" — type the model ids instead")
+		return m.startManualModels()
 	}
 	m.view = viewPickModel
 	m.setStatus(statusInfo, fmt.Sprintf("%d models found", len(msg.list)))
 	m.showModels(msg.list)
 	return m, nil
+}
+
+// startManualModels opens the type-the-ids screen, prefilled with whatever the profile
+// already registers so an edit doesn't have to retype the list. Reached both from the
+// picker's "✎ Enter model IDs" row and from a failed fetch.
+func (m model) startManualModels() (tea.Model, tea.Cmd) {
+	m.view = viewAddCustomModel
+	m.startInput("model ids, e.g. gpt-4o, kimi-k2, deepseek-v3", false)
+	if prefill := strings.Join(m.wiz.modelIDs(), ", "); prefill != "" {
+		m.input.SetValue(prefill)
+	}
+	return m, textinput.Blink
 }
 
 // filterModels fuzzy-matches query against model ids, ranked best-first (empty = all).
@@ -107,7 +106,144 @@ func filterModels(all []string, query string) []string {
 func (m *model) showModels(ids []string) {
 	m.allModels = ids
 	m.modelFilter = ""
+	// A re-fetch from a different endpoint (or a refreshed catalog) can drop ids that
+	// were previously checked. Keep only those still offered, so the picker never
+	// registers a model the endpoint no longer lists. An empty remainder falls back
+	// to registering the whole fetched list (pickerModels).
+	if len(m.wiz.models) > 0 {
+		offered := make(map[string]bool, len(ids))
+		for _, id := range ids {
+			offered[id] = true
+		}
+		kept := m.wiz.models[:0]
+		for _, id := range m.wiz.models {
+			if offered[id] {
+				kept = append(kept, id)
+			}
+		}
+		m.wiz.models = kept
+	}
 	m.renderModels()
+}
+
+// toggleModel adds or removes a model id from the curated picker list, keeping
+// first-seen order so the list reads in the order the user checked things off.
+func (m *model) toggleModel(id string) {
+	for i, sel := range m.wiz.models {
+		if sel == id {
+			m.wiz.models = append(m.wiz.models[:i:i], m.wiz.models[i+1:]...)
+			return
+		}
+	}
+	m.wiz.models = append(m.wiz.models[:len(m.wiz.models):len(m.wiz.models)], id)
+}
+
+// toggleAllModels selects all models when some or none are selected, or clears the
+// selection when every model in the current view is already selected. If a filter
+// is active, it only operates on the matching subset.
+func (m *model) toggleAllModels() {
+	targetIDs := filterModels(m.allModels, m.modelFilter)
+	if len(targetIDs) == 0 {
+		return
+	}
+
+	allSelected := true
+	for _, id := range targetIDs {
+		if !m.modelSelected(id) {
+			allSelected = false
+			break
+		}
+	}
+
+	if allSelected {
+		targetSet := make(map[string]bool, len(targetIDs))
+		for _, id := range targetIDs {
+			targetSet[id] = true
+		}
+		var kept []string
+		for _, id := range m.wiz.models {
+			if !targetSet[id] {
+				kept = append(kept, id)
+			}
+		}
+		m.wiz.models = kept
+	} else {
+		for _, id := range targetIDs {
+			if !m.modelSelected(id) {
+				m.wiz.models = append(m.wiz.models, id)
+			}
+		}
+	}
+}
+
+// modelSelected reports whether id is in the curated picker list.
+func (m *model) modelSelected(id string) bool {
+	for _, sel := range m.wiz.models {
+		if sel == id {
+			return true
+		}
+	}
+	return false
+}
+
+// pickerSummary describes the curated list for the footer, so it's clear what checking
+// rows accomplishes and how to finish.
+func (m *model) pickerSummary() string {
+	n := len(m.wiz.models)
+	if n == 0 {
+		return "selection cleared — the whole fetched list will be registered"
+	}
+	return fmt.Sprintf("%d selected (default: %s) · enter on a row makes it the default, or choose Done",
+		n, m.defaultModelLabel())
+}
+
+// defaultModelLabel names the model that will be requested by default: the explicitly
+// picked one, else the first checked id (what normalized() would promote), else none.
+func (m *model) defaultModelLabel() string {
+	if m.wiz.model != "" {
+		return m.wiz.model
+	}
+	if len(m.wiz.models) > 0 {
+		return m.wiz.models[0]
+	}
+	return "tool default"
+}
+
+// landingValue is the row the picker should open on: the current default model, else the
+// Done row while a selection is pending, else "skip" when nothing is chosen at all.
+func (m *model) landingValue() string {
+	if m.wiz.model != "" {
+		return m.wiz.model
+	}
+	if m.tool != nil && m.tool.ModelMenu != "" && len(m.wiz.models) > 0 {
+		return doneModels
+	}
+	return skipModel
+}
+
+// indexOfValue returns the position of the row carrying value, or 0 when absent (e.g.
+// a previously chosen model the latest fetch no longer lists).
+func indexOfValue(items []list.Item, value string) int {
+	for i, it := range items {
+		if row, ok := it.(item); ok && row.value == value {
+			return i
+		}
+	}
+	return 0
+}
+
+// modelRowTitle prefixes a model row with its state: "✓" for the profile's default
+// model, "•" for a row checked into the curated picker list, two spaces otherwise so
+// unmarked ids stay aligned with marked ones.
+func modelRowTitle(id string, isDefault, isChecked bool) string {
+	switch {
+	case isDefault:
+		return "✓ " + id
+	case isChecked:
+		return "• " + id
+	default:
+		return "  " + id
+	}
 }
 
 // renderModels rebuilds the picker rows for the current query (echoed in the title),
@@ -116,66 +252,71 @@ func (m *model) renderModels() {
 	ids := filterModels(m.allModels, m.modelFilter)
 	var items []list.Item
 
+	hasModelMenu := m.tool != nil && m.tool.ModelMenu != ""
+
+	// With models checked, the list needs an explicit way out: otherwise the only way to
+	// leave is to press enter on some row, which also re-picks the default model.
+	// Only tools that support registered model lists have a curated selection to finish.
+	if hasModelMenu {
+		if n := len(m.wiz.models); n > 0 {
+			items = append(items, item{
+				title: fmt.Sprintf("✔ Done — register these %d model(s)", n),
+				desc:  "Default: " + m.defaultModelLabel(),
+				value: doneModels,
+			})
+		}
+	}
 	if m.modelFilter == "" {
 		items = append(items, item{title: "← Back (change URL / key)", desc: "", value: backModel})
-		items = append(items, item{title: "✎ Enter custom model ID...", desc: "Input a specific unlisted model ID", value: customModel})
-		items = append(items, item{value: sepSentinel})
-	} else {
-		items = append(items, item{title: "✎ Enter custom model ID...", desc: "Input a specific unlisted model ID", value: customModel})
-		items = append(items, item{value: sepSentinel})
 	}
+	items = append(items, item{title: "✎ Enter custom model IDs...", desc: "Type unlisted ids, comma-separated", value: customModel})
+	items = append(items, item{value: sepSentinel})
 
 	for _, id := range ids {
-		title := id
 		isChosen := id == m.wiz.model
-		if isChosen {
-			title = "✓ " + id // mark the profile's currently selected model
-		}
-		items = append(items, item{title: title, desc: "", value: id, active: isChosen})
+		isChecked := hasModelMenu && m.modelSelected(id)
+		items = append(items, item{title: modelRowTitle(id, isChosen, isChecked), desc: "", value: id, active: isChosen})
 	}
 	// A blank divider sets the action rows apart from the models (only when not searching).
 	if len(ids) > 0 && m.modelFilter == "" {
 		items = append(items, item{value: sepSentinel})
 	}
 	skipTitle := "(skip — no model override)"
-	skipChosen := m.wiz.model == ""
+	skipChosen := m.wiz.model == "" && len(m.wiz.models) == 0
 	if skipChosen {
 		skipTitle = "✓ " + skipTitle
 	}
 	items = append(items, item{title: skipTitle, desc: "", value: skipModel, active: skipChosen})
 
 	m.list.SetItems(items)
-	// No search: land on the checked row; while searching, the best match is on top.
+	// No search: land on the row the current state points at; while searching, the best
+	// match is on top. Never land on "skip" while models are checked — that row clears
+	// the selection, so it must be chosen deliberately rather than by a stray enter.
 	selectedIndex := 0
 	if m.modelFilter == "" {
-		if m.wiz.model == "" {
-			// Find the index of skipModel
-			for i, it := range items {
-				if itemVal, ok := it.(item); ok && itemVal.value == skipModel {
-					selectedIndex = i
-					break
-				}
-			}
-		} else {
-			for i, it := range items {
-				if itemVal, ok := it.(item); ok && itemVal.value == m.wiz.model {
-					selectedIndex = i
-					break
-				}
-			}
-		}
+		selectedIndex = indexOfValue(items, m.landingValue())
 	}
 	m.list.Select(selectedIndex)
 	title := m.tool.Title + " — choose a model"
+	if hasModelMenu {
+		if n := len(m.wiz.models); n > 0 {
+			title += fmt.Sprintf(" · %d in picker", n)
+		}
+	}
 	if m.modelFilter != "" {
 		title += fmt.Sprintf(" · search: %s (%d matches)", m.modelFilter, len(ids))
 	}
 	m.list.Title = title
-	m.setHelpKeys(keyChoose, keyFilter, keyRefresh, keyBack)
+	if m.tool.ModelMenu != "" {
+		m.setHelpKeys(keyChoose, keyToggle, keyToggleAll, keyFilter, keyRefresh, keyBack)
+	} else {
+		m.setHelpKeys(keyChoose, keyFilter, keyRefresh, keyBack)
+	}
 	m.setDelegate(themedCompactDelegate())
 }
 
-// updatePickModel drives the picker: printable keys search, ctrl+r refetches,
+// updatePickModel drives the picker: printable keys search, space checks the
+// highlighted model into the curated list, ctrl+a toggles all models, ctrl+r refetches,
 // nav keys fall through to the list, enter/esc choose or cancel.
 func (m model) updatePickModel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
@@ -207,9 +348,37 @@ func (m model) updatePickModel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.modelFilter += string(msg.Runes)
 		m.renderModels()
 		return m, nil
-	case tea.KeySpace:
-		m.modelFilter += " "
+	case tea.KeyCtrlA:
+		// Ctrl+A toggles selection for all models (or all filtered matches).
+		if m.tool.ModelMenu == "" {
+			m.setStatus(statusInfo, m.tool.Title+" can't be given a model list — press enter to pick one model")
+			return m, nil
+		}
+		if len(m.allModels) == 0 {
+			return m, nil
+		}
+		cursor := m.list.Index()
+		m.toggleAllModels()
 		m.renderModels()
+		m.list.Select(cursor)
+		m.setStatus(statusInfo, m.pickerSummary())
+		return m, nil
+	case tea.KeySpace:
+		// Space checks a model into the list registered with the tool's own picker.
+		// Model ids don't contain spaces, so this can't cost a useful search query.
+		if m.tool.ModelMenu == "" {
+			m.setStatus(statusInfo, m.tool.Title+" can't be given a model list — press enter to pick one model")
+			return m, nil
+		}
+		it, ok := m.list.SelectedItem().(item)
+		if !ok || isSentinel(it.value) {
+			return m, nil
+		}
+		cursor := m.list.Index()
+		m.toggleModel(it.value)
+		m.renderModels()
+		m.list.Select(cursor) // toggling must not move the cursor off the row just checked
+		m.setStatus(statusInfo, m.pickerSummary())
 		return m, nil
 	}
 	// Arrows, page keys, home/end, ctrl+n/ctrl+p: let the list move the cursor.

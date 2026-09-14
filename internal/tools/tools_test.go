@@ -361,6 +361,173 @@ func TestClaudeCustomEndpointUsesBearer(t *testing.T) {
 	}
 }
 
+// readClaudePicker returns the model list a sandboxed settings.json's modelPicker
+// holds, whether replaceBuiltInOptions is set, and whether the key is present at all.
+// Every row is asserted to carry a label — a bare model row renders blank in the menu.
+func readClaudePicker(t *testing.T, home string) (ids []string, replace, present bool) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s struct {
+		ModelPicker struct {
+			ReplaceBuiltInOptions bool `json:"replaceBuiltInOptions"`
+			Options               []struct {
+				Model string `json:"model"`
+				Label string `json:"label"`
+			} `json:"options"`
+		} `json:"modelPicker"`
+	}
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range s.ModelPicker.Options {
+		if o.Label == "" {
+			t.Errorf("modelPicker row %q has no label", o.Model)
+		}
+		ids = append(ids, o.Model)
+	}
+	return ids, s.ModelPicker.ReplaceBuiltInOptions, bytes.Contains(data, []byte(`"modelPicker"`))
+}
+
+func TestClaudeCustomEndpointRegistersWholeModelList(t *testing.T) {
+	home := sandboxHome(t)
+	writeFile(t, filepath.Join(home, ".claude", "settings.json"), `{}`)
+
+	// A gateway serves many vendors' models behind one endpoint, so the whole fetched
+	// list has to reach /model — not just the one model the user picked.
+	fetched := []string{"deepseek-v3", "glm-4.6", "kimi-k2"}
+	c := Find("claude")
+	err := c.ApplyAuth(AuthSpec{
+		Endpoint:  "https://gateway.example/v1",
+		Key:       "sk-gw-123456789",
+		Model:     "kimi-k2",
+		AllModels: fetched,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ids, replace, present := readClaudePicker(t, home)
+	if !present {
+		t.Fatal("custom endpoint should write modelPicker so /model can switch models")
+	}
+	if !replace {
+		t.Error("replaceBuiltInOptions should be true: a gateway can't serve Claude Code's built-in lineup")
+	}
+	if strings.Join(ids, ",") != strings.Join(fetched, ",") {
+		t.Errorf("modelPicker ids = %v, want %v (the whole fetched list, in order)", ids, fetched)
+	}
+}
+
+func TestClaudeCustomEndpointRegistersChosenModelWithoutFetch(t *testing.T) {
+	home := sandboxHome(t)
+	writeFile(t, filepath.Join(home, ".claude", "settings.json"), `{}`)
+
+	c := Find("claude")
+	// No --fetch: only the configured model is known, and it must still get a picker row
+	// rather than leaving /model with nothing but Claude Code's own catalog.
+	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gateway.example/v1", Key: "sk-gw-1", Model: "deepseek-v3"}); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, _, present := readClaudePicker(t, home)
+	if !present || len(ids) != 1 || ids[0] != "deepseek-v3" {
+		t.Errorf("modelPicker ids = %v (present=%v), want just [deepseek-v3]", ids, present)
+	}
+}
+
+func TestClaudeOfficialEndpointClearsGatewayModelPicker(t *testing.T) {
+	home := sandboxHome(t)
+	// A gateway profile was applied earlier and left its menu behind.
+	writeFile(t, filepath.Join(home, ".claude", "settings.json"),
+		`{"modelPicker":{"options":[{"model":"deepseek-v3","label":"deepseek-v3"}],"replaceBuiltInOptions":true}}`)
+
+	c := Find("claude")
+	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://api.anthropic.com", Key: "sk-ant-123456789", Model: "claude-sonnet-5"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, present := readClaudePicker(t, home); present {
+		t.Error("the official endpoint must not inherit a gateway's modelPicker")
+	}
+}
+
+func TestClaudeUseOfficialAuthClearsModelPicker(t *testing.T) {
+	home := sandboxHome(t)
+	writeFile(t, filepath.Join(home, ".claude", "settings.json"),
+		`{"modelPicker":{"options":[{"model":"deepseek-v3","label":"deepseek-v3"}]}}`)
+
+	c := Find("claude")
+	if err := c.UseOfficialAuth(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, present := readClaudePicker(t, home); present {
+		t.Error("logging back into the official account must drop the gateway's modelPicker")
+	}
+}
+
+// TestClaudeSettingsMergeSwapsModelPickerWithProfile is the "list follows the profile"
+// guarantee: modelPicker is an owned key, so restoring a profile swaps it — and a
+// profile captured without one (an official account) clears whatever is live.
+func TestClaudeSettingsMergeSwapsModelPickerWithProfile(t *testing.T) {
+	sandboxHome(t)
+	c := Find("claude")
+	var merger artifact.Merger
+	for _, a := range c.Artifacts {
+		if a.ID() == "settings.json" {
+			merger = a.(artifact.Merger)
+		}
+	}
+	if merger == nil {
+		t.Fatal("settings.json artifact should implement artifact.Merger")
+	}
+	live := []byte(`{"modelPicker":{"options":[{"model":"deepseek-v3","label":"deepseek-v3"}]},"theme":"dark"}`)
+
+	// Restoring an official profile (snapshot has no modelPicker) must clear the live one.
+	merged, err := merger.Merge([]byte(`{"model":"claude-opus"}`), live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(merged, []byte("modelPicker")) {
+		t.Error("restoring a profile captured without modelPicker must delete the live one")
+	}
+	if !bytes.Contains(merged, []byte(`"theme":"dark"`)) && !bytes.Contains(merged, []byte(`"theme": "dark"`)) {
+		t.Error("a non-owned preference like theme must survive the merge")
+	}
+
+	// Restoring a gateway profile must install that profile's own list.
+	merged, err = merger.Merge([]byte(`{"modelPicker":{"options":[{"model":"kimi-k2","label":"kimi-k2"}]}}`), live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(merged, []byte("kimi-k2")) || bytes.Contains(merged, []byte("deepseek-v3")) {
+		t.Errorf("merge should take modelPicker from the snapshot, got %s", merged)
+	}
+}
+
+func TestClaudeModelIDs(t *testing.T) {
+	cases := []struct {
+		name  string
+		all   []string
+		model string
+		want  string
+	}{
+		{"fetched list kept in order", []string{"kimi-k2", "deepseek-v3"}, "", "kimi-k2,deepseek-v3"},
+		{"chosen model appended when not fetched", []string{"kimi-k2"}, "glm-4.6", "kimi-k2,glm-4.6"},
+		{"chosen model not duplicated", []string{"kimi-k2", "glm-4.6"}, "glm-4.6", "kimi-k2,glm-4.6"},
+		{"blanks and duplicates dropped", []string{"", "  ", "a", "a"}, "", "a"},
+		{"nothing known stays empty", nil, "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := strings.Join(claudeModelIDs(tc.all, tc.model), ","); got != tc.want {
+				t.Errorf("claudeModelIDs(%v, %q) = %q, want %q", tc.all, tc.model, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeClaudeBaseURL(t *testing.T) {
 	cases := map[string]string{
 		"https://api.reii.site/v1":  "https://api.reii.site",
@@ -644,4 +811,118 @@ func TestPiDescribeAndApply(t *testing.T) {
 	if info.Effort != "high" {
 		t.Errorf("Describe effort = %q, want %q", info.Effort, "high")
 	}
+}
+
+// TestClaudeCustomEndpointKeepsRegisteredListWithoutFetch is the Claude counterpart
+// of the fallback opencode.go and pi.go already had: a write that brings no model list
+// (rename, key rotation, CLI --model) must keep the ids already in /model rather than
+// collapsing the menu to the single current model.
+func TestClaudeCustomEndpointKeepsRegisteredListWithoutFetch(t *testing.T) {
+	home := sandboxHome(t)
+	writeFile(t, filepath.Join(home, ".claude", "settings.json"),
+		`{"modelPicker":{"options":[{"model":"kimi-k2","label":"kimi-k2"},{"model":"glm-4.6","label":"glm-4.6"}],"replaceBuiltInOptions":true}}`)
+
+	c := Find("claude")
+	// No AllModels: a key rotation on an existing gateway profile.
+	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gateway.example/v1", Key: "sk-gw-2", Model: "glm-4.6"}); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, _, present := readClaudePicker(t, home)
+	if !present {
+		t.Fatal("modelPicker disappeared on a write that brought no model list")
+	}
+	if strings.Join(ids, ",") != "kimi-k2,glm-4.6" {
+		t.Errorf("modelPicker ids = %v, want the already-registered [kimi-k2 glm-4.6]", ids)
+	}
+}
+
+// TestClaudeCustomEndpointFetchReplacesRegisteredList is the other half: when a call
+// does bring a list, it wins outright — a re-fetch against a different gateway must not
+// leave the previous gateway's models in the menu.
+func TestClaudeCustomEndpointFetchReplacesRegisteredList(t *testing.T) {
+	home := sandboxHome(t)
+	writeFile(t, filepath.Join(home, ".claude", "settings.json"),
+		`{"modelPicker":{"options":[{"model":"kimi-k2","label":"kimi-k2"}]}}`)
+
+	c := Find("claude")
+	err := c.ApplyAuth(AuthSpec{
+		Endpoint:  "https://other.example/v1",
+		Key:       "sk-gw-3",
+		Model:     "deepseek-v3",
+		AllModels: []string{"deepseek-v3", "qwen3-max"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ids, _, _ := readClaudePicker(t, home)
+	if strings.Join(ids, ",") != "deepseek-v3,qwen3-max" {
+		t.Errorf("modelPicker ids = %v, want the freshly fetched list only", ids)
+	}
+}
+
+// TestModelMenuMatchesRegisteredModelList keeps the ModelMenu flag honest: a tool that
+// advertises an in-session model menu must actually write every id it's handed, and one
+// that doesn't advertise a menu must not be silently expected to. The TUI keys its
+// curation UI off this flag, so a wrong value misleads the user directly.
+func TestModelMenuMatchesRegisteredModelList(t *testing.T) {
+	fetched := []string{"kimi-k2", "glm-4.6", "deepseek-v3"}
+
+	for _, tool := range All() {
+		t.Run(tool.Name, func(t *testing.T) {
+			home := sandboxHome(t)
+			// Re-resolve the tool so its paths point at this subtest's sandbox.
+			tl := Find(tool.Name)
+			if tl.ApplyAuth == nil {
+				t.Skip("tool does not support ApplyAuth")
+			}
+			err := tl.ApplyAuth(AuthSpec{
+				Endpoint:  "https://gateway.example/v1",
+				Key:       "sk-gw-123456789",
+				Model:     "kimi-k2",
+				AllModels: fetched,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Every id must appear somewhere in the tool's config for the menu to offer it.
+			written := configContents(t, home)
+			var missing []string
+			for _, id := range fetched {
+				if !strings.Contains(written, id) {
+					missing = append(missing, id)
+				}
+			}
+			if tl.ModelMenu != "" && len(missing) > 0 {
+				t.Errorf("%s advertises %s but did not register %v", tl.Name, tl.ModelMenu, missing)
+			}
+			if tl.ModelMenu == "" && len(missing) == 0 {
+				t.Errorf("%s registered the whole list but advertises no model menu — set ModelMenu", tl.Name)
+			}
+		})
+	}
+}
+
+// configContents concatenates every file charon may have written under a sandboxed
+// home, so a test can assert on ids without knowing each tool's config format.
+func configContents(t *testing.T, home string) string {
+	t.Helper()
+	var b strings.Builder
+	err := filepath.Walk(home, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		data, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return nil // unreadable files simply contribute nothing
+		}
+		b.Write(data)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
 }

@@ -106,6 +106,21 @@ Data lives under `~/.config/charon/` (`$XDG_CONFIG_HOME` respected):
 `ApplyAuth` must **merge** into existing config (use the `edit.go` helpers) so
 unrelated user settings survive; it must not rewrite the file wholesale.
 
+### Model lists (`Spec.Models` / `AuthSpec.AllModels`)
+
+A profile's `Spec.Models` is the curated list charon registers in the **tool's own**
+model picker (Claude `modelPicker`, OpenCode `provider.charon.models`, pi's extension),
+so switching model mid-session doesn't need charon. It is persisted in the manifest and
+passed to `ApplyAuth` as `AuthSpec.AllModels`. Two rules a new tool must honor:
+
+- `AllModels` empty means **"keep what's registered"**, not "register nothing" — read
+  the ids already in the live config and reuse them, or a rename/key rotation collapses
+  the user's picker to one row.
+- Whatever key holds the list must be an **owned key** of the config artifact, so the
+  list travels with the profile and one endpoint's models never leak into another's.
+
+Codex has no config surface for a model list, so it only honors `Model`.
+
 ## Conventions
 
 - Standard Go style: `gofmt`/`goimports`, tabs, error wrapping with `%w`,
