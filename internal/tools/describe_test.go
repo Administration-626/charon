@@ -28,8 +28,8 @@ func TestCodexDescribeUnknownAuthModePassesThrough(t *testing.T) {
 
 func TestClaudeContextWindow(t *testing.T) {
 	cases := map[string]int{
-		"claude-opus-4-7": 200_000,
-		"CLAUDE-SONNET":   200_000,
+		"claude-opus-4-7": 1_000_000,
+		"CLAUDE-SONNET":   1_000_000,
 		"gpt-5.5":         0,
 		"":                0,
 	}
@@ -55,18 +55,14 @@ func TestOpenCodeDescribeFallsBackToAuthJSONLogin(t *testing.T) {
 	if info.AuthMode != "oauth (anthropic)" {
 		t.Errorf("AuthMode = %q, want oauth (anthropic)", info.AuthMode)
 	}
-	// An oauth login carries no email, unlike Claude/Codex — the provider name is the
-	// account identity, so "back up this login" can name the profile automatically
-	// instead of failing with "no logged-in account detected".
+	// An OAuth login carries no email, unlike Claude/Codex, so status falls back to
+	// showing the provider name as the account identity.
 	if info.Account != "anthropic" {
 		t.Errorf("Account = %q, want anthropic (provider-name fallback for oauth logins)", info.Account)
 	}
 }
 
-// TestOpenCodeSaveCurrentAccountAfterProviderLogin reproduces "sign into a provider
-// for the default profile, then can't back it up": SaveCurrentAccount requires
-// Describe().Account to be non-empty, which used to never happen for OpenCode.
-func TestOpenCodeSaveCurrentAccountAfterProviderLogin(t *testing.T) {
+func TestOpenCodeDescribeReportsAccountAfterProviderLogin(t *testing.T) {
 	sandboxHome(t)
 	writeFile(t, filepath.Join(home(), ".local", "share", "opencode", "auth.json"),
 		`{"github-copilot":{"type":"oauth","refresh":"r","access":"a","expires":0}}`)
@@ -76,7 +72,7 @@ func TestOpenCodeSaveCurrentAccountAfterProviderLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	if info.Account == "" {
-		t.Fatal("Account should be set after an oauth provider login, so backup can name the profile")
+		t.Fatal("Account should be set after an OAuth provider login for status display")
 	}
 	if info.Account != "github-copilot" {
 		t.Errorf("Account = %q, want github-copilot", info.Account)
@@ -85,9 +81,8 @@ func TestOpenCodeSaveCurrentAccountAfterProviderLogin(t *testing.T) {
 
 // TestOpenCodeAccountDetectedDespiteUnrelatedAPIKeyEntry reproduces the real bug: a
 // user connects to ChatGPT via OpenCode's own `/connect`, but auth.json also has an
-// unrelated "opencode" api-key entry (OpenCode's own hosted-models login) — which
-// used to win AuthMode first and suppress Account detection entirely, so "back up
-// this login" never found an account to name the profile after.
+// unrelated "opencode" API-key entry (OpenCode's own hosted-models login). Account
+// detection must still report the OAuth identity for status.
 func TestOpenCodeAccountDetectedDespiteUnrelatedAPIKeyEntry(t *testing.T) {
 	sandboxHome(t)
 	// Matches the real shape of an OpenAI access token (as ChatGPT via /connect stores

@@ -18,7 +18,7 @@ func (m model) modelMenuNote() string {
 	}
 	if m.tool.ModelMenu == "" {
 		return m.tool.Title + " can't be given a model list, so only the first id is used." +
-			" Add a profile per model to switch between them."
+			" Add a binding per model to switch between them."
 	}
 	return "All of them are offered in " + m.tool.Title + "'s own " + m.tool.ModelMenu +
 		", so you can switch model without leaving your session."
@@ -68,13 +68,13 @@ func (m model) View() string {
 		}
 		return body
 	case viewEditForm:
-		title := m.tool.Title + " · Edit Profile"
+		title := m.tool.Title + " · Edit Binding"
 		if !m.wiz.edit {
-			title = m.tool.Title + " · New Profile"
+			title = m.tool.Title + " · New Binding"
 		}
 		header := "\n" + titleStyle.Render(title) + "\n\n"
 
-		labels := []string{"Profile Name ", "API Base URL ", "API Key/Token", "Model Slug   "}
+		labels := []string{"Name         ", "API Base URL ", "API Key/Token", "Model Slug   "}
 		var formLines []string
 
 		for i := 0; i < formInputCount; i++ {
@@ -109,12 +109,12 @@ func (m model) View() string {
 			}
 		}
 
-		saveBtn := "  [ Save Profile ]"
+		saveBtn := "  [ Save ]"
 		cancelBtn := "  [ Cancel ]"
 		if m.formFocus == focusSave {
-			saveBtn = promptStyle.Render("▌ [ Save Profile ]")
+			saveBtn = promptStyle.Render("▌ [ Save ]")
 		} else {
-			saveBtn = hintStyle.Render("  [ Save Profile ]")
+			saveBtn = hintStyle.Render("  [ Save ]")
 		}
 		if m.formFocus == focusCancel {
 			cancelBtn = promptStyle.Render("▌ [ Cancel ]")
@@ -165,7 +165,7 @@ func (m model) wizardHeader() string {
 	if total == 0 {
 		return "\n"
 	}
-	title := titleStyle.Render(m.tool.Title + " · new profile")
+	title := titleStyle.Render(m.tool.Title + " · new binding")
 	step := stepStyle.Render(fmt.Sprintf("Step %d of %d · %s", n, total, label))
 	return "\n" + title + "\n" + step + "\n\n"
 }
@@ -190,7 +190,7 @@ func (m model) prompt() string {
 	case viewAddKey:
 		return "API key — input is hidden as you type:"
 	case viewAddName:
-		return "Name this profile (e.g. work, openrouter-fast):"
+		return "Name this binding (e.g. work, openrouter-fast):"
 	case viewAddCustomModel:
 		return "Enter model IDs — comma-separated registers them all (first is the default):"
 	case viewDupName:
@@ -210,13 +210,13 @@ func (m model) optionsHelp() string {
 		return "Options:\n  • [ Enter ] Register These Model IDs\n  • [ Esc   ] ← Back"
 	case viewAddName:
 		if len(m.allModels) > 0 {
-			return "Options:\n  • [ Enter ] Save Profile\n  • [ Esc   ] ← Back to Model Selection"
+			return "Options:\n  • [ Enter ] Save\n  • [ Esc   ] ← Back to Model Selection"
 		}
-		return "Options:\n  • [ Enter ] Save Profile\n  • [ Esc   ] ← Back to API Key"
+		return "Options:\n  • [ Enter ] Save\n  • [ Esc   ] ← Back to API Key"
 	case viewEditField:
 		return "Options:\n  • [ Enter ] Save Field\n  • [ Esc   ] Cancel Field Edit"
 	case viewDupName:
-		return "Options:\n  • [ Enter ] Duplicate Profile\n  • [ Esc   ] Cancel"
+		return "Options:\n  • [ Enter ] Duplicate\n  • [ Esc   ] Cancel"
 	default:
 		return ""
 	}
@@ -233,7 +233,7 @@ func (m model) confirmDialog() string {
 		Padding(1, 2).
 		Width(min(44, m.width-4))
 
-	content := warnStyle.Render("Delete profile "+m.delTarget+"?") + "\n" +
+	content := warnStyle.Render("Delete binding "+m.delTarget+"?") + "\n" +
 		"This can't be undone.\n\n" +
 		hintStyle.Render("enter: delete · esc: cancel")
 

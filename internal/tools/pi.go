@@ -62,13 +62,11 @@ func piEscapeValue(s string) string {
 	return s
 }
 
-// piContextWindow mirrors claudeContextWindow's Claude-model special-case, plus a
-// generic default for everything else.
+// piContextWindow is the window pi records for a model. Pi has no catalog of its
+// own for a custom provider, so every model gets the 1M that current frontier
+// models advertise; one with a smaller real window still stops at its own limit.
 func piContextWindow(model string) int {
-	if w := claudeContextWindow(model); w != 0 {
-		return w
-	}
-	return 128_000
+	return 1_000_000
 }
 
 // piBuildModels turns a list of model ids into pi model entries.
@@ -137,18 +135,6 @@ func newPi() *Tool {
 		Provider:        "openai",
 		ModelMenu:       "/model",
 		DefaultEndpoint: "https://api.openai.com/v1",
-		Artifacts: []artifact.Artifact{
-			// Other settings.json fields (theme, extensions list, shell, ...) are CLI
-			// preferences, not per-profile auth — preserved live. defaultModel and
-			// defaultThinkingLevel switch with the profile, matching Claude Code/Codex.
-			artifact.NewMergedJSONFile("settings.json", settingsPath, 0o600,
-				"defaultProvider", "defaultModel", "defaultThinkingLevel").
-				WithDisplay("defaultModel", "defaultThinkingLevel"),
-			artifact.NewFile("charon.ts", extensionPath, 0o600), // charon owns this extension file outright
-			// auth.json holds OAuth provider logins. The charon provider stores its key
-			// in charon.ts (apiKey field) instead; snapshotting auth.json would silently
-			// clobber existing OAuth sessions on profile switch.
-		},
 		ApplyAuth: func(a AuthSpec) error {
 			// Preserve the previously-registered model list when this call doesn't bring
 			// its own (rename, key rotation, CLI --model) — otherwise pi's /model picker

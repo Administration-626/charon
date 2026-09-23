@@ -70,7 +70,7 @@ func TestCodexAccountFallsBackToAccountID(t *testing.T) {
 
 func TestClaudeAccountFromClaudeJSON(t *testing.T) {
 	home := sandboxHome(t)
-	writeFile(t, filepath.Join(home, ".claude", "settings.json"), `{}`)
+	writeFile(t, filepath.Join(home, ".claude", "settings.json"), `{"env":{"ANTHROPIC_API_KEY":"sk-test"}}`)
 	writeFile(t, filepath.Join(home, ".claude.json"),
 		`{"oauthAccount":{"emailAddress":"bob@example.com"}}`)
 
@@ -82,7 +82,7 @@ func TestClaudeAccountFromClaudeJSON(t *testing.T) {
 
 func TestClaudeAccountAbsent(t *testing.T) {
 	home := sandboxHome(t)
-	writeFile(t, filepath.Join(home, ".claude", "settings.json"), `{}`)
+	writeFile(t, filepath.Join(home, ".claude", "settings.json"), `{"env":{"ANTHROPIC_API_KEY":"sk-test"}}`)
 
 	info, _ := Find("claude").Describe()
 	if info.Account != "" {

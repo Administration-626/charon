@@ -17,9 +17,9 @@
 
 Charon is a tiny Go CLI that detects the **Codex**, **Claude Code**,
 **OpenCode**, and **Pi** CLIs and switches each one's **endpoint + credentials**
-between named profiles. Every profile is a full snapshot of that tool's auth
-surface, so it works for both API-key logins and OAuth/ChatGPT sessions — and
-switching away and back is always clean and reversible.
+between named bindings. A binding is an endpoint, an API key, and the models it
+should offer — not a snapshot of the tool's config. Switching re-renders that
+binding into the tool, overwriting only the keys charon owns.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Administration-626/charon/main/assets/screenshot.png" alt="Charon interactive menu" width="80%">
@@ -29,23 +29,22 @@ switching away and back is always clean and reversible.
 
 - **One command, four tools.** Manage Codex, Claude Code, OpenCode, and Pi from
   a single interactive menu or a scriptable CLI.
-- **Named profiles.** Snapshot each tool's full auth surface and hop between
-  endpoints/keys instantly.
-- **Model discovery.** Add a profile from just an endpoint + key; Charon fetches
-  the model list and lets you pick one — or type a custom model slug directly.
+- **Named bindings.** Save an endpoint, a key, and the models it offers, then
+  hop between them. One site can back several tools.
+- **Model discovery.** Add a binding from an endpoint + key; Charon fetches the
+  model list and lets you pick — or type model ids directly.
 - **Switch models inside the tool.** Check off the models you actually use and
   Charon registers them in the tool's own picker (Claude Code's `/model`, OpenCode's
   `/models`, Pi's `/model`), so changing model mid-session never means going back
   through Charon.
-- **Single-page form.** Add or edit a profile on one screen (Name, URL, Token,
-  Model) with direct typing and `[ Save Profile ]` / `[ Cancel ]` buttons — no
-  multi-step wizard, no view-jumping.
-- **Instant clone & search.** Press `c` to duplicate a profile without prompts,
+- **Single-page form.** Add or edit a binding on one screen (Name, URL, Token,
+  Model) with direct typing and `[ Save ]` / `[ Cancel ]` buttons.
+- **Instant clone & search.** Press `c` to duplicate a binding without prompts,
   and type to fuzzy-filter the model list in real time.
-- **Unicode names.** Profile names accept letters and digits in any script, so
-  Chinese (or other non-ASCII) names work natively.
-- **Safe by default.** Every switch is backed up first, writes are atomic, and an
-  auto-captured `default` profile means you can always revert.
+- **Unicode names.** Binding names support any script, including Chinese; spaces
+  and control characters are rejected.
+- **Safe by default.** Writes are atomic. Deleting the binding a tool is
+  currently using is refused — switch to another one first.
 - **Non-destructive.** Charon only ever touches its own `charon` provider entry
   in each tool's config, never your hand-authored providers.
 
@@ -98,34 +97,30 @@ go build -o charon ./cmd/charon   # or just build here
 ### Interactive menu
 
 Run `charon` with no arguments to open an arrow-key menu: pick a tool, then
-switch, add, edit, or delete profiles. Quit any time with `ctrl+c`.
+switch, add, edit, or delete bindings. Quit any time with `ctrl+c`.
 
 ### CLI reference
 
 ```sh
 charon                       # interactive arrow-key menu
-charon status                # show each tool's active profile, endpoint, and auth (--json)
-charon ls <tool>             # list saved profiles (--json)
-charon save <tool> [name]    # snapshot current live config (omit name to use the logged-in account)
-charon refresh <tool>        # capture in-session changes (model, effort) into the active profile
+charon status                # show each tool's live config and active binding (--json)
+charon ls <tool>             # list saved bindings (--json)
 charon models <tool>         # list models offered by an API (--key [--endpoint])
-charon add <tool>            # add + activate a profile (--name --key [--endpoint --model --models])
-charon edit <tool> <p>       # change a profile's endpoint/key/model/models (--name to rename)
-charon rename <tool> <o> <n> # rename a saved profile
-charon cp <tool> <src> <dst> # duplicate a saved profile
-charon switch <tool> <p>     # apply a saved profile (backs up current first)
-charon restore <tool>        # revert to the auto-captured default
-charon undo <tool>           # revert to the most recent pre-switch backup
-charon prune <tool>          # delete old backups, keeping the newest (--keep N, default 10)
-charon rm <tool> <p>         # delete a profile
+charon add <tool>            # add + activate a binding (--name --key and at least one model id)
+charon edit <tool> <b>       # change a binding's endpoint/key/model/models (--name to rename)
+charon rename <tool> <o> <n> # rename a saved binding
+charon cp <tool> <src> <dst> # duplicate a saved binding
+charon switch <tool> <b>     # render a saved binding into the tool
+charon rm <tool> <b>         # delete a binding (refused while it is the active one)
 charon completion <shell>    # print a bash/zsh/fish completion script
 charon update                # upgrade charon to the latest release
 charon uninstall             # remove the installed charon binary
 ```
 
-`status` and `ls` accept `--json` for scripting and editor integrations. `status`
-also flags **`(modified)`** next to a tool whose live config changed outside Charon
-(e.g. a fresh `claude login`), so a stale active profile is easy to spot.
+`status` and `ls` accept `--json` for scripting and editor integrations.
+`status` reads the tool's live config; `ls` reads the saved bindings. A model
+change made with the tool's own `/model` is overwritten the next time that
+binding is rendered.
 
 ### Shell completions
 
@@ -141,16 +136,16 @@ charon completion fish | source
 ```
 
 They complete subcommands, tool names, and — for `switch`/`edit`/`rename`/`cp`/`rm`
-— saved profile names.
+— saved binding names.
 
-## Adding & editing profiles
+## Adding & editing bindings
 
 ### From an endpoint + key (with model discovery)
 
-In the menu, drill into a tool and choose **＋ Add new profile…** (or press `a`).
+In the menu, drill into a tool and choose **＋ Add new binding…** (or press `a`).
 A single-page form collects everything on one screen:
 
-- **Name** — a profile name (letters/digits in any script; Unicode is fine).
+- **Name** — a binding name (any script; Unicode is fine).
 - **API base URL** — leave blank to accept the provider default; a real value is
   never prefilled.
 - **API key** — masked input.
@@ -162,8 +157,8 @@ A single-page form collects everything on one screen:
     e.g. `kimi-k2, deepseek-v3`) for endpoints or gateways that do not expose
     `/v1/models`. If an online fetch fails, Charon falls back to this manual screen
     automatically with existing IDs prefilled.
-  You can also type a model slug directly into the field, or leave it blank for the
-  tool's default.
+  You can also type a model slug directly into the field. If you leave it blank,
+  the first model in the registered list becomes the default.
 
 In the model picker, just **start typing to fuzzy-filter** the list in real time
 (Backspace edits the query, `Esc` clears it):
@@ -176,62 +171,40 @@ In the model picker, just **start typing to fuzzy-filter** the list in real time
 - Press **`Enter`** on any model row to set it as the default (marked `✓`),
   automatically adding it to the registered list if not already checked, and return
   to the form.
-- Press **`Enter`** on **`(skip — no model override)`** to clear all selections and
-  revert to no override.
 - Check nothing and the whole fetched list is registered.
-Tab to **`[ Save Profile ]`** to write the endpoint/key/model into the tool's live
-config and switch to it, or **`[ Cancel ]`** to discard. Name, URL, and key are
-required; a red status bar flags anything missing on submit.
+Tab to **`[ Save ]`** to write the endpoint/key/model into the tool's live
+config and switch to it, or **`[ Cancel ]`** to discard. Name, key, and at least
+one model are required. Leave URL blank to use the tool's default endpoint; a red
+status bar flags missing required values on submit.
 
 ### Switching model inside the tool
 
-The models a profile registers land in the tool's own menu, so you can change model
+The models a binding registers land in the tool's own menu, so you can change model
 without leaving your session: Claude Code's `/model` (via `modelPicker`), OpenCode's
 `/models` (via the `charon` provider's model map), and Pi's `/model` (via the
-generated extension). The list travels with the profile — switch profiles and the
-menu switches too, so a gateway's models never leak into your official account's
-picker. Codex is the exception: its config has no place to register extra models, so
-its model still comes from the profile (`charon edit codex <p> --model ...`).
+generated extension). The list travels with the binding — switch bindings and the
+menu switches too. Codex is the exception: its config has no place to register extra
+models, so a Codex binding carries exactly one (`charon edit codex <b> --model ...`).
+A binding with one model replaces the previous binding's list with that one model.
+Changing the model in the tool does not update the saved binding. Charon reapplies
+the binding's saved default when it renders that binding again.
 
-### Backing up a logged-in account
+In the menu, press **`c`** on a binding to **clone** it instantly into
+`<name>-copy` with no prompts — focus jumps to the new copy, which shares the
+same key and model list and is not activated.
 
-Already signed in to Codex or Claude Code with a real account? Charon can snapshot
-that session and **name the profile after the account** automatically:
+### Editing an existing binding
 
-```sh
-codex login              # sign in as your work account
-charon save codex        # → saves & activates profile "you@work.com"
-
-codex login              # sign in as a second account
-charon save codex        # → saves & activates profile "you@personal.com"
-
-charon switch codex you@work.com   # hop back instantly
-```
-
-The email is read from the tool's own config — Codex's `id_token`, Claude Code's
-`~/.claude.json` — purely to name the profile; that file is only ever read, never
-modified. These login backups are **not editable** (there's no endpoint/key to
-change); re-running `charon save` refreshes the snapshot. An API-key login has
-no account, so `charon save` still expects an explicit name.
-
-In the menu, press **`c`** on a profile to **clone** it instantly into
-`<name>-copy` with no prompts — focus jumps to the new copy, which is a normal
-editable profile you can rename, edit, or delete.
-
-### Editing an existing profile
-
-Press **`e`** on a profile to open its edit form, showing the current **Name**,
+Press **`e`** on a binding to open its edit form, showing the current **Name**,
 **URL**, **Token** (masked), and **Model** on a single screen. Type directly into
 any field; the **Model** field's **`[ Fetch & Pick Online Models ]`** and
 **`[ Type Model IDs Manually ]`** buttons let you update or re-fetch the registered
-models. The models already registered with the tool (and the tool's menu, e.g.
-`/model` or `/models`) are noted under the action buttons and are kept as-is unless
-you curate a new list, so a rename or key rotation never empties the tool's own
-picker. Tab to **`[ Save Profile ]`**
-to apply the changes and switch to the profile — renaming is handled
-automatically — or **`[ Cancel ]`** to discard. The auto-captured **`default`**
-profile and login backups (which have no endpoint/key) are protected and cannot
-be edited.
+models. The model list saved on this binding stays as-is unless you curate a new list,
+so a rename or key rotation keeps the binding's own picker. Tab to **`[ Save ]`**
+to apply the changes — renaming is handled automatically — or **`[ Cancel ]`** to
+discard. Editing a binding that is not the active one updates only the catalog;
+the live config changes when you switch to it. Press **`d`** to delete; the active
+binding is refused until you switch away.
 
 ### Non-interactively
 
@@ -243,7 +216,7 @@ charon add    codex --name openrouter --endpoint https://openrouter.ai/api/v1 \
 
 `--models` registers a list in the tool's own picker, so you can switch between them
 from inside the tool. The first id becomes the default when `--model` is omitted, and
-the list is stored with the profile, so a later `edit` that doesn't pass `--models`
+the list is stored with the binding, so a later `edit` that doesn't pass `--models`
 leaves it intact:
 
 ```sh
@@ -253,31 +226,42 @@ charon edit claude gateway --key sk-rotated   # picker list survives untouched
 charon edit claude gateway --models glm-4.6   # curate the menu down
 ```
 
+When `--models` excludes the current default, its first id becomes the new default.
+Pass `--model` to choose another default explicitly; that id is also kept in the
+picker list.
+
 Each tool gets a dedicated `charon` provider entry written into its own config
 format (Codex `[model_providers.charon]`, Claude `env.ANTHROPIC_*`, OpenCode an
 `@ai-sdk/openai-compatible` provider, Pi a `pi.registerProvider("charon", ...)`
 extension), so switching away and back is clean.
 
-A typical flow: log into a tool normally, `charon save codex work-key`; log into a
-different endpoint/key, `charon save codex proxy`; then hop between them with
-`charon switch codex work-key` — or just run `charon` and pick from the menu.
-`restore` always returns to the pristine config captured the first time Charon ran.
+A typical flow: `charon add codex --name work-key --key sk-... --model gpt-5`,
+then `charon add codex --name proxy --endpoint https://gateway.example/v1 --key sk-...
+--model glm-4.6`, and hop with `charon switch codex work-key` — or just run `charon`
+and pick from the menu.
 
 ## How it works
 
-- **Storage:** `~/.config/charon/` (`$XDG_CONFIG_HOME` respected).
-  - `profiles/<tool>/<name>/` — snapshot files + `manifest.json`.
-  - `backups/<tool>/<timestamp>/` — auto-backup taken before every switch, add,
-    or undo. `charon undo` reverts to the newest; the last 10 per tool are kept
-    (tune with `charon prune <tool> --keep N`).
-  - `config.json` — active profile per tool.
-- **`default`** is captured automatically the first time a detected tool is seen,
-  so reverting is always possible and it is never overwritten.
+- **Storage:** `~/.config/charon/` (`$XDG_CONFIG_HOME` respected). Five JSON files,
+  no database:
+  - `providers.json` — a site: id, base URL. Reused across tools.
+  - `credentials.json` — a key for one site. Mode `0600`.
+  - `models.json` — a model slug for one site.
+  - `bindings.json` — one tool's saved choice: name, credential, default model,
+    and the model ids its picker should offer.
+  - `active.json` — which binding each tool currently renders.
+- A binding's models must belong to the same site as its key. Codex carries
+  exactly one model.
+- Switching updates `active.json` and re-renders that binding. Only the keys
+  charon owns are overwritten.
 - Writes are **atomic** (temp file → `rename`).
+- On first open, saved legacy profiles with endpoint, key, and model data are imported
+  as bindings. The old profile tree is kept; snapshot-only profiles, backups, and OAuth
+  logins are not imported.
 
 ## Security
 
-Profiles are stored **unencrypted** on disk (`0600` for files, `0700` for
+Bindings are stored **unencrypted** on disk (`0600` for files, `0700` for
 directories — the `x` bit on directories means "enter", not "execute", so
 `0700` is the correct way to allow access). This is the same permission model
 used by the tools themselves (`~/.codex/config.toml`, `~/.claude/settings.json`,
@@ -285,17 +269,18 @@ etc.) — if an attacker can read `~/.config/charon`, they can also read those
 files. **Shell config files** (`~/.bashrc`, `~/.zshrc`), by contrast, default to
 `0644` (world-readable), so storing API keys there is considerably less secure.
 Keep `~/.config/charon` private. Writes are **atomic** (temp file → `rename`).
+Nothing is sent off the machine.
 
 ## Project layout
 
 ```
 cmd/charon/          entrypoint + subcommands
-internal/artifact/   snapshot/restore primitives (Artifact interface + implementations)
+internal/artifact/   atomic writes
 internal/tools/      per-tool adapters (codex, claude, opencode, pi)
-internal/profile/    snapshot store (split by concern: snapshot, apply, backup, manage)
+internal/catalog/    providers, credentials, models, bindings, active pointer
 internal/models/     fetch model lists from a provider API (openai/anthropic wire)
 internal/tui/        bubbletea interactive menu (single-page forms, fuzzy model search)
-internal/secret/     masking + platform keychain access
+internal/secret/     masking
 ```
 
 ## Development

@@ -7,8 +7,6 @@ import (
 	"strings"
 
 	toml "github.com/pelletier/go-toml/v2"
-
-	"charon/internal/artifact"
 )
 
 func home() string {
@@ -16,11 +14,11 @@ func home() string {
 	return h
 }
 
-// claudeContextWindow returns the window to pin for a Claude model (200K), else 0.
-// Conservative: avoids the 1M beta window; OpenAI slugs Codex already sizes itself.
+// claudeContextWindow returns the window to pin for a Claude model (1M), else 0.
+// OpenAI slugs Codex already sizes itself, so those stay unset.
 func claudeContextWindow(model string) int {
 	if strings.Contains(strings.ToLower(model), "claude") {
-		return 200_000
+		return 1_000_000
 	}
 	return 0
 }
@@ -36,20 +34,8 @@ func newCodex() *Tool {
 		Title:    "Codex",
 		Provider: "openai",
 		// No ModelMenu: model_providers.<id> has no field for a model list, so Codex's
-		// /model only ever lists its built-in presets. A Codex profile carries one model.
+		// /model only ever lists its built-in presets. A Codex binding carries one model.
 		DefaultEndpoint: "https://api.openai.com/v1",
-		Artifacts: []artifact.Artifact{
-			// Other config.toml settings (sandbox mode, approval policy, ...) are CLI
-			// preferences, not per-profile auth — preserved live. model and
-			// model_reasoning_effort switch with the profile, matching Claude Code.
-			artifact.NewMergedTOMLFile("config.toml", configPath, 0o600,
-				"model", "model_context_window", "model_provider", "model_providers", "model_reasoning_effort").
-				WithDisplay("model", "model_reasoning_effort"),
-			// auth.json holds ChatGPT OAuth tokens or the native OPENAI_API_KEY. Neither
-			// participates in auth for a charon custom provider (key lives in config.toml
-			// experimental_bearer_token); snapshotting it would silently clobber the
-			// user's OAuth login whenever profiles are switched.
-		},
 		ApplyAuth: func(a AuthSpec) error {
 			// Register a self-contained OpenAI-compatible provider (key embedded inline)
 			// and point Codex at it; auth.json (ChatGPT OAuth) is left untouched.
@@ -61,8 +47,8 @@ func newCodex() *Tool {
 			if modelSlug != "" {
 				cfg["model"] = modelSlug
 			}
-			// Codex sizes unknown (non-OpenAI) slugs at 272K > Claude's real 200K and overruns
-			// the context; pin the window for Claude models, clearing any stale prior value.
+			// Codex sizes unknown (non-OpenAI) slugs from its own catalog, which undersizes
+			// Claude models; pin their window, clearing any stale prior value.
 			delete(cfg, "model_context_window")
 			if w := claudeContextWindow(modelSlug); w != 0 {
 				cfg["model_context_window"] = w
@@ -81,33 +67,6 @@ func newCodex() *Tool {
 				return err
 			}
 			return writeTOMLMap(configPath, cfg, 0o600)
-		},
-		OfficialOAuth: func() bool {
-			data, err := os.ReadFile(authPath)
-			if err != nil {
-				return false
-			}
-			var auth struct {
-				AuthMode string `json:"auth_mode"`
-				Tokens   any    `json:"tokens"`
-			}
-			return json.Unmarshal(data, &auth) == nil && (auth.AuthMode == "chatgpt" || auth.Tokens != nil)
-		},
-		UseOfficialAuth: func() error {
-			cfg, err := loadTOMLMap(configPath)
-			if err != nil {
-				return err
-			}
-			delete(cfg, "model_provider")
-			delete(cfg, "model_context_window")
-			return writeTOMLMap(configPath, cfg, 0o600)
-		},
-		OAuthFingerprint: func() string {
-			info, err := os.Stat(authPath)
-			if err != nil {
-				return ""
-			}
-			return info.ModTime().String()
 		},
 		Detected: func() bool {
 			return detected("codex", configPath, authPath)

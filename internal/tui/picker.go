@@ -28,9 +28,27 @@ type minLoadElapsedMsg struct{}
 
 func fetchModelsCmd(provider, endpoint, key string) tea.Cmd {
 	return func() tea.Msg {
-		l, err := models.Fetch(models.Provider(provider), endpoint, key)
+		l, err := probeModels(provider, endpoint, key)
 		return fetchedMsg{list: l, err: err}
 	}
+}
+
+// probeModels asks the endpoint for its model list in the tool's historical dialect
+// first, then the other. Which dialect answered is not stored.
+func probeModels(provider, endpoint, key string) ([]string, error) {
+	first := models.Provider(provider)
+	list, err := models.Fetch(first, endpoint, key)
+	if err == nil {
+		return list, nil
+	}
+	other := models.OpenAI
+	if first == models.OpenAI {
+		other = models.Anthropic
+	}
+	if list, err2 := models.Fetch(other, endpoint, key); err2 == nil {
+		return list, nil
+	}
+	return nil, err
 }
 
 // loadingMessages are playful lines shown while fetching, one picked at random per fetch.
@@ -58,7 +76,7 @@ func (m *model) beginFetch() tea.Cmd {
 	m.pending = nil
 	m.loadingMsg = randomLoadingMsg()
 	m.spinner = newSpinner()
-	return tea.Batch(m.spinner.Tick, fetchModelsCmd(m.tool.Provider, m.wiz.endpoint, m.wiz.key))
+	return tea.Batch(m.spinner.Tick, fetchModelsCmd(m.tool.Provider, m.tool.ResolveEndpoint(m.wiz.endpoint), m.wiz.key))
 }
 
 // applyFetched moves to the model picker on success. On failure it falls through to
@@ -76,7 +94,7 @@ func (m model) applyFetched(msg fetchedMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// startManualModels opens the type-the-ids screen, prefilled with whatever the profile
+// startManualModels opens the type-the-ids screen, prefilled with whatever the binding
 // already registers so an edit doesn't have to retype the list. Reached both from the
 // picker's "✎ Enter model IDs" row and from a failed fetch.
 func (m model) startManualModels() (tea.Model, tea.Cmd) {
@@ -210,7 +228,7 @@ func (m *model) defaultModelLabel() string {
 }
 
 // landingValue is the row the picker should open on: the current default model, else the
-// Done row while a selection is pending, else "skip" when nothing is chosen at all.
+// Done row while a selection is pending, else the first available model or custom entry.
 func (m *model) landingValue() string {
 	if m.wiz.model != "" {
 		return m.wiz.model
@@ -218,7 +236,10 @@ func (m *model) landingValue() string {
 	if m.tool != nil && m.tool.ModelMenu != "" && len(m.wiz.models) > 0 {
 		return doneModels
 	}
-	return skipModel
+	if len(m.allModels) > 0 {
+		return m.allModels[0]
+	}
+	return customModel
 }
 
 // indexOfValue returns the position of the row carrying value, or 0 when absent (e.g.
@@ -232,7 +253,7 @@ func indexOfValue(items []list.Item, value string) int {
 	return 0
 }
 
-// modelRowTitle prefixes a model row with its state: "✓" for the profile's default
+// modelRowTitle prefixes a model row with its state: "✓" for the binding's default
 // model, "•" for a row checked into the curated picker list, two spaces otherwise so
 // unmarked ids stay aligned with marked ones.
 func modelRowTitle(id string, isDefault, isChecked bool) string {
@@ -246,8 +267,7 @@ func modelRowTitle(id string, isDefault, isChecked bool) string {
 	}
 }
 
-// renderModels rebuilds the picker rows for the current query (echoed in the title),
-// always keeping a trailing "skip" row.
+// renderModels rebuilds the picker rows for the current query (echoed in the title).
 func (m *model) renderModels() {
 	ids := filterModels(m.allModels, m.modelFilter)
 	var items []list.Item
@@ -281,17 +301,9 @@ func (m *model) renderModels() {
 	if len(ids) > 0 && m.modelFilter == "" {
 		items = append(items, item{value: sepSentinel})
 	}
-	skipTitle := "(skip — no model override)"
-	skipChosen := m.wiz.model == "" && len(m.wiz.models) == 0
-	if skipChosen {
-		skipTitle = "✓ " + skipTitle
-	}
-	items = append(items, item{title: skipTitle, desc: "", value: skipModel, active: skipChosen})
-
 	m.list.SetItems(items)
 	// No search: land on the row the current state points at; while searching, the best
-	// match is on top. Never land on "skip" while models are checked — that row clears
-	// the selection, so it must be chosen deliberately rather than by a stray enter.
+	// match is on top.
 	selectedIndex := 0
 	if m.modelFilter == "" {
 		selectedIndex = indexOfValue(items, m.landingValue())

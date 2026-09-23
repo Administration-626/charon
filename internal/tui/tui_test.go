@@ -2,15 +2,47 @@ package tui
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
-	"charon/internal/profile"
+	"charon/internal/catalog"
 	"charon/internal/tools"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+func openTestCatalog(t *testing.T, detectCodex bool) *catalog.Catalog {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USER", "tester")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("PATH", t.TempDir()) // keeps Claude detection from querying the real Keychain
+	settings := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settings), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settings, []byte(`{"env":{"ANTHROPIC_API_KEY":"sk-test"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if detectCodex {
+		path := filepath.Join(home, ".codex", "config.toml")
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("model = \"gpt-5\"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c, err := catalog.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
 
 // errFetchFailed stands in for a models-endpoint failure (404, auth, no such route).
 var errFetchFailed = errors.New("API returned 404 Not Found (check endpoint and key)")
@@ -58,7 +90,7 @@ func TestWizardStep(t *testing.T) {
 		{viewAddKey, 2, 4, "API key"},
 		{viewFetching, 3, 4, "choose a model"},
 		{viewPickModel, 3, 4, "choose a model"},
-		{viewAddName, 4, 4, "name the profile"},
+		{viewAddName, 4, 4, "name the binding"},
 		// Non-wizard views report no progress.
 		{viewTools, 0, 0, ""},
 		{viewProfiles, 0, 0, ""},
@@ -75,13 +107,11 @@ func TestWizardStep(t *testing.T) {
 	}
 }
 
-func TestDefaultEditFormHidesNameField(t *testing.T) {
-	m := model{tool: &tools.Tool{Title: "Fake"}, wiz: wizard{name: "default", origName: "default"}}
+func TestEditFormAlwaysShowsNameField(t *testing.T) {
+	m := model{tool: &tools.Tool{Title: "Fake"}, wiz: wizard{name: "work", origName: "work", edit: true}}
 	m.loadEditForm()
-	for _, raw := range m.list.Items() {
-		if raw.(item).value == fieldName {
-			t.Fatal("default edit form exposes rename field")
-		}
+	if m.formInputs[focusName].Value() != "work" {
+		t.Fatalf("name field = %q, want work", m.formInputs[focusName].Value())
 	}
 }
 
@@ -150,7 +180,7 @@ func TestSkipSeparators(t *testing.T) {
 		t.Errorf("down: index = %d, want 2 (divider skipped)", got)
 	}
 
-	// Moving up onto the divider should continue back to the profile (idx 0).
+	// Moving up onto the divider should continue back to the binding (idx 0).
 	before = m.list.Index()
 	m.list.CursorUp()
 	m.skipSeparators(before)
@@ -160,11 +190,7 @@ func TestSkipSeparators(t *testing.T) {
 }
 
 func TestQuitKeyDisabledInPicker(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	st, err := profile.Open()
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := openTestCatalog(t, false)
 	m := newModel(st, "v1.0.0")
 	if m.list.KeyMap.Quit.Enabled() {
 		t.Error("Quit key should be disabled after newModel")
@@ -194,7 +220,6 @@ func TestIsSentinel(t *testing.T) {
 		want  bool
 	}{
 		{addSentinel, true},
-		{skipModel, true},
 		{customModel, true},
 		{backModel, true},
 		{sepSentinel, true},
@@ -287,11 +312,7 @@ func TestSetStatusAndClearStatus(t *testing.T) {
 }
 
 func TestEscAndQKeyNavigation(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	st, err := profile.Open()
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := openTestCatalog(t, false)
 	m := newModel(st, "v1.0.0")
 
 	testKeys := []struct {
@@ -330,10 +351,7 @@ func TestEscAndQKeyNavigation(t *testing.T) {
 }
 
 func TestEnterKeyInToolsAndProfiles(t *testing.T) {
-	st, err := profile.Open()
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := openTestCatalog(t, true)
 	m := newModel(st, "v0.0.0")
 	m.width = 100
 	m.height = 30
@@ -359,7 +377,7 @@ func TestEnterKeyInToolsAndProfiles(t *testing.T) {
 			t.Errorf("Enter on tool in viewTools = %v, want viewProfiles", updated.view)
 		}
 
-		// 2. Enter on '＋ Add new profile…' in viewProfiles opens viewEditForm.
+		// 2. Enter on '＋ Add new binding…' in viewProfiles opens viewEditForm.
 		addIdx := -1
 		for i, it := range updated.list.Items() {
 			if row, ok := it.(item); ok && row.value == addSentinel {
@@ -379,10 +397,7 @@ func TestEnterKeyInToolsAndProfiles(t *testing.T) {
 }
 
 func TestAKeyInProfilesOpensAddForm(t *testing.T) {
-	st, err := profile.Open()
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := openTestCatalog(t, false)
 	m := newModel(st, "v0.0.0")
 	m.tool = m.allTools[0]
 	m.view = viewProfiles
@@ -393,7 +408,7 @@ func TestAKeyInProfilesOpensAddForm(t *testing.T) {
 		t.Errorf("pressing 'a' in viewProfiles view = %v, want viewEditForm", updated.view)
 	}
 	if updated.wiz.edit {
-		t.Error("wiz.edit should be false for a new profile")
+		t.Error("wiz.edit should be false for a new binding")
 	}
 }
 
@@ -402,12 +417,7 @@ func TestAKeyInProfilesOpensAddForm(t *testing.T) {
 // since that's what the curation keys are for.
 func pickerModel(t *testing.T, fetched []string) *model {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	st, err := profile.Open()
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := openTestCatalog(t, false)
 	m := newModel(st, "v0.0.0")
 	m.tool = toolWithModelMenu(t, &m)
 	m.view = viewPickModel
@@ -577,7 +587,7 @@ func TestFailedFetchFallsBackToManualEntry(t *testing.T) {
 	}
 	// The already-registered ids are prefilled so an edit needn't retype them.
 	if v := got.input.Value(); v != "kimi-k2, glm-4.6" {
-		t.Errorf("input = %q, want the profile's current ids prefilled", v)
+		t.Errorf("input = %q, want the binding's current ids prefilled", v)
 	}
 }
 
@@ -748,18 +758,18 @@ func TestPickerDoneRow(t *testing.T) {
 func TestPickerLandingRules(t *testing.T) {
 	m := pickerModel(t, []string{"kimi-k2", "glm-4.6", "deepseek-v3"})
 
-	// Rule 1: landingValue defaults to skip when nothing is chosen.
+	// Rule 1: when nothing is chosen, land on the first available model.
 	m.wiz.model = ""
 	m.wiz.models = nil
 	m.renderModels()
-	if got := m.landingValue(); got != skipModel {
-		t.Errorf("landingValue() = %q, want %q", got, skipModel)
+	if got := m.landingValue(); got != "kimi-k2" {
+		t.Errorf("landingValue() = %q, want kimi-k2", got)
 	}
-	if sel, ok := m.list.SelectedItem().(item); !ok || sel.value != skipModel {
-		t.Errorf("selected item = %+v, want skip row", m.list.SelectedItem())
+	if sel, ok := m.list.SelectedItem().(item); !ok || sel.value != "kimi-k2" {
+		t.Errorf("selected item = %+v, want first model", m.list.SelectedItem())
 	}
 
-	// Rule 2: when models are checked but no explicit default is set, land on Done row (not skip).
+	// Rule 2: when models are checked but no explicit default is set, land on Done row.
 	m.toggleModel("glm-4.6")
 	m.renderModels()
 	if got := m.landingValue(); got != doneModels {
@@ -787,37 +797,13 @@ func TestPickerLandingRules(t *testing.T) {
 	}
 }
 
-func TestPickerSkipClearsSelection(t *testing.T) {
+func TestPickerHasNoSkipRow(t *testing.T) {
 	m := pickerModel(t, []string{"kimi-k2", "glm-4.6"})
-	m.wiz.models = []string{"kimi-k2", "glm-4.6"}
-	m.wiz.model = "kimi-k2"
 	m.renderModels()
-
-	skipIdx := -1
-	for i, it := range m.list.Items() {
-		if row, ok := it.(item); ok && row.value == skipModel {
-			skipIdx = i
-			break
+	for _, it := range m.list.Items() {
+		if row, ok := it.(item); ok && strings.Contains(row.title, "skip") {
+			t.Fatalf("picker still offers a skip row: %+v", row)
 		}
-	}
-	if skipIdx < 0 {
-		t.Fatal("no skip row in picker")
-	}
-	m.list.Select(skipIdx)
-
-	next, _ := m.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
-	got, ok := next.(model)
-	if !ok {
-		t.Fatalf("updatePickModel returned %T, want model", next)
-	}
-	if got.view != viewEditForm {
-		t.Errorf("view = %v, want viewEditForm", got.view)
-	}
-	if got.wiz.model != "" {
-		t.Errorf("model = %q, want empty after skip", got.wiz.model)
-	}
-	if len(got.wiz.models) != 0 {
-		t.Errorf("models = %v, want cleared after skip", got.wiz.models)
 	}
 }
 

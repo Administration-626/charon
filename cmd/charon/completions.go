@@ -1,7 +1,7 @@
 package main
 
 // Shell completion scripts. They complete subcommands and tool names statically,
-// and profile names dynamically by shelling out to the hidden `charon __profiles`.
+// and binding names dynamically by shelling out to the hidden `charon __profiles`.
 // Kept free of backticks so they can live in Go raw string literals.
 
 const bashCompletion = `# bash completion for charon
@@ -9,7 +9,7 @@ _charon() {
     local cur cword cmds tools sub
     cur="${COMP_WORDS[COMP_CWORD]}"
     cword=$COMP_CWORD
-    cmds="status ls save models add edit rename cp switch use restore undo prune rm completion version help"
+    cmds="status ls models add edit rename cp switch use rm completion version help"
     tools="codex claude opencode pi"
 
     if [ "$cword" -eq 1 ]; then
@@ -26,7 +26,7 @@ _charon() {
                 COMPREPLY=( $(compgen -W "$(charon __profiles "${COMP_WORDS[2]}" 2>/dev/null)" -- "$cur") )
             fi
             ;;
-        ls|save|models|add|status|undo|prune|restore)
+        ls|models|add|status)
             if [ "$cword" -eq 2 ]; then
                 COMPREPLY=( $(compgen -W "$tools" -- "$cur") )
             fi
@@ -45,7 +45,7 @@ const zshCompletion = `#compdef charon
 # zsh completion for charon
 _charon() {
     local -a cmds tools
-    cmds=(status ls save models add edit rename cp switch use restore undo prune rm completion version help)
+    cmds=(status ls models add edit rename cp switch use rm completion version help)
     tools=(codex claude opencode pi)
 
     if (( CURRENT == 2 )); then
@@ -61,7 +61,7 @@ _charon() {
                 compadd -- ${(f)"$(charon __profiles ${words[3]} 2>/dev/null)"}
             fi
             ;;
-        ls|save|models|add|status|undo|prune|restore)
+        ls|models|add|status)
             (( CURRENT == 3 )) && compadd -- $tools
             ;;
         completion)
@@ -77,7 +77,7 @@ function __charon_needs_tool
     set -l cmd (commandline -opc)
     if test (count $cmd) -eq 2
         switch $cmd[2]
-            case switch use rm edit rename cp ls save models add status undo prune restore
+            case switch use rm edit rename cp ls models add status
                 return 0
         end
     end
@@ -103,7 +103,7 @@ function __charon_profiles
 end
 
 complete -c charon -f
-complete -c charon -n '__fish_use_subcommand' -a 'status ls save models add edit rename cp switch use restore undo prune rm completion version help'
+complete -c charon -n '__fish_use_subcommand' -a 'status ls models add edit rename cp switch use rm completion version help'
 complete -c charon -n '__charon_needs_tool' -a 'codex claude opencode pi'
 complete -c charon -n '__charon_needs_profile' -a '(__charon_profiles)'
 `

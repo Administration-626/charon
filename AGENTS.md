@@ -2,29 +2,25 @@
 
 Guidance for AI coding agents (and humans) working in this repository.
 `charon` is a small Go CLI that detects the Codex, Claude Code, OpenCode, and Pi
-CLIs and switches each one's **endpoint + credentials** between named profiles.
+CLIs and switches each one's **endpoint + credentials** between named bindings.
 
 ## Golden rule: this tool edits real user credentials
 
 `charon` reads and writes live config for other tools (`~/.codex`, `~/.claude`,
-`~/.config/opencode`, `~/.local/share/opencode`, `~/.pi/agent`) and the macOS
-Keychain. It also
-**reads** `~/.claude.json` (`oauthAccount.emailAddress`) solely to name an
-account-backup profile — that file is never written or snapshotted.
+`~/.config/opencode`, `~/.local/share/opencode`, `~/.pi/agent`). It stores API
+keys of its own under `~/.config/charon/`.
 
-- **Never** run `charon add`, `charon switch`, `charon save`, or the interactive menu
+- **Never** run `charon add`, `charon switch`, `charon edit`, or the interactive menu
   against your real `$HOME` while developing. Always sandbox:
   ```sh
   HOME=$(mktemp -d) go run ./cmd/charon status
   ```
 - Tests must never touch real config. Use `t.Setenv("HOME", t.TempDir())` and
   `t.Setenv("XDG_CONFIG_HOME", t.TempDir())`. See `internal/tools/tools_test.go`
-  and `internal/profile/store_test.go` for the pattern.
-- Do not add tests that read or write the real Keychain. The keychain shell-out
-  (`internal/secret/keychain_darwin.go`) is intentionally left uncovered.
-- Preserve the safety guarantees: **atomic writes** (temp file + rename),
-  `0600` on credential files / `0700` on dirs, and an **auto-backup before every
-  switch**. Don't regress these.
+  and `internal/catalog/catalog_test.go` for the pattern.
+- Do not add tests that read or write the real Keychain.
+- Preserve the safety guarantees: **atomic writes** (temp file + rename) and
+  `0600` on credential files / `0700` on dirs. Don't regress these.
 
 ## Commands
 
@@ -47,79 +43,73 @@ golangci-lint on Linux + macOS; keep all of them green.
 cmd/charon/         CLI entrypoint (thin; no business logic)
   main.go           main, subcommand dispatch, usage
   commands.go       one cmd* func per subcommand + requireTool
-internal/artifact/  snapshot/restore primitives, no tool knowledge
-  Artifact/Rotator/Merger/Peeker interfaces; FileArtifact,
-  MergedFileArtifact, KeychainArtifact; AtomicWrite
-internal/tools/   per-tool adapters
+internal/artifact/  atomic writes
+internal/tools/     per-tool adapters
   tool.go           Tool struct, AuthSpec, registry (All/Find)
   providers.go      guards for the shared "charon" provider entry (codex/opencode)
   edit.go           JSON/TOML load-merge-write helpers (preserve unknown keys)
   codex.go / claude.go / opencode.go / pi.go   one file per tool
-internal/profile/ snapshot store, split by concern:
-  store.go (layout/config/name validation) · snapshot.go (Save/Add/Edit/EnsureDefault)
-  apply.go (Apply/Undo/Drift/refresh) · backup.go (backups + prune) · manage.go (rm/mv/cp)
-internal/models/  fetch model lists from a provider API (openai/anthropic wire)
-internal/secret/  masking + platform keychain (darwin vs. other build tags)
-internal/tui/     bubbletea interactive menu
+internal/catalog/   the store: providers, credentials, models, bindings, active pointer
+internal/models/    fetch model lists from a provider API (openai/anthropic wire)
+internal/secret/    masking
+internal/tui/       bubbletea interactive menu
 ```
 
-Layering (imports point left): `secret` ← `artifact` ← `tools` ← `profile` ← `cmd`/`tui`.
-Profile names are validated centrally in `internal/profile/store.go` (`validateName`);
-never join a user-supplied name into a path without it.
+Layering (imports point left): `secret` ← `artifact` ← `tools` ← `catalog` ← `cmd`/`tui`.
+Binding names are validated in `internal/catalog` (`validateName`); a name is a label,
+never a path segment, so do not join one into a filesystem path.
 
 Data lives under `~/.config/charon/` (`$XDG_CONFIG_HOME` respected):
-`profiles/<tool>/<name>/` (snapshot files + `manifest.json`),
-`backups/<tool>/<timestamp>/`, and `config.json` (active profile per tool).
+`providers.json`, `credentials.json`, `models.json`, `bindings.json`, `active.json`.
+On first open, editable legacy profiles with an endpoint, key, and model are imported;
+the old `profiles/` tree remains untouched. Snapshot-only profiles, backups, and OAuth
+logins are not imported.
 
-### Store locking and platform notes
+### Store locking
 
-- **Mutations are serialized by an advisory lock.** Every mutating `Store` method
-  (`Apply`, `Undo`, `Refresh`, `Save`, `SaveWithSpec`, `SaveCurrentAccount`,
-  `AddProfile`, `EditProfile`, `EnsureDefault`, `PruneBackups`, `SetActiveName`,
-  `Remove`, `Rename`, `Duplicate`) takes an exclusive flock on
-  `~/.config/charon/.lock` (via `golang.org/x/sys/unix` on Linux/macOS; a no-op
-  elsewhere). The lock is held only for the duration of the mutation and is
-  reentrant within a process (a depth counter in `Store`), so nested calls (e.g.
-  `AddProfile` → `backup` → `setActive`) can't deadlock or release early. A second
-  `charon` process racing the same store receives `ErrStoreLocked` rather than
-  corrupting it. Don't remove or bypass this lock, and don't add a mutating method
-  without wrapping it the same way.
-- **The OS keychain is macOS-only.** `secret.KeychainSupported()` reports whether
-  keychain entries can actually be read/written (true on macOS). On other platforms
-  `KeychainRead`/`KeychainWrite`/`KeychainDelete` are no-ops and `Detected`/OAuth
-  logic degrades gracefully — tools that rely on a keychain artifact (Claude's
-  OAuth) are simply inert there. `cmd status` prints a note when such a tool is
-  seen on an unsupported platform so the user isn't misled. Never assume keychain
-  features work off macOS, and keep keychain artifacts `Preservable` (see the
-  `Preservable` capability in `internal/artifact`) — charon must never delete a real
-  OAuth login it doesn't own, so `restoreFrom` skips `Remove` for them.
+- **Mutations are serialized by an advisory lock.** Every mutating `Catalog` method
+  takes an exclusive flock on `~/.config/charon/.lock` (via `golang.org/x/sys/unix`
+  on Linux/macOS; a no-op elsewhere). A competing mutation waits, then runs against
+  the latest files, so its result becomes active without interleaving another
+  operation. The process-local mutex also serializes goroutines using one Catalog.
+  Keep the lock around the full read-modify-write operation, including rendering an
+  active binding; don't add a mutation without wrapping it the same way.
 
 ### How to add a new tool
 
 1. Add `internal/tools/<tool>.go` returning a `*Tool` with: `Name`, `Title`,
-   `Provider` (`openai`/`anthropic`), `DefaultEndpoint`, `Artifacts` (built from
-   `internal/artifact` constructors), `Detected`, `Describe`, and `ApplyAuth`.
+   `Provider` (`openai`/`anthropic`), `DefaultEndpoint`, `Detected`, `Describe`,
+   and `ApplyAuth`.
 2. Register it in `All()` in `tool.go`.
 3. Add a `TestXxxDescribeAndApply` in `tools_test.go` using a sandboxed `$HOME`.
-   Everything else (store, CLI, TUI) is generic and needs no changes.
+   Everything else (catalog, CLI, TUI) is generic and needs no changes.
 
 `ApplyAuth` must **merge** into existing config (use the `edit.go` helpers) so
-unrelated user settings survive; it must not rewrite the file wholesale.
+unrelated user settings survive; it must not rewrite the file wholesale. It must
+refuse to modify a user-authored provider (`ensureOnlyCharonChanged`, managed
+provider name `"charon"`).
 
-### Model lists (`Spec.Models` / `AuthSpec.AllModels`)
+### Model lists (`AuthSpec.AllModels`)
 
-A profile's `Spec.Models` is the curated list charon registers in the **tool's own**
-model picker (Claude `modelPicker`, OpenCode `provider.charon.models`, pi's extension),
-so switching model mid-session doesn't need charon. It is persisted in the manifest and
-passed to `ApplyAuth` as `AuthSpec.AllModels`. Two rules a new tool must honor:
+A binding's model list is what charon registers in the **tool's own** model picker
+(Claude `modelPicker`, OpenCode `provider.charon.models`, pi's extension), so
+switching model mid-session doesn't need charon. It is passed to `ApplyAuth` as
+`AuthSpec.AllModels`. Two rules a new tool must honor:
 
-- `AllModels` empty means **"keep what's registered"**, not "register nothing" — read
-  the ids already in the live config and reuse them, or a rename/key rotation collapses
-  the user's picker to one row.
+- `AllModels` empty (nil) means **"keep what's registered"**, not "register nothing";
+  this lets a direct `ApplyAuth` call that changes only a key or default model retain
+  the picker. `Catalog.Project` always passes the binding's complete list, including a
+  one-model list, so switching bindings replaces the picker and cannot retain another
+  endpoint's models.
 - Whatever key holds the list must be an **owned key** of the config artifact, so the
-  list travels with the profile and one endpoint's models never leak into another's.
+  list travels with the binding and one endpoint's models never leak into another's.
 
-Codex has no config surface for a model list, so it only honors `Model`.
+Codex has no config surface for a model list (`catalog.SingleModelTools`), so a
+Codex binding carries exactly one model.
+
+Which wire dialect an endpoint speaks is **not stored**. `models.Fetch` is called
+twice when listing models — the tool's historical dialect first, then the other —
+and the winner is not persisted.
 
 ## Conventions
 
@@ -136,7 +126,7 @@ Codex has no config surface for a model list, so it only honors `Model`.
 ## Testing expectations
 
 - Any new behavior needs a test. Keep coverage on `internal/models`,
-  `internal/profile`, and `internal/tools` from regressing.
+  `internal/catalog`, and `internal/tools` from regressing.
 - Use `httptest` for anything hitting the network (see `fetch_test.go`); never
   make real API calls in tests.
 - The TUI is verified by compile + `go vet`; extract pure logic into testable
@@ -145,5 +135,8 @@ Codex has no config surface for a model list, so it only honors `Model`.
 ## Out of scope / do not do
 
 - Don't commit built binaries, `dist/`, or coverage files (see `.gitignore`).
-- Don't send config or secrets to any external service.
-- Don't weaken file permissions or remove the pre-switch backup step.
+- Don't send config or secrets to any external service. No user-driven import/export or sync.
+- Don't weaken file permissions.
+- Don't snapshot a tool's config, capture OAuth logins, or auto-create a `default`
+  binding. Official logins are the tool's own business.
+- Don't add a tool adapter the user does not use.

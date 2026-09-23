@@ -9,8 +9,6 @@ import (
 	"testing"
 
 	toml "github.com/pelletier/go-toml/v2"
-
-	"charon/internal/artifact"
 )
 
 // sandboxHome points HOME (and USER) at a temp dir so tool paths resolve there
@@ -20,6 +18,8 @@ func sandboxHome(t *testing.T) string {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 	t.Setenv("USER", "tester")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir()) // prevents Claude detection from querying the real Keychain
 	return dir
 }
 
@@ -115,7 +115,9 @@ func TestEmptyConfigDirectoriesAreNotDetected(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"codex", "claude", "opencode", "pi"} {
+	// Claude detection checks the macOS Keychain after finding no config, so do not
+	// call it from a test that must never access the real Keychain.
+	for _, name := range []string{"codex", "opencode", "pi"} {
 		if Find(name).Detected() {
 			t.Errorf("%s should not be detected via an empty config directory", name)
 		}
@@ -124,9 +126,9 @@ func TestEmptyConfigDirectoriesAreNotDetected(t *testing.T) {
 
 func TestCodexPinsClaudeContextWindow(t *testing.T) {
 	home := sandboxHome(t)
-	// A prior Claude profile pinned the window; switching to an OpenAI model
+	// A prior Claude binding pinned the window; switching to an OpenAI model
 	// (which Codex already sizes from its catalog) must clear it.
-	writeFile(t, filepath.Join(home, ".codex", "config.toml"), "model_context_window = 200000\n")
+	writeFile(t, filepath.Join(home, ".codex", "config.toml"), "model_context_window = 1000000\n")
 
 	c := Find("codex")
 	window := func() (int64, bool) {
@@ -141,13 +143,13 @@ func TestCodexPinsClaudeContextWindow(t *testing.T) {
 		return *cfg.Window, true
 	}
 
-	// A Claude model routed through the custom provider gets its window pinned
-	// so Codex stops overrunning it with the 272K fallback.
+	// A Claude model routed through the custom provider gets its window pinned,
+	// since Codex's own catalog undersizes it.
 	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-k123456789", Model: "claude-opus-4-7"}); err != nil {
 		t.Fatal(err)
 	}
-	if w, ok := window(); !ok || w != 200000 {
-		t.Errorf("claude model should pin model_context_window=200000, got %d (set=%v)", w, ok)
+	if w, ok := window(); !ok || w != 1000000 {
+		t.Errorf("claude model should pin model_context_window=1000000, got %d (set=%v)", w, ok)
 	}
 
 	// Switching to a model Codex knows must drop the stale pin.
@@ -222,47 +224,9 @@ func TestClaudeDescribeAndApply(t *testing.T) {
 	}
 }
 
-// TestClaudeSettingsMergeOwnsModelAndEffortButNotTheme locks in which settings.json
-// keys switch per profile (so each account remembers its own model/effort) versus
-// which stay a live, account-independent preference (theme).
-func TestClaudeSettingsMergeOwnsModelAndEffortButNotTheme(t *testing.T) {
-	sandboxHome(t)
-	c := Find("claude")
-	var merger artifact.Merger
-	for _, a := range c.Artifacts {
-		if a.ID() == "settings.json" {
-			merger = a.(artifact.Merger)
-		}
-	}
-	if merger == nil {
-		t.Fatal("settings.json artifact should implement artifact.Merger")
-	}
-
-	snapshot := []byte(`{"model":"claude-haiku","effortLevel":"low","theme":"dark"}`)
-	live := []byte(`{"model":"claude-opus","effortLevel":"medium","theme":"light"}`)
-
-	merged, err := merger.Merge(snapshot, live)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got map[string]any
-	if err := json.Unmarshal(merged, &got); err != nil {
-		t.Fatal(err)
-	}
-	if got["model"] != "claude-haiku" {
-		t.Errorf("model = %v, want claude-haiku (each profile keeps its own model)", got["model"])
-	}
-	if got["effortLevel"] != "low" {
-		t.Errorf("effortLevel = %v, want low (each profile keeps its own effort)", got["effortLevel"])
-	}
-	if got["theme"] != "light" {
-		t.Errorf("theme = %v, want light (theme is a live preference, not per-profile)", got["theme"])
-	}
-}
-
 func TestClaudeApplyClearsStaleBaseURL(t *testing.T) {
 	home := sandboxHome(t)
-	// A previously-applied custom-gateway profile left a base URL behind.
+	// A previously-applied custom-gateway binding left a base URL behind.
 	writeFile(t, filepath.Join(home, ".claude", "settings.json"),
 		`{"env":{"ANTHROPIC_BASE_URL":"https://gateway.example/v1","ANTHROPIC_AUTH_TOKEN":"sk-gw-old"}}`)
 
@@ -280,6 +244,9 @@ func TestClaudeApplyClearsStaleBaseURL(t *testing.T) {
 	}
 	if _, ok := s.Env["ANTHROPIC_AUTH_TOKEN"]; ok {
 		t.Errorf("switching to stock endpoint must clear stale ANTHROPIC_AUTH_TOKEN, got env=%v", s.Env)
+	}
+	if _, ok := s.Env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"]; ok {
+		t.Errorf("stock endpoint must not pin a context window, got env=%v", s.Env)
 	}
 }
 
@@ -358,6 +325,11 @@ func TestClaudeCustomEndpointUsesBearer(t *testing.T) {
 	}
 	if s.Model != "" {
 		t.Errorf("custom endpoint must not set top-level model, got %q", s.Model)
+	}
+	// Without a declared window Claude Code clamps every unrecognized model id —
+	// which is all of them on a gateway — to 200K and compacts far too early.
+	if s.Env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] != "1000000" {
+		t.Errorf("custom endpoint should declare its context window, got env=%v", s.Env)
 	}
 }
 
@@ -440,7 +412,7 @@ func TestClaudeCustomEndpointRegistersChosenModelWithoutFetch(t *testing.T) {
 
 func TestClaudeOfficialEndpointClearsGatewayModelPicker(t *testing.T) {
 	home := sandboxHome(t)
-	// A gateway profile was applied earlier and left its menu behind.
+	// A gateway binding was applied earlier and left its menu behind.
 	writeFile(t, filepath.Join(home, ".claude", "settings.json"),
 		`{"modelPicker":{"options":[{"model":"deepseek-v3","label":"deepseek-v3"}],"replaceBuiltInOptions":true}}`)
 
@@ -450,59 +422,6 @@ func TestClaudeOfficialEndpointClearsGatewayModelPicker(t *testing.T) {
 	}
 	if _, _, present := readClaudePicker(t, home); present {
 		t.Error("the official endpoint must not inherit a gateway's modelPicker")
-	}
-}
-
-func TestClaudeUseOfficialAuthClearsModelPicker(t *testing.T) {
-	home := sandboxHome(t)
-	writeFile(t, filepath.Join(home, ".claude", "settings.json"),
-		`{"modelPicker":{"options":[{"model":"deepseek-v3","label":"deepseek-v3"}]}}`)
-
-	c := Find("claude")
-	if err := c.UseOfficialAuth(); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, present := readClaudePicker(t, home); present {
-		t.Error("logging back into the official account must drop the gateway's modelPicker")
-	}
-}
-
-// TestClaudeSettingsMergeSwapsModelPickerWithProfile is the "list follows the profile"
-// guarantee: modelPicker is an owned key, so restoring a profile swaps it — and a
-// profile captured without one (an official account) clears whatever is live.
-func TestClaudeSettingsMergeSwapsModelPickerWithProfile(t *testing.T) {
-	sandboxHome(t)
-	c := Find("claude")
-	var merger artifact.Merger
-	for _, a := range c.Artifacts {
-		if a.ID() == "settings.json" {
-			merger = a.(artifact.Merger)
-		}
-	}
-	if merger == nil {
-		t.Fatal("settings.json artifact should implement artifact.Merger")
-	}
-	live := []byte(`{"modelPicker":{"options":[{"model":"deepseek-v3","label":"deepseek-v3"}]},"theme":"dark"}`)
-
-	// Restoring an official profile (snapshot has no modelPicker) must clear the live one.
-	merged, err := merger.Merge([]byte(`{"model":"claude-opus"}`), live)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(merged, []byte("modelPicker")) {
-		t.Error("restoring a profile captured without modelPicker must delete the live one")
-	}
-	if !bytes.Contains(merged, []byte(`"theme":"dark"`)) && !bytes.Contains(merged, []byte(`"theme": "dark"`)) {
-		t.Error("a non-owned preference like theme must survive the merge")
-	}
-
-	// Restoring a gateway profile must install that profile's own list.
-	merged, err = merger.Merge([]byte(`{"modelPicker":{"options":[{"model":"kimi-k2","label":"kimi-k2"}]}}`), live)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Contains(merged, []byte("kimi-k2")) || bytes.Contains(merged, []byte("deepseek-v3")) {
-		t.Errorf("merge should take modelPicker from the snapshot, got %s", merged)
 	}
 }
 
@@ -798,7 +717,7 @@ func TestPiDescribeAndApply(t *testing.T) {
 	}
 
 	// A live-set defaultThinkingLevel (a CLI preference, e.g. via pi's /settings)
-	// must survive being merged back in by the profile store, matching Codex/OpenCode.
+	// must survive auth changes, matching Codex/OpenCode.
 	s["defaultThinkingLevel"] = "high"
 	sd, _ = json.Marshal(s)
 	if err := os.WriteFile(settingsPath, sd, 0o600); err != nil {
@@ -823,7 +742,7 @@ func TestClaudeCustomEndpointKeepsRegisteredListWithoutFetch(t *testing.T) {
 		`{"modelPicker":{"options":[{"model":"kimi-k2","label":"kimi-k2"},{"model":"glm-4.6","label":"glm-4.6"}],"replaceBuiltInOptions":true}}`)
 
 	c := Find("claude")
-	// No AllModels: a key rotation on an existing gateway profile.
+	// No AllModels: a key rotation on an existing gateway binding.
 	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gateway.example/v1", Key: "sk-gw-2", Model: "glm-4.6"}); err != nil {
 		t.Fatal(err)
 	}

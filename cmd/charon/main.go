@@ -1,13 +1,12 @@
 // Command charon detects the Codex, Claude Code, OpenCode, and Pi CLIs and
-// switches their endpoint + credentials between saved profiles.
+// switches their endpoint + credentials between saved bindings.
 package main
 
 import (
 	"fmt"
 	"os"
 
-	"charon/internal/profile"
-	"charon/internal/tools"
+	"charon/internal/catalog"
 	"charon/internal/tui"
 )
 
@@ -37,65 +36,42 @@ func run(args []string) error {
 		}
 	}
 
-	store, err := profile.Open()
+	cat, err := catalog.Open()
 	if err != nil {
 		return err
 	}
-	// Capture the pristine config of every detected tool on first sight.
-	for _, t := range tools.All() {
-		if err := store.EnsureDefault(t); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not snapshot %s: %v\n", t.Name, err)
-		}
-	}
 
 	if len(args) == 0 {
-		return tui.Run(store, version)
+		return tui.Run(cat, version)
 	}
 
 	switch args[0] {
 	case "status", "st":
-		return cmdStatus(store, args[1:])
+		return cmdStatus(cat, args[1:])
 	case "ls":
-		return cmdList(store, args[1:])
+		return cmdList(cat, args[1:])
 	case "switch", "use":
-		return cmdSwitch(store, args[1:])
-	case "restore":
-		return cmdSwitch(store, append([]string{argAt(args, 1)}, profile.DefaultName))
-	case "undo":
-		return cmdUndo(store, args[1:])
-	case "prune":
-		return cmdPrune(store, args[1:])
-	case "save":
-		return cmdSave(store, args[1:])
-	case "refresh":
-		return cmdRefresh(store, args[1:])
+		return cmdSwitch(cat, args[1:])
 	case "models":
 		return cmdModels(args[1:])
 	case "add":
-		return cmdAdd(store, args[1:])
+		return cmdAdd(cat, args[1:])
 	case "edit":
-		return cmdEdit(store, args[1:])
+		return cmdEdit(cat, args[1:])
 	case "rename", "mv":
-		return cmdRename(store, args[1:])
+		return cmdRename(cat, args[1:])
 	case "cp":
-		return cmdDuplicate(store, args[1:])
+		return cmdDuplicate(cat, args[1:])
 	case "rm":
-		return cmdRemove(store, args[1:])
+		return cmdRemove(cat, args[1:])
 	case "completion":
 		return cmdCompletion(args[1:])
 	case "__profiles": // hidden: feeds shell completion
-		return cmdProfiles(store, args[1:])
+		return cmdProfiles(cat, args[1:])
 	default:
 		printUsage()
 		return fmt.Errorf("unknown command %q", args[0])
 	}
-}
-
-func argAt(args []string, i int) string {
-	if i < len(args) {
-		return args[i]
-	}
-	return ""
 }
 
 func printUsage() {
@@ -103,21 +79,15 @@ func printUsage() {
 
 Usage:
   charon                     interactive menu
-  charon status              show each tool's active profile, endpoint and auth (--json)
-  charon ls <tool>           list saved profiles for a tool (--json)
-  charon save <tool> [name]  snapshot current live config as a profile
-                             (omit name to auto-name after the logged-in account)
-  charon refresh <tool>      capture in-session changes (model, effort) into active profile
+  charon status              show each tool's live config and active binding (--json)
+  charon ls <tool>           list saved bindings for a tool (--json)
   charon models <tool>       list models from an API (--key, --endpoint)
-  charon add <tool>          add+activate a profile (--name --key [--endpoint --model --models])
-  charon edit <tool> <p>     change a profile's endpoint/key/model/models/name
-  charon rename <tool> <o> <n>  rename a saved profile
-  charon cp <tool> <src> <dst>  duplicate a saved profile
-  charon switch <tool> <p>   apply a saved profile (backs up current first)
-  charon restore <tool>      revert to the auto-captured default
-  charon undo <tool>         revert to the most recent pre-switch backup
-  charon prune <tool>        delete old backups, keeping the newest (--keep N)
-  charon rm <tool> <p>       delete a saved profile
+  charon add <tool>          add+activate a binding (--name --key plus a model id)
+  charon edit <tool> <b>     change a binding's endpoint/key/model/models/name
+  charon rename <tool> <o> <n>  rename a saved binding
+  charon cp <tool> <src> <dst>  duplicate a saved binding
+  charon switch <tool> <b>   render a saved binding into the tool
+  charon rm <tool> <b>       delete a saved binding (not the active one)
   charon completion <shell>  print a bash/zsh/fish completion script
   charon update              upgrade charon to the latest version
   charon uninstall           remove the installed charon binary

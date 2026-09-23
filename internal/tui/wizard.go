@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"charon/internal/profile"
+	"charon/internal/catalog"
 	"charon/internal/tools"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -39,9 +39,9 @@ const formInputCount = focusFetch
 
 type wizard struct {
 	endpoint, key, model string
-	name                 string // target profile name when editing
+	name                 string // target binding name when editing
 	origName             string // pre-edit name, to clean up on rename
-	edit                 bool   // true = overwrite an existing profile
+	edit                 bool   // true = overwrite an existing binding
 	// models is the curated list to register in the tool's own model picker, built by
 	// space-toggling rows in the picker. Empty means "offer whatever was fetched", which
 	// keeps the pick-one flow registering the full list as it always has.
@@ -112,7 +112,7 @@ func wizardStep(v view) (n, total int, label string) {
 	case viewAddCustomModel:
 		return 3, 4, "type the model ids"
 	case viewAddName:
-		return 4, 4, "name the profile"
+		return 4, 4, "name the binding"
 	}
 	return 0, 0, ""
 }
@@ -139,9 +139,9 @@ func (m *model) loadEditForm() {
 	m.formInputs[focusName] = newFormInput("e.g. openrouter-fast", m.wiz.name, false)
 	m.formInputs[focusURL] = newFormInput(exampleEndpoint, m.wiz.endpoint, false)
 	m.formInputs[focusToken] = newFormInput("sk-or-v1-xxxxxxxx", m.wiz.key, false)
-	modelPlaceholder := "e.g. gpt-4o (leave blank for default)"
+	modelPlaceholder := "e.g. gpt-4o (leave blank to use the first selected model)"
 	if m.tool != nil && m.tool.Name == "claude" {
-		modelPlaceholder = "e.g. claude-3-7-sonnet (leave blank for default)"
+		modelPlaceholder = "e.g. claude-3-7-sonnet (leave blank to use the first selected model)"
 	}
 	m.formInputs[focusModel] = newFormInput(modelPlaceholder, m.wiz.modelField(), false)
 	m.formInputs[focusName].Focus()
@@ -228,12 +228,9 @@ func (m *model) syncFormFocus() (tea.Model, tea.Cmd) {
 
 func (m model) submitForm() (tea.Model, tea.Cmd) {
 	name := strings.TrimSpace(m.formInputs[focusName].Value())
-	if name == "" && m.wiz.origName != profile.DefaultName {
-		m.setStatus(statusErr, "Profile Name is required")
-		return m, nil
-	}
 	if name == "" {
-		name = m.wiz.name
+		m.setStatus(statusErr, "Name is required")
+		return m, nil
 	}
 
 	endpoint := strings.TrimRight(strings.TrimSpace(m.formInputs[focusURL].Value()), "/")
@@ -260,7 +257,7 @@ func (m model) onEditFormSelect(field string) (tea.Model, tea.Cmd) {
 	case actionSave:
 		name := strings.TrimSpace(m.wiz.name)
 		if name == "" {
-			m.setStatus(statusErr, "profile name is required")
+			m.setStatus(statusErr, "name is required")
 			return m, nil
 		}
 		return m.finishAdd(name)
@@ -271,12 +268,8 @@ func (m model) onEditFormSelect(field string) (tea.Model, tea.Cmd) {
 		m.loadProfiles("")
 		return m, nil
 	case fieldName:
-		if m.wiz.origName == profile.DefaultName {
-			m.setStatus(statusInfo, "the default profile can't be renamed")
-			return m, nil
-		}
 		m.editField = field
-		m.startInput("profile name", false)
+		m.startInput("binding name", false)
 		m.input.SetValue(m.wiz.name)
 		return m, textinput.Blink
 	case fieldURL:
@@ -384,7 +377,7 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.dupSource = ""
 		m.view = viewProfiles
 		m.setStatus(statusInfo, "cancelled")
-		m.loadProfiles(src) // land back on the profile that was being duplicated, if any
+		m.loadProfiles(src) // land back on the binding that was being duplicated, if any
 		return m, nil
 	case "enter":
 		val := m.input.Value()
@@ -471,7 +464,7 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m.finishAdd(m.wiz.name)
 			}
 			m.view = viewAddName
-			m.startInput("profile name (e.g. openrouter-fast)", false)
+			m.startInput("binding name (e.g. openrouter-fast)", false)
 			return m, textinput.Blink
 
 		case viewAddName:
@@ -489,14 +482,13 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			src := m.dupSource
-			if err := m.store.Duplicate(m.tool.Name, src, val); err != nil {
+			if err := m.cloneBinding(src, val); err != nil {
 				m.setStatus(statusErr, err.Error())
 				return m, nil
 			}
 			m.dupSource = ""
 			m.view = viewProfiles
 			m.setStatus(statusOK, "Duplicated "+src+" → "+val)
-			// Stay on the source row rather than jumping to the new duplicate.
 			m.loadProfiles(src)
 			return m, nil
 		}
@@ -513,19 +505,23 @@ func (m model) handleConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		name := m.delTarget
 		m.delTarget = ""
 		m.showConfirm = false
-		if m.store.Active(m.tool.Name) == name {
-			if _, err := m.store.Apply(m.tool, profile.DefaultName); err != nil {
-				m.setStatus(statusErr, err.Error())
-				m.loadProfiles(name)
-				return m, nil
-			}
+		if active, found, err := m.cat.Active(m.tool.Name); err == nil && found && active.Name == name {
+			m.setStatus(statusErr, "switch to another binding before deleting the active one")
+			m.loadProfiles(name)
+			return m, nil
 		}
-		if err := m.store.Remove(m.tool.Name, name); err != nil {
+		b, found, err := m.cat.BindingByName(m.tool.Name, name)
+		if err != nil || !found {
+			m.setStatus(statusErr, "no binding named "+name)
+			m.loadProfiles("")
+			return m, nil
+		}
+		if err := m.cat.RemoveBinding(b.ID); err != nil {
 			m.setStatus(statusErr, err.Error())
 			m.loadProfiles(name)
 		} else {
 			m.setStatus(statusOK, "Deleted "+name)
-			m.loadProfiles("") // the row is gone; fall back to the active profile
+			m.loadProfiles("")
 		}
 		return m, nil
 	case "esc":
@@ -541,27 +537,77 @@ func (m model) handleConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// finishAdd applies the wizard's endpoint/key/model and snapshots it as the named
-// profile — via EditProfile when editing, so a rename also cleans up the old name.
+// finishAdd stores the wizard's endpoint/key/model as a binding. Adding also activates
+// it. Editing an inactive binding only updates the catalog; editing the active one
+// re-renders it. A curated one-model list is stored explicitly so future switches
+// reproduce the exact picker selection.
 func (m model) finishAdd(name string) (tea.Model, tea.Cmd) {
-	spec := profile.Spec{Endpoint: m.wiz.endpoint, Key: m.wiz.key, Model: m.wiz.model, Models: m.pickerModels()}
-	verb := "Added"
-	var err error
-	if m.wiz.edit {
-		verb = "Updated"
-		err = m.store.EditProfile(m.tool, m.wiz.origName, name, spec)
-	} else {
-		err = m.store.AddProfile(m.tool, name, spec)
+	slugs := m.pickerModels()
+	if len(slugs) == 0 && m.wiz.model != "" {
+		slugs = []string{m.wiz.model}
 	}
+	if len(slugs) == 0 {
+		m.setStatus(statusErr, "a binding needs at least one model")
+		return m, nil
+	}
+	if catalog.SingleModelTools[m.tool.Name] && len(slugs) > 1 {
+		slugs = slugs[:1]
+		m.wiz.model = slugs[0]
+	}
+	curated := len(m.wiz.models) > 0
+
+	var existing *catalog.Binding
+	if m.wiz.edit {
+		b, found, err := m.cat.BindingByName(m.tool.Name, m.wiz.origName)
+		if err != nil || !found {
+			m.setStatus(statusErr, "no binding named "+m.wiz.origName)
+			return m, nil
+		}
+		existing = &b
+	}
+	b, err := catalog.StoreBinding(m.cat, m.tool, existing, name, m.wiz.endpoint, m.wiz.key, m.wiz.model, slugs, curated || !m.wiz.edit)
 	if err != nil {
 		m.setStatus(statusErr, err.Error())
 		return m, nil
 	}
-	stored, _ := m.store.GetSpec(m.tool.Name, name)
-	m.setStatus(statusOK, fmt.Sprintf("%s %s (%s · %s)", verb, name, m.wiz.endpoint, describeSpecModels(stored)))
+
+	verb := "Added"
+	if m.wiz.edit {
+		verb = "Updated"
+		if _, err := m.cat.ProjectIfActive(b.ID); err != nil {
+			m.setStatus(statusErr, err.Error())
+			return m, nil
+		}
+	} else if _, err := m.cat.Activate(b.ID); err != nil {
+		m.setStatus(statusErr, err.Error())
+		return m, nil
+	}
+
+	m.setStatus(statusOK, fmt.Sprintf("%s %s (%s · %s)", verb, name, m.wiz.endpoint, describeModels(m.wiz.model, slugs)))
 	m.view = viewProfiles
-	m.loadProfiles(name) // land on the profile just added/edited, not wherever is active
+	m.loadProfiles(name)
 	return m, nil
+}
+
+// cloneBinding copies a binding under a new name, sharing its credential and models.
+func (m model) cloneBinding(src, dst string) error {
+	b, found, err := m.cat.BindingByName(m.tool.Name, src)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("no binding named %s", src)
+	}
+	slugs, err := m.cat.ModelSlugs(b.Models)
+	if err != nil {
+		return err
+	}
+	slug, err := m.cat.ModelSlug(b.ModelID)
+	if err != nil {
+		return err
+	}
+	_, err = m.cat.AddBinding(b.Tool, dst, b.CredentialID, slug, slugs)
+	return err
 }
 
 // splitModelIDs parses a typed model field ("a, b ,c") into ids, dropping blanks so a
@@ -579,20 +625,33 @@ func splitModelIDs(val string) []string {
 // pickerModels is the model list to register with the tool: the curated selection when
 // the user checked any rows, else the whole fetched list — preserving the long-standing
 // behavior where picking one model still registers everything the endpoint offers.
+// A tool that can hold only one model (Codex) never gets more than the chosen slug.
 func (m model) pickerModels() []string {
+	if m.tool != nil && catalog.SingleModelTools[m.tool.Name] {
+		if m.wiz.model != "" {
+			return []string{m.wiz.model}
+		}
+		if len(m.wiz.models) > 0 {
+			return m.wiz.models[:1]
+		}
+		if len(m.allModels) > 0 {
+			return m.allModels[:1]
+		}
+		return nil
+	}
 	if len(m.wiz.models) > 0 {
 		return m.wiz.models
 	}
 	return m.allModels
 }
 
-// describeSpecModels summarizes a saved spec's model choice for the footer.
-func describeSpecModels(spec profile.Spec) string {
-	if spec.Model == "" {
-		return "no model override"
+// describeModels summarizes a binding's model choice for the footer.
+func describeModels(slug string, slugs []string) string {
+	if slug == "" {
+		return "no model"
 	}
-	if extra := len(spec.ModelIDs()) - 1; extra > 0 {
-		return fmt.Sprintf("%s +%d more in the tool's picker", spec.Model, extra)
+	if extra := len(slugs) - 1; extra > 0 {
+		return fmt.Sprintf("%s +%d more in the tool's picker", slug, extra)
 	}
-	return spec.Model
+	return slug
 }

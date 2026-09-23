@@ -1,18 +1,22 @@
 package tools
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"charon/internal/artifact"
 	"charon/internal/secret"
 )
 
 const claudeKeychainService = "Claude Code-credentials"
+
+// claudeMaxContextTokens is what a custom endpoint declares as its context window.
+// Claude Code falls back to 200K for any model id it does not recognize, which is
+// every model served through a gateway. One million matches the largest window the
+// models routed this way advertise; a model with a smaller real window still stops
+// at its own limit, it just no longer compacts at 200K.
+const claudeMaxContextTokens = "1000000"
 
 // newClaude describes Claude Code: API keys in ~/.claude/settings.json, OAuth in the keychain.
 func newClaude() *Tool {
@@ -25,19 +29,8 @@ func newClaude() *Tool {
 		Provider:        "anthropic",
 		ModelMenu:       "/model",
 		DefaultEndpoint: "https://api.anthropic.com",
-		Artifacts: []artifact.Artifact{
-			// theme is a display preference, not per-profile auth — preserved live. model,
-			// effortLevel and modelPicker switch with the profile, so each account remembers
-			// its own choice — and a gateway's model list never leaks into the official
-			// account's /model menu (Merge deletes an owned key the snapshot doesn't have).
-			artifact.NewMergedJSONFile("settings.json", settingsPath, 0o600, "env", "customApiKeyResponses", "model", "effortLevel", "modelPicker").
-				WithDisplay("model", "effortLevel"),
-			artifact.NewKeychain("credentials", claudeKeychainService, os.Getenv("USER")),
-		},
 		ApplyAuth: func(a AuthSpec) error {
-			// Preserve the previously-registered list when this call brings none (rename,
-			// key rotation, CLI --model), so /model doesn't collapse to a single row —
-			// the same fallback opencode.go and pi.go make.
+			// Preserve the already-registered list when a caller does not supply one.
 			existingModels := claudeExistingModels(settingsPath)
 			s, err := loadJSONMap(settingsPath)
 			if err != nil {
@@ -50,12 +43,18 @@ func newClaude() *Tool {
 			delete(env, "ANTHROPIC_BASE_URL")
 			delete(env, "ANTHROPIC_MODEL")
 			delete(env, "ANTHROPIC_CUSTOM_MODEL_OPTION")
+			// Claude Code treats a model id it does not recognize as "unknown" and clamps
+			// its context window to 200K, which makes a larger model compact constantly.
+			// Declaring the window lifts that fallback. Only set for a custom endpoint;
+			// the stock branch below clears it so an official login is not pinned.
+			delete(env, "CLAUDE_CODE_MAX_CONTEXT_TOKENS")
 
 			custom := a.Endpoint != "" && !strings.Contains(a.Endpoint, "api.anthropic.com")
 			if custom {
 				// Gateways want Bearer auth at a custom base URL.
 				env["ANTHROPIC_BASE_URL"] = normalizeClaudeBaseURL(a.Endpoint)
 				env["ANTHROPIC_AUTH_TOKEN"] = a.Key
+				env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = claudeMaxContextTokens
 				// Gateway models aren't in Claude Code's catalog; the top-level "model"
 				// selector validates against it and rejects them, so route via ANTHROPIC_MODEL.
 				delete(s, "model")
@@ -94,33 +93,6 @@ func newClaude() *Tool {
 				}
 			}
 			return writeJSONMap(settingsPath, s, 0o600)
-		},
-		OfficialOAuth: func() bool {
-			_, err := secret.KeychainRead(claudeKeychainService)
-			return err == nil
-		},
-		UseOfficialAuth: func() error {
-			s, err := loadJSONMap(settingsPath)
-			if err != nil {
-				return err
-			}
-			env := subMap(s, "env")
-			delete(env, "ANTHROPIC_API_KEY")
-			delete(env, "ANTHROPIC_AUTH_TOKEN")
-			delete(env, "ANTHROPIC_BASE_URL")
-			delete(env, "ANTHROPIC_MODEL")
-			delete(env, "ANTHROPIC_CUSTOM_MODEL_OPTION")
-			delete(s, "model")
-			delete(s, "modelPicker")
-			return writeJSONMap(settingsPath, s, 0o600)
-		},
-		OAuthFingerprint: func() string {
-			v, err := secret.KeychainRead(claudeKeychainService)
-			if err != nil {
-				return ""
-			}
-			sum := sha256.Sum256([]byte(v))
-			return hex.EncodeToString(sum[:])
 		},
 		Detected: func() bool {
 			if detected("claude", settingsPath) {
@@ -172,7 +144,7 @@ func newClaude() *Tool {
 }
 
 // claudeAccountEmail reads the logged-in account's email from ~/.claude.json for
-// display/naming only — the file is never written or snapshotted. "" if absent.
+// display only; the file is never written. "" if absent.
 func claudeAccountEmail() string {
 	data, err := os.ReadFile(filepath.Join(home(), ".claude.json"))
 	if err != nil {
@@ -189,17 +161,8 @@ func claudeAccountEmail() string {
 	return c.OAuthAccount.EmailAddress
 }
 
-// normalizeClaudeBaseURL trims a trailing "/v1": Claude appends "/v1/messages", so a
-// "/v1" base URL 404s as "/v1/v1/messages". (Claude-only; Codex genuinely wants "/v1".)
-func normalizeClaudeBaseURL(ep string) string {
-	ep = strings.TrimRight(ep, "/")
-	ep = strings.TrimSuffix(ep, "/v1")
-	return strings.TrimRight(ep, "/")
-}
-
 // claudeExistingModels reads the model ids currently registered in settings.json's
-// modelPicker, so a write that brings no list of its own can keep them. nil when the
-// file is absent, unreadable, or has no picker.
+// modelPicker, so a write without a replacement list can keep them.
 func claudeExistingModels(settingsPath string) []string {
 	data, err := os.ReadFile(settingsPath)
 	if err != nil {
@@ -222,6 +185,14 @@ func claudeExistingModels(settingsPath string) []string {
 		}
 	}
 	return ids
+}
+
+// normalizeClaudeBaseURL trims a trailing "/v1": Claude appends "/v1/messages", so a
+// "/v1" base URL 404s as "/v1/v1/messages". (Claude-only; Codex genuinely wants "/v1".)
+func normalizeClaudeBaseURL(ep string) string {
+	ep = strings.TrimRight(ep, "/")
+	ep = strings.TrimSuffix(ep, "/v1")
+	return strings.TrimRight(ep, "/")
 }
 
 // claudeModelPicker builds the settings.json "modelPicker" value that curates Claude

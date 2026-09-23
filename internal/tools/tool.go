@@ -1,11 +1,9 @@
-// Package tools models the AI CLIs whose endpoint + credentials charon snapshots.
+// Package tools models the AI CLIs whose endpoint and credentials charon configures.
 package tools
 
 import (
 	"os"
 	"os/exec"
-
-	"charon/internal/artifact"
 )
 
 // Info is a display-friendly summary of a tool's live configuration.
@@ -39,18 +37,14 @@ type AuthSpec struct {
 
 // Tool describes one AI CLI's auth surface and how to summarize/reconfigure it.
 type Tool struct {
-	Name             string // stable id, e.g. "codex"
-	Title            string // display name, e.g. "Codex"
-	Artifacts        []artifact.Artifact
-	Provider         string               // model-list wire format: "openai" or "anthropic"
-	DefaultEndpoint  string               // prefilled when adding a profile
-	ModelMenu        string               // the tool's own model-switching command (e.g. "/model") when it can be given a list of models to offer; "" when the tool's config has no place to register one (Codex)
-	Detected         func() bool          // is the tool installed/configured?
-	Describe         func() (Info, error) // read live config into an Info
-	ApplyAuth        func(AuthSpec) error // write endpoint/key/model into live config
-	OfficialOAuth    func() bool          // official OAuth credentials exist despite custom routing
-	UseOfficialAuth  func() error         // clear custom routing without removing OAuth credentials
-	OAuthFingerprint func() string        // identifies the current OAuth credential (e.g. its mtime); "" if none. Used to detect a fresh login versus a long-standing token.
+	Name            string               // stable id, e.g. "codex"
+	Title           string               // display name, e.g. "Codex"
+	Provider        string               // model-list wire format: "openai" or "anthropic"
+	DefaultEndpoint string               // prefilled when adding a binding
+	ModelMenu       string               // the tool's own model-switching command (e.g. "/model") when it can be given a list of models to offer; "" when the tool's config has no place to register one (Codex)
+	Detected        func() bool          // is the tool installed/configured?
+	Describe        func() (Info, error) // read live config into an Info
+	ApplyAuth       func(AuthSpec) error // write endpoint/key/model into live config
 }
 
 func detected(executable string, paths ...string) bool {

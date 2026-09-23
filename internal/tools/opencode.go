@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"charon/internal/artifact"
 )
 
 // opencodeConfigPath returns the existing config (opencode.jsonc, else legacy
@@ -36,16 +34,6 @@ func newOpenCode() *Tool {
 		Provider:        "openai",
 		ModelMenu:       "/models",
 		DefaultEndpoint: "https://api.openai.com/v1",
-		Artifacts: []artifact.Artifact{
-			// The config holds provider options.apiKey, so keep it private. Other top-level
-			// settings (e.g. theme) are CLI preferences, not per-profile auth — preserved live.
-			artifact.NewMergedJSONFile(filepath.Base(configPath), configPath, 0o600, "provider", "model", "small_model", "reasoningEffort", "agent", "agents").
-				WithDisplay("model", "reasoningEffort").
-				WithAgentFallback("agent", "agents"),
-			// auth.json holds OAuth logins (e.g. github-copilot). The charon provider
-			// stores its key in opencode.jsonc options.apiKey instead; snapshotting
-			// auth.json would silently clobber existing OAuth sessions on profile switch.
-		},
 		ApplyAuth: func(a AuthSpec) error {
 			// Register a "charon" provider: OpenCode needs options.apiKey and a
 			// non-empty models map for the models to show in /models.
@@ -85,7 +73,7 @@ func newOpenCode() *Tool {
 			if modelSlug != "" {
 				// Register every model the caller already fetched (e.g. the TUI wizard's
 				// picker list), not just modelSlug, so OpenCode's own /models picker can
-				// switch between them without re-adding the profile. Falls back to the
+				// switch between them without re-adding the binding. Falls back to the
 				// previously-registered list, then just modelSlug, when the caller has no
 				// fetched list (e.g. the CLI --model flag or an edit of another field).
 				ids := a.AllModels

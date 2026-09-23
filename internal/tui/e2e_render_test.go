@@ -4,19 +4,13 @@ import (
 	"strings"
 	"testing"
 
-	"charon/internal/profile"
 	"charon/internal/tools"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestInteractiveFlowVisualAudit(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	st, err := profile.Open()
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := openTestCatalog(t, false)
 
 	tool := &tools.Tool{Name: "claude", Title: "Claude Code", ModelMenu: "/model"}
 	m := newModel(st, "v1.3.12")
@@ -25,7 +19,7 @@ func TestInteractiveFlowVisualAudit(t *testing.T) {
 	m.resize()
 	m.tool = tool
 	m.wiz = wizard{
-		name:     "test-profile",
+		name:     "test-binding",
 		endpoint: "https://api.example.com/v1",
 		key:      "sk-test",
 		models:   []string{"claude-3-5-sonnet", "claude-3-haiku"},

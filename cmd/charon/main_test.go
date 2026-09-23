@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"charon/internal/profile"
+	"charon/internal/catalog"
 )
 
-// sandbox points HOME and the store's XDG_CONFIG_HOME at temp dirs so run()
+// sandbox points HOME and the catalog's XDG_CONFIG_HOME at temp dirs so run()
 // never touches real user config (see AGENTS.md).
 func sandbox(t *testing.T) string {
 	t.Helper()
@@ -18,6 +18,12 @@ func sandbox(t *testing.T) string {
 	t.Setenv("HOME", home)
 	t.Setenv("USER", "tester")
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("PATH", t.TempDir()) // prevents Claude detection from querying the real Keychain
+	claudeDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(claudeDir, "settings.json"), `{"env":{"ANTHROPIC_API_KEY":"sk-test"}}`)
 	return home
 }
 
@@ -39,6 +45,15 @@ func writeTestFile(t *testing.T, path, content string) {
 	}
 }
 
+func openCatalog(t *testing.T) *catalog.Catalog {
+	t.Helper()
+	c, err := catalog.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
 func TestRunRejectsUnknownCommandAndTool(t *testing.T) {
 	sandbox(t)
 	if err := run([]string{"bogus"}); err == nil || !strings.Contains(err.Error(), "unknown command") {
@@ -47,7 +62,7 @@ func TestRunRejectsUnknownCommandAndTool(t *testing.T) {
 	for _, args := range [][]string{
 		{"rm", "faketool", "x"},
 		{"switch", "faketool", "x"},
-		{"undo", "faketool"},
+		{"edit", "faketool", "x"},
 		{"ls", "faketool"},
 		{"cp", "faketool", "a", "b"},
 	} {
@@ -55,13 +70,17 @@ func TestRunRejectsUnknownCommandAndTool(t *testing.T) {
 			t.Errorf("run(%v) = %v, want unknown-tool error", args, err)
 		}
 	}
+	// Snapshot commands are gone; they must read as unknown, not as a usage error.
+	if err := run([]string{"undo", "codex"}); err == nil || !strings.Contains(err.Error(), "unknown command") {
+		t.Errorf("run(undo) = %v, want unknown-command error", err)
+	}
 }
 
-func TestRunProfileLifecycle(t *testing.T) {
+func TestRunBindingLifecycle(t *testing.T) {
 	home := sandbox(t)
 	seedCodex(t, home)
 
-	if err := run([]string{"add", "codex", "--name", "work", "--key", "sk-test", "--endpoint", "https://example.com/v1"}); err != nil {
+	if err := run([]string{"add", "codex", "--name", "work", "--key", "sk-test", "--endpoint", "https://example.com/v1", "--model", "gpt-5"}); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	if err := run([]string{"ls", "codex"}); err != nil {
@@ -73,46 +92,48 @@ func TestRunProfileLifecycle(t *testing.T) {
 	if err := run([]string{"switch", "codex", "work-2"}); err != nil {
 		t.Fatalf("switch: %v", err)
 	}
-	if err := run([]string{"restore", "codex"}); err != nil {
-		t.Fatalf("restore: %v", err)
+	// The active binding cannot be deleted; switch away first.
+	if err := run([]string{"rm", "codex", "work-2"}); err == nil {
+		t.Fatal("rm of the active binding succeeded, want a refusal")
 	}
-	if err := run([]string{"undo", "codex"}); err != nil {
-		t.Fatalf("undo: %v", err)
+	if err := run([]string{"switch", "codex", "work"}); err != nil {
+		t.Fatalf("switch back: %v", err)
 	}
 	if err := run([]string{"rm", "codex", "work-2"}); err != nil {
 		t.Fatalf("rm: %v", err)
 	}
 
-	store, err := profile.Open()
-	if err != nil {
-		t.Fatal(err)
+	c := openCatalog(t)
+	if _, found, err := c.BindingByName("codex", "work"); err != nil || !found {
+		t.Errorf("work binding missing: found=%v err=%v", found, err)
 	}
-	if !store.Exists("codex", "work") || !store.Exists("codex", profile.DefaultName) {
-		t.Errorf("expected work + default profiles, got %v", store.List("codex"))
+	if _, found, err := c.BindingByName("codex", "work-2"); err != nil || found {
+		t.Errorf("work-2 still exists after rm: found=%v err=%v", found, err)
 	}
-	if store.Exists("codex", "work-2") {
-		t.Error("work-2 still exists after rm")
+	if _, found, err := c.BindingByName("codex", "default"); err != nil || found {
+		t.Errorf("a default binding was captured: found=%v err=%v", found, err)
 	}
 }
 
-func TestRunRejectsUnsafeProfileArguments(t *testing.T) {
+func TestRunValidatesBindingNames(t *testing.T) {
 	home := sandbox(t)
 	seedCodex(t, home)
 
 	for _, args := range [][]string{
-		{"rm", "codex", "nope"},                             // nonexistent profile
-		{"rm", "codex", "../.."},                            // traversal out of the store
-		{"save", "codex", "../evil"},                        // credential snapshot outside the store
-		{"add", "codex", "--name", "default", "--key", "k"}, // reserved name
-		{"rename", "codex", "default", "x"},                 // default is not renamable
+		{"rm", "codex", "nope"},      // no such binding
+		{"save", "codex", "../evil"}, // unknown command
+		{"add", "codex", "--name", "line\nbreak", "--key", "sk-test", "--model", "gpt-5"},
 	} {
 		if err := run(args); err == nil {
 			t.Errorf("run(%v) succeeded, want error", args)
 		}
 	}
-	// The traversal attempts must not have deleted the store or the config dir.
+	if err := run([]string{"add", "codex", "--name", "../evil", "--key", "sk-test", "--model", "gpt-5"}); err != nil {
+		t.Fatalf("path-shaped text is still only a label: %v", err)
+	}
+	// Invalid names must not have deleted the catalog dir.
 	if _, err := os.Stat(filepath.Join(home, ".config", "charon")); err != nil {
-		t.Fatalf("store dir damaged: %v", err)
+		t.Fatalf("catalog dir damaged: %v", err)
 	}
 }
 
@@ -121,9 +142,9 @@ func TestRunRejectsInvalidURLAndKey(t *testing.T) {
 	seedCodex(t, home)
 
 	for _, args := range [][]string{
-		{"add", "codex", "--name", "bad-url", "--key", "sk-test", "--endpoint", "not a url"},
-		{"add", "codex", "--name", "bad-scheme", "--key", "sk-test", "--endpoint", "ftp://example.com"},
-		{"add", "codex", "--name", "no-key", "--key", "  "},
+		{"add", "codex", "--name", "bad-url", "--key", "sk-test", "--model", "gpt-5", "--endpoint", "not a url"},
+		{"add", "codex", "--name", "bad-scheme", "--key", "sk-test", "--model", "gpt-5", "--endpoint", "ftp://example.com"},
+		{"add", "codex", "--name", "no-key", "--key", "  ", "--model", "gpt-5"},
 		{"models", "codex", "--key", "sk-test", "--endpoint", "not a url"},
 	} {
 		if err := run(args); err == nil {
@@ -131,7 +152,7 @@ func TestRunRejectsInvalidURLAndKey(t *testing.T) {
 		}
 	}
 
-	if err := run([]string{"add", "codex", "--name", "good", "--key", "sk-test", "--endpoint", "https://example.com/v1"}); err != nil {
+	if err := run([]string{"add", "codex", "--name", "good", "--key", "sk-test", "--endpoint", "https://example.com/v1", "--model", "gpt-5"}); err != nil {
 		t.Fatalf("add with valid endpoint/key: %v", err)
 	}
 	if err := run([]string{"edit", "codex", "good", "--endpoint", "not a url"}); err == nil {
@@ -143,16 +164,16 @@ func TestRunRejectsInvalidURLAndKey(t *testing.T) {
 }
 
 // TestRunEditDoesNotSwitchInactiveProfile locks in that editing a saved-but-
-// inactive profile via the CLI only updates its stored spec, leaving the
-// active profile (and hence the live config) untouched.
+// inactive binding via the CLI only updates the catalog, leaving the active
+// binding (and hence the live config) untouched.
 func TestRunEditDoesNotSwitchInactiveProfile(t *testing.T) {
 	home := sandbox(t)
 	seedCodex(t, home)
 
-	if err := run([]string{"add", "codex", "--name", "work", "--key", "sk-work", "--endpoint", "https://work.example.com/v1"}); err != nil {
+	if err := run([]string{"add", "codex", "--name", "work", "--key", "sk-work", "--endpoint", "https://work.example.com/v1", "--model", "gpt-5"}); err != nil {
 		t.Fatalf("add work: %v", err)
 	}
-	if err := run([]string{"add", "codex", "--name", "other", "--key", "sk-other", "--endpoint", "https://other.example.com/v1"}); err != nil {
+	if err := run([]string{"add", "codex", "--name", "other", "--key", "sk-other", "--endpoint", "https://other.example.com/v1", "--model", "gpt-5"}); err != nil {
 		t.Fatalf("add other: %v", err)
 	}
 	if err := run([]string{"switch", "codex", "work"}); err != nil {
@@ -163,12 +184,43 @@ func TestRunEditDoesNotSwitchInactiveProfile(t *testing.T) {
 		t.Fatalf("edit other: %v", err)
 	}
 
-	store, err := profile.Open()
-	if err != nil {
-		t.Fatal(err)
+	c := openCatalog(t)
+	active, found, err := c.Active("codex")
+	if err != nil || !found || active.Name != "work" {
+		t.Errorf("active = %+v found=%v err=%v, want work (editing an inactive binding must not switch)", active, found, err)
 	}
-	if store.Active("codex") != "work" {
-		t.Errorf("active = %q, want work (editing an inactive profile must not switch)", store.Active("codex"))
+	other, found, err := c.BindingByName("codex", "other")
+	if err != nil || !found {
+		t.Fatalf("other binding: found=%v err=%v", found, err)
+	}
+	if slug, err := c.ModelSlug(other.ModelID); err != nil || slug != "gpt-5.5" {
+		t.Errorf("other model = %q err=%v, want gpt-5.5 stored without rendering", slug, err)
+	}
+}
+
+func TestRunEditModelsPromotesFirstItemWhenOldDefaultIsRemoved(t *testing.T) {
+	home := sandbox(t)
+	seedClaude(t, home)
+	if err := run([]string{
+		"add", "claude", "--name", "gateway", "--key", "sk-test",
+		"--endpoint", "https://gateway.example/v1", "--models", "kimi-k2,glm-4.6",
+	}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := run([]string{"edit", "claude", "gateway", "--models", "glm-4.6"}); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+
+	c := openCatalog(t)
+	b, found, err := c.BindingByName("claude", "gateway")
+	if err != nil || !found {
+		t.Fatalf("gateway binding: found=%v err=%v", found, err)
+	}
+	if slug, err := c.ModelSlug(b.ModelID); err != nil || slug != "glm-4.6" {
+		t.Errorf("default model = %q, err=%v; want first requested model glm-4.6", slug, err)
+	}
+	if models, err := c.ModelSlugs(b.Models); err != nil || len(models) != 1 || models[0] != "glm-4.6" {
+		t.Errorf("models = %v, err=%v; want [glm-4.6]", models, err)
 	}
 }
 
@@ -183,58 +235,6 @@ func TestRunStatusAndVersion(t *testing.T) {
 	}
 	if err := run([]string{"version"}); err != nil {
 		t.Errorf("version: %v", err)
-	}
-}
-
-func TestRunRefreshUpdatesActiveProfile(t *testing.T) {
-	home := sandbox(t)
-	seedCodex(t, home)
-
-	if err := run([]string{"add", "codex", "--name", "work", "--key", "sk-test", "--endpoint", "https://example.com/v1"}); err != nil {
-		t.Fatalf("add: %v", err)
-	}
-	// Refresh without an explicit active profile should work after add.
-	if err := run([]string{"refresh", "codex"}); err != nil {
-		t.Errorf("refresh: %v", err)
-	}
-}
-
-func TestRunRefreshErrorsOnUnknownTool(t *testing.T) {
-	sandbox(t)
-	if err := run([]string{"refresh", "nosuchtool"}); err == nil || !strings.Contains(err.Error(), "unknown tool") {
-		t.Errorf("refresh unknown tool: %v, want unknown-tool error", err)
-	}
-}
-
-func TestRunPruneRequiresTool(t *testing.T) {
-	sandbox(t)
-	if err := run([]string{"prune"}); err == nil || !strings.Contains(err.Error(), "usage") {
-		t.Errorf("prune without args: %v, want usage error", err)
-	}
-}
-
-func TestRunPruneOnDetectedTool(t *testing.T) {
-	home := sandbox(t)
-	seedCodex(t, home)
-
-	// Add a profile to create some state, then prune.
-	if err := run([]string{"add", "codex", "--name", "work", "--key", "sk-test", "--endpoint", "https://example.com/v1"}); err != nil {
-		t.Fatalf("add: %v", err)
-	}
-	if err := run([]string{"prune", "codex"}); err != nil {
-		t.Errorf("prune codex: %v", err)
-	}
-}
-
-func TestRunPruneWithKeepFlag(t *testing.T) {
-	home := sandbox(t)
-	seedCodex(t, home)
-
-	if err := run([]string{"add", "codex", "--name", "work", "--key", "sk-test", "--endpoint", "https://example.com/v1"}); err != nil {
-		t.Fatalf("add: %v", err)
-	}
-	if err := run([]string{"prune", "codex", "--keep", "5"}); err != nil {
-		t.Errorf("prune codex --keep 5: %v", err)
 	}
 }
 
@@ -266,32 +266,16 @@ func TestRunCompletionUnsupportedShell(t *testing.T) {
 	}
 }
 
-func TestRunProfilesListsProfileNames(t *testing.T) {
+func TestRunProfilesListsBindingNames(t *testing.T) {
 	home := sandbox(t)
 	seedCodex(t, home)
 
-	if err := run([]string{"add", "codex", "--name", "work", "--key", "sk-test", "--endpoint", "https://example.com/v1"}); err != nil {
+	if err := run([]string{"add", "codex", "--name", "work", "--key", "sk-test", "--endpoint", "https://example.com/v1", "--model", "gpt-5"}); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	// __profiles is a hidden command for shell completion.
 	if err := run([]string{"__profiles", "codex"}); err != nil {
 		t.Errorf("__profiles codex: %v", err)
-	}
-}
-
-func TestRunSaveRequiresTool(t *testing.T) {
-	sandbox(t)
-	if err := run([]string{"save"}); err == nil || !strings.Contains(err.Error(), "usage") {
-		t.Errorf("save without args: %v, want usage error", err)
-	}
-}
-
-func TestRunSaveWithName(t *testing.T) {
-	home := sandbox(t)
-	seedCodex(t, home)
-
-	if err := run([]string{"save", "codex", "snapshot1"}); err != nil {
-		t.Errorf("save codex snapshot1: %v", err)
 	}
 }
 
@@ -343,9 +327,26 @@ func claudePickerIDs(t *testing.T, home string) []string {
 	return ids
 }
 
+func bindingSlugs(t *testing.T, c *catalog.Catalog, tool, name string) (slug string, slugs []string) {
+	t.Helper()
+	b, found, err := c.BindingByName(tool, name)
+	if err != nil || !found {
+		t.Fatalf("binding %s/%s: found=%v err=%v", tool, name, found, err)
+	}
+	slug, err = c.ModelSlug(b.ModelID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slugs, err = c.ModelSlugs(b.Models)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return slug, slugs
+}
+
 // TestRunAddWithModelsRegistersPickerList covers `--models a,b,c`: the ids reach the
 // tool's own model menu (so switching model mid-session needs no charon round trip)
-// and are stored on the profile, with the first one taken as the default model.
+// and are stored on the binding, with the first one taken as the default model.
 func TestRunAddWithModelsRegistersPickerList(t *testing.T) {
 	home := sandbox(t)
 	seedClaude(t, home)
@@ -359,19 +360,12 @@ func TestRunAddWithModelsRegistersPickerList(t *testing.T) {
 	if got := strings.Join(claudePickerIDs(t, home), ","); got != "kimi-k2,glm-4.6,deepseek-v3" {
 		t.Errorf("modelPicker ids = %q, want the whole --models list", got)
 	}
-	store, err := profile.Open()
-	if err != nil {
-		t.Fatal(err)
+	slug, slugs := bindingSlugs(t, openCatalog(t), "claude", "gw")
+	if strings.Join(slugs, ",") != "kimi-k2,glm-4.6,deepseek-v3" {
+		t.Errorf("binding models = %v, want the --models list persisted", slugs)
 	}
-	sp, ok := store.GetSpec("claude", "gw")
-	if !ok {
-		t.Fatal("profile has no spec")
-	}
-	if strings.Join(sp.Models, ",") != "kimi-k2,glm-4.6,deepseek-v3" {
-		t.Errorf("spec.Models = %v, want the --models list persisted", sp.Models)
-	}
-	if sp.Model != "kimi-k2" {
-		t.Errorf("spec.Model = %q, want the first --models id promoted to default", sp.Model)
+	if slug != "kimi-k2" {
+		t.Errorf("default model = %q, want the first --models id promoted to default", slug)
 	}
 }
 
@@ -392,17 +386,15 @@ func TestRunEditKeepsPickerListWithoutModelsFlag(t *testing.T) {
 	if got := strings.Join(claudePickerIDs(t, home), ","); got != "kimi-k2,glm-4.6" {
 		t.Errorf("modelPicker ids = %q, want the list to survive a key rotation", got)
 	}
-	store, err := profile.Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sp, _ := store.GetSpec("claude", "gw"); strings.Join(sp.Models, ",") != "kimi-k2,glm-4.6" {
-		t.Errorf("spec.Models = %v, want the list preserved", sp.Models)
+	_, slugs := bindingSlugs(t, openCatalog(t), "claude", "gw")
+	if strings.Join(slugs, ",") != "kimi-k2,glm-4.6" {
+		t.Errorf("binding models = %v, want the list preserved", slugs)
 	}
 }
 
 // TestRunEditModelsFlagReplacesPickerList: passing --models explicitly curates the
-// menu down, which is how you drop models you no longer want offered.
+// menu down, which is how you drop models you no longer want offered. A list of
+// one must replace the picker rather than fall through to "keep the existing list".
 func TestRunEditModelsFlagReplacesPickerList(t *testing.T) {
 	home := sandbox(t)
 	seedClaude(t, home)

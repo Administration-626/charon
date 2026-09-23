@@ -3,7 +3,7 @@
 // The model is split across a few files in this package:
 //   - tui.go     the model, lifecycle (Run/Init/Update) and top-level navigation
 //   - views.go   rendering (View, wizard header, prompts, status line)
-//   - wizard.go  the add/edit profile flow and confirm-delete prompt
+//   - wizard.go  the add/edit binding flow and confirm-delete prompt
 //   - picker.go  the fetch-and-choose-a-model screen
 package tui
 
@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"charon/internal/profile"
+	"charon/internal/catalog"
 	"charon/internal/secret"
 	"charon/internal/tools"
 
@@ -25,9 +25,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Run starts the interactive menu against the given store.
-func Run(store *profile.Store, version string) error {
-	_, err := tea.NewProgram(newModel(store, version), tea.WithAltScreen()).Run()
+// Run starts the interactive menu against the catalog.
+func Run(cat *catalog.Catalog, version string) error {
+	_, err := tea.NewProgram(newModel(cat, version), tea.WithAltScreen()).Run()
 	return err
 }
 
@@ -41,8 +41,8 @@ const (
 	viewFetching       // wizard: fetching models
 	viewPickModel      // wizard: choose a model
 	viewAddCustomModel // wizard: enter custom model ID
-	viewAddName        // wizard: name the profile
-	viewDupName        // backup: name the duplicated proxy profile
+	viewAddName        // wizard: name the binding
+	viewDupName        // clone: name the duplicate
 	viewEditForm       // edit: field picker (url/name/token/model)
 	viewEditField      // edit: single-field text input
 )
@@ -58,23 +58,22 @@ const (
 
 const (
 	addSentinel = "\x00add"         // the "add new" list row
-	skipModel   = "\x00nomodel"     // the "skip model" list row
 	customModel = "\x00custommodel" // the "custom model" list row
 	doneModels  = "\x00donemodels"  // the "finish curating the model list" row
 	backModel   = "\x00back"        // the "back to previous step" list row
 	sepSentinel = "\x00sep"         // a blank divider row (inert; cursor skips it)
 )
 
-// isSentinel reports whether v is a synthetic action row rather than a profile.
+// isSentinel reports whether v is a synthetic action row rather than a binding.
 func isSentinel(v string) bool {
-	return v == addSentinel || v == skipModel || v == customModel ||
+	return v == addSentinel || v == customModel ||
 		v == doneModels || v == backModel || v == sepSentinel
 }
 
 type item struct {
 	title, desc string
 	value       string
-	active      bool // the already-picked profile — stays primary-colored even off-cursor
+	active      bool // the already-picked binding — stays primary-colored even off-cursor
 }
 
 func (i item) Title() string       { return i.title }
@@ -102,7 +101,7 @@ var (
 const exampleEndpoint = "https://api.example.com/v1"
 
 type model struct {
-	store       *profile.Store
+	cat         *catalog.Catalog
 	allTools    []*tools.Tool // registry built once; reused across renders
 	view        view
 	list        list.Model
@@ -111,9 +110,9 @@ type model struct {
 	wiz         wizard
 	editField   string // which field the single-field editor is editing
 	fromForm    bool   // model picker/fetch was launched from the edit form
-	delTarget   string // profile name pending delete confirmation
-	dupSource   string // profile being duplicated by the backup flow
-	showConfirm bool   // when true, render a confirmation dialog over the profile list
+	delTarget   string // binding name pending delete confirmation
+	dupSource   string // binding being duplicated
+	showConfirm bool   // when true, render a confirmation dialog over the binding list
 
 	formInputs []textinput.Model // native form inputs for Name, URL, Token, Model
 	formFocus  int               // index of focused form element (0: Name, 1: URL, 2: Token, 3: Model, 4: Save, 5: Cancel)
@@ -167,7 +166,7 @@ func (m *model) resize() {
 	m.list.SetSize(m.width, h)
 }
 
-func newModel(store *profile.Store, version string) model {
+func newModel(store *catalog.Catalog, version string) model {
 	l := list.New(nil, themedDelegate(), 0, 0)
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
@@ -202,7 +201,7 @@ func newModel(store *profile.Store, version string) model {
 	ti.Cursor.Style = ti.Cursor.Style.Foreground(colorAccent)
 	ti.Cursor.SetMode(cursor.CursorStatic)
 
-	m := model{store: store, allTools: tools.All(), view: viewTools, list: l, input: ti, spinner: newSpinner(), version: version}
+	m := model{cat: store, allTools: tools.All(), view: viewTools, list: l, input: ti, spinner: newSpinner(), version: version}
 	m.loadTools()
 	return m
 }
@@ -232,13 +231,13 @@ func (m model) inputView() bool {
 	return false
 }
 
-// selectedProfile returns the highlighted profile row, or false (with a status hint)
-// when the cursor is on a sentinel row like "Add new profile" or the divider — the
-// shared guard for the e/b/d shortcuts, which only act on real profiles.
-func (m *model) selectedProfile() (item, bool) {
+// selectedBinding returns the highlighted binding row, or false (with a status hint)
+// when the cursor is on a sentinel row like "Add new binding" or the divider — the
+// shared guard for the e/c/d shortcuts, which only act on real bindings.
+func (m *model) selectedBinding() (item, bool) {
 	it, ok := m.list.SelectedItem().(item)
 	if !ok || isSentinel(it.value) {
-		m.setStatus(statusInfo, "select a profile first")
+		m.setStatus(statusInfo, "select a binding first")
 		return item{}, false
 	}
 	return it, true
@@ -264,12 +263,9 @@ func (m *model) loadTools() {
 		desc := "not installed — see the README to set it up"
 		if t.Detected != nil && t.Detected() {
 			info, _ := t.Describe()
-			active := m.store.Active(t.Name)
-			if active == "" {
-				active = "—"
-			}
-			if drift, _ := m.store.Drift(t); drift {
-				active += " ⚠"
+			active := "—"
+			if b, found, err := m.cat.Active(t.Name); err == nil && found {
+				active = b.Name
 			}
 			desc = fmt.Sprintf("active: %s · %s · %s", active, info.AuthMode, info.Endpoint)
 		}
@@ -285,25 +281,27 @@ func (m *model) loadTools() {
 	m.setDelegate(themedDelegate()) // two-line rows show each tool's status
 }
 
-// loadProfiles rebuilds the profile list for the current tool. selectName, if
-// non-empty, is the row the cursor should land on (e.g. the profile just
-// edited or backed up); otherwise the cursor defaults to the active profile.
-// This keeps an edit or backup from silently relocating the cursor onto
+// loadProfiles rebuilds the binding list for the current tool. selectName, if
+// non-empty, is the row the cursor should land on (e.g. the binding just
+// edited or cloned); otherwise the cursor defaults to the active binding.
+// This keeps an edit or clone from silently relocating the cursor onto
 // whatever happens to be active — only an explicit switch should do that.
 func (m *model) loadProfiles(selectName string) {
 	var items []list.Item
-	active := m.store.Active(m.tool.Name)
-	saved := m.store.List(m.tool.Name)
-	drift, _ := m.store.Drift(m.tool) // live config changed outside charon?
+	active := ""
+	if b, found, err := m.cat.Active(m.tool.Name); err == nil && found {
+		active = b.Name
+	}
+	saved, _ := m.cat.Bindings(m.tool.Name)
 	target := selectName
 	if target == "" {
 		target = active
 	}
 
 	if m.tool.ApplyAuth != nil {
-		items = append(items, item{title: "＋ Add new profile…", desc: "Create a new custom endpoint & API key profile (or press 'a')", value: addSentinel})
+		items = append(items, item{title: "＋ Add new binding…", desc: "Save an endpoint, key, and model (or press 'a')", value: addSentinel})
 		if len(saved) > 0 {
-			items = append(items, item{value: sepSentinel}) // gap between add button and profile list
+			items = append(items, item{value: sepSentinel})
 		}
 	}
 
@@ -312,79 +310,75 @@ func (m *model) loadProfiles(selectName string) {
 	if m.tool.ApplyAuth != nil {
 		offset = 1
 		if len(saved) > 0 {
-			offset = 2 // 1 item + 1 separator
+			offset = 2
 		}
 	}
 
-	for i, name := range saved {
-		// ✓ marks the active profile; url and model show on the line below.
-		title := name
-		isActive := name == active
+	for i, b := range saved {
+		title := b.Name
+		isActive := b.Name == active
 		if isActive {
 			title = "✓ " + title
-			if drift {
-				title += "  ⚠ modified" // snapshot no longer matches live config
-			}
 		}
-		if name == target {
+		if b.Name == target {
 			selectedIndex = i + offset
 		}
-		items = append(items, item{title: title, desc: m.profileDetail(name), value: name, active: isActive})
+		items = append(items, item{title: title, desc: m.profileDetail(b.Name), value: b.Name, active: isActive})
 	}
 
 	m.list.SetItems(items)
 	m.list.Select(selectedIndex)
-	m.list.Title = m.tool.Title + " profiles"
+	m.list.Title = m.tool.Title + " bindings"
 	m.setHelpKeys(keySwitch, keyEdit, keyBackup, keyDelete, keyBack)
-	m.setDelegate(themedDelegate()) // two-line rows show each profile's url and model
-	// Welcome a first-time user who has no profiles for this tool yet.
+	m.setDelegate(themedDelegate())
 	if len(saved) == 0 && m.status == "" && m.tool.ApplyAuth != nil {
-		m.setStatus(statusInfo, `No profiles yet — press enter on "Add new profile" or press 'a' to create one.`)
+		m.setStatus(statusInfo, `No bindings yet — press enter on "Add new binding" or press 'a' to create one.`)
 	}
 }
 
-// profileDetail is the second-line summary of a profile: its endpoint, model, and
-// reasoning-effort level when known, falling back to the manifest label for profiles
-// charon captured rather than created itself.
+// profileDetail is the second-line summary of a binding: its endpoint and default
+// model, plus how many extra models its picker offers. For the active binding the
+// live model and effort are overlaid for display only — they are not written back.
 func (m *model) profileDetail(name string) string {
-	model, effort := m.store.ProfileModelEffort(m.tool, name)
-	liveEndpoint := ""
-	// The active profile's on-disk snapshot only resyncs when you switch away (see
-	// refreshMergerArtifacts) — an external /model change while it's active leaves the
-	// snapshot stale. Read live config instead so the list matches what's actually set.
-	if name == m.store.Active(m.tool.Name) && m.tool.Describe != nil {
+	b, found, err := m.cat.BindingByName(m.tool.Name, name)
+	if err != nil || !found {
+		return ""
+	}
+	url, slug := "", ""
+	extra := 0
+	if cr, err := m.cat.Credential(b.CredentialID); err == nil {
+		if p, err := m.cat.Provider(cr.ProviderID); err == nil {
+			url = p.BaseURL
+		}
+	}
+	if s, err := m.cat.ModelSlug(b.ModelID); err == nil {
+		slug = s
+	}
+	if slugs, err := m.cat.ModelSlugs(b.Models); err == nil && len(slugs) > 1 {
+		extra = len(slugs) - 1
+	}
+	effort := ""
+	if active, ok, err := m.cat.Active(m.tool.Name); err == nil && ok && active.Name == name && m.tool.Describe != nil {
 		if info, err := m.tool.Describe(); err == nil {
-			liveEndpoint = info.Endpoint
+			if info.Endpoint != "" {
+				url = info.Endpoint
+			}
 			if info.Model != "" {
-				model = info.Model
+				slug = info.Model
 			}
-			if info.Effort != "" {
-				effort = info.Effort
-			}
+			effort = info.Effort
 		}
 	}
-	spec, hasSpec := m.store.GetSpec(m.tool.Name, name)
-	if hasSpec && model == "" {
-		model = spec.Model
+	if url == "" {
+		url = "default endpoint"
 	}
-	if !hasSpec && model == "" && effort == "" && liveEndpoint == "" {
-		if man, err := m.store.LoadManifest(m.tool.Name, name); err == nil && man.Label != "" {
-			return man.Label
-		}
-		return "captured config"
+	if slug == "" {
+		slug = "no model"
 	}
-	url := "default endpoint"
-	if liveEndpoint != "" {
-		url = liveEndpoint
-	} else if hasSpec {
-		if u := m.tool.ResolveEndpoint(spec.Endpoint); u != "" {
-			url = u
-		}
+	detail := url + " · " + slug
+	if extra > 0 {
+		detail += fmt.Sprintf(" +%d", extra)
 	}
-	if model == "" {
-		model = "no model override"
-	}
-	detail := url + " · " + model
 	if effort != "" {
 		detail += " · effort: " + effort
 	}
@@ -471,7 +465,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "c":
 			if m.view == viewProfiles {
-				if it, ok := m.selectedProfile(); ok {
+				if it, ok := m.selectedBinding(); ok {
 					return m.startBackup(it.value)
 				}
 				return m, nil
@@ -492,48 +486,47 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// onEditKey opens the edit form for the highlighted profile ("e" on the profiles
-// view). Official defaults and captured login backups have nothing to edit.
+// onEditKey opens the edit form for the highlighted binding ("e").
 func (m model) onEditKey() (tea.Model, tea.Cmd) {
-	it, ok := m.selectedProfile()
+	it, ok := m.selectedBinding()
 	if !ok {
 		return m, nil
 	}
-	sp, ok := m.store.GetSpec(m.tool.Name, it.value)
-	if !ok {
-		// OAuth / official default / captured backups have no endpoint/key to change.
-		m.setStatus(statusInfo, "this profile has no editable settings")
+	b, found, err := m.cat.BindingByName(m.tool.Name, it.value)
+	if err != nil || !found {
+		m.setStatus(statusErr, "no binding named "+it.value)
 		return m, nil
 	}
-	// spec.Model is frozen at Add-time; prefer whatever the list just showed (the
-	// captured snapshot, or live config for the active profile) so edit matches it.
-	model := sp.Model
-	if snapModel, _ := m.store.ProfileModelEffort(m.tool, it.value); snapModel != "" {
-		model = snapModel
+	cr, err := m.cat.Credential(b.CredentialID)
+	if err != nil {
+		m.setStatus(statusErr, err.Error())
+		return m, nil
 	}
-	if it.value == m.store.Active(m.tool.Name) && m.tool.Describe != nil {
-		if info, err := m.tool.Describe(); err == nil && info.Model != "" {
-			model = info.Model
-		}
+	p, err := m.cat.Provider(cr.ProviderID)
+	if err != nil {
+		m.setStatus(statusErr, err.Error())
+		return m, nil
 	}
+	slug, _ := m.cat.ModelSlug(b.ModelID)
+	slugs, _ := m.cat.ModelSlugs(b.Models)
 	m.wiz = wizard{name: it.value, origName: it.value, edit: true,
-		endpoint: sp.Endpoint, key: sp.Key, model: model, models: sp.Models}
-	m.editField = "" // fresh edit starts on the first field
+		endpoint: p.BaseURL, key: cr.Key, model: slug, models: slugs}
+	m.editField = ""
 	m.view = viewEditForm
 	m.clearStatus()
 	m.loadEditForm()
 	return m, nil
 }
 
-// onDeleteKey arms the confirm-delete prompt for the highlighted profile ("d" on
-// the profiles view). The default profile is not deletable.
+// onDeleteKey arms the confirm-delete prompt for the highlighted binding ("d").
+// The active binding is not deletable; switch away first.
 func (m model) onDeleteKey() (tea.Model, tea.Cmd) {
-	it, ok := m.selectedProfile()
+	it, ok := m.selectedBinding()
 	if !ok {
 		return m, nil
 	}
-	if it.value == profile.DefaultName {
-		m.setStatus(statusInfo, "the default profile can't be deleted")
+	if active, found, err := m.cat.Active(m.tool.Name); err == nil && found && active.Name == it.value {
+		m.setStatus(statusInfo, "switch to another binding before deleting the active one")
 		return m, nil
 	}
 	m.delTarget = it.value
@@ -542,36 +535,57 @@ func (m model) onDeleteKey() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// startBackup routes the "c"/"b" shortcut: clones API profiles instantly with an auto-incremented
-// name without interrupting the user with a prompt, and focuses on the newly created clone.
+// startBackup clones the highlighted binding ("c") into the first free
+// "<name>-copy" (then "<name>-copy-2", …). The clone shares the credential and
+// model list and is not activated.
 func (m model) startBackup(name string) (tea.Model, tea.Cmd) {
-	if _, ok := m.store.GetSpec(m.tool.Name, name); ok || name == profile.DefaultName {
-		saved := m.store.List(m.tool.Name)
-		newName := profile.NextDuplicateName(saved, name)
-		if err := m.store.Duplicate(m.tool.Name, name, newName); err != nil {
-			m.setStatus(statusErr, err.Error())
-			return m, nil
-		}
-		m.loadProfiles(newName)
-		m.setStatus(statusOK, fmt.Sprintf("Cloned %s as %s", name, newName))
+	b, found, err := m.cat.BindingByName(m.tool.Name, name)
+	if err != nil || !found {
+		m.setStatus(statusErr, "no binding named "+name)
 		return m, nil
 	}
-	// OAuth / original login → capture the current account, named by its email.
-	saved, err := m.store.SaveCurrentAccount(m.tool)
+	saved, err := m.cat.Bindings(m.tool.Name)
 	if err != nil {
 		m.setStatus(statusErr, err.Error())
-	} else {
-		m.setStatus(statusOK, "Backed up login as "+saved)
+		return m, nil
 	}
-	m.loadProfiles(saved)
+	names := make([]string, len(saved))
+	for i, s := range saved {
+		names[i] = s.Name
+	}
+	newName := nextDuplicateName(names, name)
+	slugs, err := m.cat.ModelSlugs(b.Models)
+	if err != nil {
+		m.setStatus(statusErr, err.Error())
+		return m, nil
+	}
+	slug, err := m.cat.ModelSlug(b.ModelID)
+	if err != nil {
+		m.setStatus(statusErr, err.Error())
+		return m, nil
+	}
+	if _, err := m.cat.AddBinding(b.Tool, newName, b.CredentialID, slug, slugs); err != nil {
+		m.setStatus(statusErr, err.Error())
+		return m, nil
+	}
+	m.loadProfiles(newName)
+	m.setStatus(statusOK, fmt.Sprintf("Cloned %s as %s", name, newName))
 	return m, nil
 }
 
-// nextCopyName returns the first free "<base>-N" name (N starting at 2).
-func (m *model) nextCopyName(base string) string {
+// nextDuplicateName returns the first free "<src>-copy" (then "<src>-copy-2", …).
+func nextDuplicateName(existing []string, src string) string {
+	taken := make(map[string]bool, len(existing))
+	for _, n := range existing {
+		taken[n] = true
+	}
+	base := src + "-copy"
+	if !taken[base] {
+		return base
+	}
 	for i := 2; ; i++ {
 		cand := fmt.Sprintf("%s-%d", base, i)
-		if !m.store.Exists(m.tool.Name, cand) {
+		if !taken[cand] {
 			return cand
 		}
 	}
@@ -645,7 +659,7 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 		m.tool = t
 		m.view = viewProfiles
 		m.clearStatus()
-		m.loadProfiles("") // land on the active profile
+		m.loadProfiles("") // land on the active binding
 		m.resize()         // banner hidden → grow the list
 
 	case viewProfiles:
@@ -655,13 +669,17 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 			m.loadEditForm()
 			return m, nil
 		}
-		backup, err := m.store.Apply(m.tool, it.value)
-		if err != nil {
+		b, found, err := m.cat.BindingByName(m.tool.Name, it.value)
+		if err != nil || !found {
+			m.setStatus(statusErr, "no binding named "+it.value)
+			return m, nil
+		}
+		if _, err := m.cat.Activate(b.ID); err != nil {
 			m.setStatus(statusErr, err.Error())
 		} else {
 			info, _ := m.tool.Describe()
-			m.setStatus(statusOK, fmt.Sprintf("Switched to %s (%s · %s). Backup: %s",
-				it.value, info.Endpoint, secret.Mask(info.Secret), backup))
+			m.setStatus(statusOK, fmt.Sprintf("Switched to %s (%s · %s)",
+				it.value, info.Endpoint, secret.Mask(info.Secret)))
 			m.loadProfiles(it.value)
 		}
 
@@ -681,7 +699,7 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 		}
 		if it.value == doneModels {
 			// Finish curating without changing the default: an unset default is filled in
-			// from the first checked id when the profile is saved (Spec.normalized).
+			// from the first checked id when the binding is saved.
 			return m.leavePicker()
 		}
 		if it.value == customModel {
@@ -695,23 +713,18 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 			}
 			return m, textinput.Blink
 		}
-		if it.value == skipModel {
-			m.wiz.model = ""
-			m.wiz.models = nil // no model at all means nothing to register either
-		} else {
-			m.wiz.model = it.value
-			// Picking a default implies wanting it available, so it joins the selection
-			// rather than sitting outside the list that gets registered.
-			if len(m.wiz.models) > 0 && !m.modelSelected(it.value) {
-				m.toggleModel(it.value)
-			}
+		m.wiz.model = it.value
+		// Picking a default implies wanting it available, so it joins the selection
+		// rather than sitting outside the list that gets registered.
+		if len(m.wiz.models) > 0 && !m.modelSelected(it.value) {
+			m.toggleModel(it.value)
 		}
 		return m.leavePicker()
 	}
 	return m, nil
 }
 
-// leavePicker returns from the model picker to the profile form, keeping the wizard's
+// leavePicker returns from the model picker to the form, keeping the wizard's
 // model choice and selection as they stand.
 func (m model) leavePicker() (tea.Model, tea.Cmd) {
 	m.editField = fieldModel
