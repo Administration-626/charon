@@ -1,7 +1,7 @@
 <h1 align="center">Charon</h1>
 
 <p align="center">
-  <em>Ferry your AI tools between endpoints.</em>
+  <em>Switch your AI tools between endpoints.</em>
 </p>
 
 <p align="center">
@@ -15,8 +15,8 @@
   <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-Charon is a tiny Go CLI that detects the **Codex**, **Claude Code**,
-**OpenCode**, and **Pi** CLIs and switches each one's **endpoint + credentials**
+Charon is a tiny Go CLI that detects the Codex, Claude Code,
+OpenCode, and Pi CLIs and switches each one's endpoint + credentials
 between named bindings. A binding is an endpoint, an API key, and the models it
 should offer — not a snapshot of the tool's config. Switching re-renders that
 binding into the tool, overwriting only the keys charon owns.
@@ -27,35 +27,35 @@ binding into the tool, overwriting only the keys charon owns.
 
 ## Features
 
-- **One command, four tools.** Manage Codex, Claude Code, OpenCode, and Pi from
+- One command, four tools. Manage Codex, Claude Code, OpenCode, and Pi from
   a single interactive menu or a scriptable CLI.
-- **Named bindings.** Save an endpoint, a key, and the models it offers, then
-  hop between them. One site can back several tools.
-- **Model discovery.** Add a binding from an endpoint + key; Charon fetches the
+- Named bindings. Save an endpoint, an API key, and its models, then switch
+  between bindings. One endpoint can serve several tools.
+- Model discovery. Add a binding from an endpoint + key; Charon fetches the
   model list and lets you pick — or type model ids directly.
-- **Switch models inside the tool.** Check off the models you actually use and
+- Switch models inside the tool. Check off the models you actually use and
   Charon registers them in the tool's own picker (Claude Code's `/model`, OpenCode's
   `/models`, Pi's `/model`), so changing model mid-session never means going back
   through Charon.
-- **Single-page form.** Add or edit a binding on one screen (Name, URL, Token,
-  Model) with direct typing and `[ Save ]` / `[ Cancel ]` buttons.
-- **Instant clone & search.** Press `c` to duplicate a binding without prompts,
+- Single-page form. Add or edit a binding on one screen (Name, URL, Token,
+  Model) with direct typing and [ Save ] / [ Cancel ] buttons.
+- Instant clone & search. Press c to duplicate a binding without prompts,
   and type to fuzzy-filter the model list in real time.
-- **Unicode names.** Binding names support any script, including Chinese; spaces
+- Unicode names. Binding names support any script, including Chinese; spaces
   and control characters are rejected.
-- **Safe by default.** Writes are atomic. Deleting the binding a tool is
+- Safe by default. Writes are atomic. Deleting the binding a tool is
   currently using is refused — switch to another one first.
-- **Non-destructive.** Charon only ever touches its own `charon` provider entry
+- Non-destructive. Charon only ever touches its own `charon` provider entry
   in each tool's config, never your hand-authored providers.
 
 ## Supported tools
 
 | Tool | Endpoint | Credentials |
 |------|----------|-------------|
-| **Codex** | `~/.codex/config.toml` (`model_provider` → `base_url`) | `~/.codex/config.toml` (`experimental_bearer_token`) |
-| **Claude Code** | `~/.claude/settings.json` (`env.ANTHROPIC_BASE_URL`) | `settings.json` env key |
-| **OpenCode** | `~/.config/opencode/opencode.jsonc` (`provider.*.options.baseURL`) | `opencode.jsonc` (`provider.charon.options.apiKey`) |
-| **Pi** | `~/.pi/agent/extensions/charon.ts` (`baseUrl`) | `~/.pi/agent/extensions/charon.ts` (`apiKey`) |
+| Codex | `~/.codex/config.toml` (`model_provider` → `base_url`) | `~/.codex/config.toml` (`experimental_bearer_token`) |
+| Claude Code | `~/.claude/settings.json` (`env.ANTHROPIC_BASE_URL`) | `settings.json` env key |
+| OpenCode | `~/.config/opencode/opencode.jsonc` (`provider.*.options.baseURL`) | `opencode.jsonc` (`provider.charon.options.apiKey`) |
+| Pi | `~/.pi/agent/extensions/charon.ts` (`baseUrl`) | `~/.pi/agent/extensions/charon.ts` (`apiKey`) |
 
 ## Installation
 
@@ -73,7 +73,7 @@ curl -fsSL https://github.com/Administration-626/charon/releases/latest/download
 <details>
 <summary><b>Other methods</b> — manual binary · build from source</summary>
 
-**Pre-built binary** — grab your platform's archive from the
+Pre-built binary — grab your platform's archive from the
 [Releases page](https://github.com/Administration-626/charon/releases/latest)
 (`charon_linux_{amd64,arm64}.tar.gz`) and verify it against the included
 `checksums.txt`:
@@ -83,7 +83,7 @@ curl -L https://github.com/Administration-626/charon/releases/latest/download/ch
 sudo mv charon /usr/local/bin/
 ```
 
-**From source** — requires Go 1.24+:
+From source — requires Go 1.24+:
 
 ```sh
 make install                      # build + install to ~/.local/bin (PREFIX to override)
@@ -142,38 +142,38 @@ They complete subcommands, tool names, and — for `switch`/`edit`/`rename`/`cp`
 
 ### From an endpoint + key (with model discovery)
 
-In the menu, drill into a tool and choose **＋ Add new binding…** (or press `a`).
+In the menu, drill into a tool and choose ＋ Add new binding… (or press a).
 A single-page form collects everything on one screen:
 
-- **Name** — a binding name (any script; Unicode is fine).
-- **API base URL** — leave blank to accept the provider default; a real value is
+- Name — a binding name (any script; Unicode is fine).
+- API base URL — leave blank to accept the provider default; a real value is
   never prefilled.
-- **API key** — masked input.
-- **Model** — two action buttons underneath give you full control:
-  - **`[ Fetch & Pick Online Models ]`** hits `GET /v1/models` (using `Authorization:
+- API key — masked input.
+- Model — two action buttons underneath give you full control:
+  - [ Fetch & Pick Online Models ] hits `GET /v1/models` (using `Authorization:
     Bearer` for OpenAI-style APIs and `x-api-key` for Anthropic) and opens the
     model picker.
-  - **`[ Type Model IDs Manually ]`** lets you type model IDs directly (comma-separated,
+  - [ Type Model IDs Manually ] lets you type model IDs directly (comma-separated,
     e.g. `kimi-k2, deepseek-v3`) for endpoints or gateways that do not expose
     `/v1/models`. If an online fetch fails, Charon falls back to this manual screen
     automatically with existing IDs prefilled.
   You can also type a model slug directly into the field. If you leave it blank,
   the first model in the registered list becomes the default.
 
-In the model picker, just **start typing to fuzzy-filter** the list in real time
-(Backspace edits the query, `Esc` clears it):
-- **`Space`** checks/unchecks a model (marked `•`) into the curated list registered
+In the model picker, just start typing to fuzzy-filter the list in real time
+(Backspace edits the query, Esc clears it):
+- Space checks/unchecks a model (marked •) into the curated list registered
   with the tool.
-- **`Ctrl+A`** selects or deselects all models (or all matching search results).
-- Once models are checked, a **`✔ Done — register these N model(s)`** row appears at the
-  top (showing the active default model). Press **`Enter`** on it to return to the
+- Ctrl+A selects or deselects all models (or all matching search results).
+- Once models are checked, a Done — register these N model(s) row appears at the
+  top (showing the active default model). Press Enter on it to return to the
   form without re-picking the default.
-- Press **`Enter`** on any model row to set it as the default (marked `✓`),
+- Press Enter on any model row to set it as the default,
   automatically adding it to the registered list if not already checked, and return
   to the form.
 - Check nothing and the whole fetched list is registered.
-Tab to **`[ Save ]`** to write the endpoint/key/model into the tool's live
-config and switch to it, or **`[ Cancel ]`** to discard. Name, key, and at least
+Tab to [ Save ] to write the endpoint/key/model into the tool's live
+config and switch to it, or [ Cancel ] to discard. Name, key, and at least
 one model are required. Leave URL blank to use the tool's default endpoint; a red
 status bar flags missing required values on submit.
 
@@ -189,21 +189,21 @@ A binding with one model replaces the previous binding's list with that one mode
 Changing the model in the tool does not update the saved binding. Charon reapplies
 the binding's saved default when it renders that binding again.
 
-In the menu, press **`c`** on a binding to **clone** it instantly into
+In the menu, press c on a binding to clone it instantly into
 `<name>-copy` with no prompts — focus jumps to the new copy, which shares the
 same key and model list and is not activated.
 
 ### Editing an existing binding
 
-Press **`e`** on a binding to open its edit form, showing the current **Name**,
-**URL**, **Token** (masked), and **Model** on a single screen. Type directly into
-any field; the **Model** field's **`[ Fetch & Pick Online Models ]`** and
-**`[ Type Model IDs Manually ]`** buttons let you update or re-fetch the registered
+Press e on a binding to open its edit form, showing the current Name,
+URL, Token (masked), and Model on a single screen. Type directly into
+any field; the Model field's [ Fetch & Pick Online Models ] and
+[ Type Model IDs Manually ] buttons let you update or re-fetch the registered
 models. The model list saved on this binding stays as-is unless you curate a new list,
-so a rename or key rotation keeps the binding's own picker. Tab to **`[ Save ]`**
-to apply the changes — renaming is handled automatically — or **`[ Cancel ]`** to
+so a rename or key rotation keeps the binding's own picker. Tab to [ Save ]
+to apply the changes — renaming is handled automatically — or [ Cancel ] to
 discard. Editing a binding that is not the active one updates only the catalog;
-the live config changes when you switch to it. Press **`d`** to delete; the active
+the live config changes when you switch to it. Press d to delete; the active
 binding is refused until you switch away.
 
 ### Non-interactively
@@ -233,16 +233,16 @@ picker list.
 Each tool gets a dedicated `charon` provider entry written into its own config
 format (Codex `[model_providers.charon]`, Claude `env.ANTHROPIC_*`, OpenCode an
 `@ai-sdk/openai-compatible` provider, Pi a `pi.registerProvider("charon", ...)`
-extension), so switching away and back is clean.
+extension), so Charon can reapply a binding after you switch to another one.
 
-A typical flow: `charon add codex --name work-key --key sk-... --model gpt-5`,
+For example, run `charon add codex --name work-key --key sk-... --model gpt-5`,
 then `charon add codex --name proxy --endpoint https://gateway.example/v1 --key sk-...
---model glm-4.6`, and hop with `charon switch codex work-key` — or just run `charon`
-and pick from the menu.
+--model glm-4.6`. Switch back with `charon switch codex work-key`, or run `charon`
+and choose a binding from the menu.
 
 ## How it works
 
-- **Storage:** `~/.config/charon/` (`$XDG_CONFIG_HOME` respected). Five JSON files,
+- Storage: `~/.config/charon/` (`$XDG_CONFIG_HOME` respected). Five JSON files,
   no database:
   - `providers.json` — a site: id, base URL. Reused across tools.
   - `credentials.json` — a key for one site. Mode `0600`.
@@ -254,21 +254,21 @@ and pick from the menu.
   exactly one model.
 - Switching updates `active.json` and re-renders that binding. Only the keys
   charon owns are overwritten.
-- Writes are **atomic** (temp file → `rename`).
+- Writes are atomic (temp file → `rename`).
 - On first open, saved legacy profiles with endpoint, key, and model data are imported
   as bindings. The old profile tree is kept; snapshot-only profiles, backups, and OAuth
   logins are not imported.
 
 ## Security
 
-Bindings are stored **unencrypted** on disk (`0600` for files, `0700` for
-directories — the `x` bit on directories means "enter", not "execute", so
+Bindings are stored unencrypted on disk (`0600` for files, `0700` for
+directories — the x bit on directories means "enter", not "execute", so
 `0700` is the correct way to allow access). This is the same permission model
 used by the tools themselves (`~/.codex/config.toml`, `~/.claude/settings.json`,
 etc.) — if an attacker can read `~/.config/charon`, they can also read those
-files. **Shell config files** (`~/.bashrc`, `~/.zshrc`), by contrast, default to
+files. Shell config files (`~/.bashrc`, `~/.zshrc`), by contrast, default to
 `0644` (world-readable), so storing API keys there is considerably less secure.
-Keep `~/.config/charon` private. Writes are **atomic** (temp file → `rename`).
+Keep `~/.config/charon` private. Writes are atomic (temp file → `rename`).
 Nothing is sent off the machine.
 
 ## Project layout
@@ -296,8 +296,8 @@ make run     # build + interactive menu (sandbox HOME first!)
 
 CI (`.github/workflows/ci.yml`) runs formatting checks, vet, race tests, build,
 and golangci-lint on Linux. Contributor and agent conventions —
-including the rule to **always sandbox `HOME` when testing so real credentials
-are never touched** — live in [AGENTS.md](AGENTS.md).
+including the rule to always sandbox `HOME` when testing so real credentials
+are never touched — live in [AGENTS.md](AGENTS.md).
 
 ## Roadmap
 
@@ -306,14 +306,14 @@ are never touched** — live in [AGENTS.md](AGENTS.md).
 
 ## Contributing
 
-**PRs and issues are very welcome.** This is an early project with plenty of room
-to grow — your ideas and bug reports genuinely shape where it goes next.
+PRs and issues are welcome. This is an early project, and feedback helps guide
+future changes.
 
-- 🐛 **Found a bug?** [Open an issue](https://github.com/Administration-626/charon/issues/new) with the tool name, OS, and expected vs. actual behavior.
-- 💡 **Have an idea?** [Start a discussion](https://github.com/Administration-626/charon/issues/new) — new tool support, UX tweaks, anything is fair game.
-- 🔧 **Sending a fix or feature?** Fork → branch → PR. Run `make fmt && make test` before pushing. See [AGENTS.md](AGENTS.md) for the conventions.
+- Found a bug? [Open an issue](https://github.com/Administration-626/charon/issues/new) with the tool name, operating system, expected behavior, and actual behavior.
+- Have a feature request? [Open an issue](https://github.com/Administration-626/charon/issues/new) describing the requested tool support or interface change.
+- Sending a fix or feature? Fork the repository, create a branch, and open a PR. Run `make fmt && make test` before pushing. See [AGENTS.md](AGENTS.md) for the conventions.
 
-No contribution is too small — a typo fix is as appreciated as a new feature.
+Contributions include typo fixes, bug fixes, and new features.
 
 ## License
 
