@@ -123,7 +123,7 @@ func (m model) View() string {
 		}
 
 		btnLine := "\n  " + saveBtn + "\n  " + cancelBtn
-		hint := "\n\n" + hintStyle.Render("Shortcuts: ↑/↓: move · tab: switch · ctrl+s: save · esc: cancel")
+		hint := "\n\n" + hintStyle.Render("Shortcuts: ↑/↓: move · tab: switch · enter: select button · esc: cancel")
 
 		body := header + strings.Join(formLines, "\n") + "\n" + btnLine + hint
 		if line := statusRender(m.statusLvl, m.status); line != "" {

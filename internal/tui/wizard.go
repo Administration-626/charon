@@ -305,9 +305,9 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.wiz.model = strings.TrimSpace(val)
 		}
 
+		// Deliberately no ctrl+s here: the terminal eats it as XOFF (flow control) and
+		// the TUI freezes. Save is the [ Save ] row, reached with ↓/tab then enter.
 		switch msg.String() {
-		case "ctrl+s":
-			return m.onEditFormSelect(actionSave)
 		case "esc":
 			return m.onEsc()
 		case "m", "ctrl+m":
