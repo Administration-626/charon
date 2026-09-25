@@ -88,6 +88,7 @@ func TestDetectedWithoutAuth(t *testing.T) {
 		{tool: "claude", config: filepath.Join(home, ".claude", "settings.json")},
 		{tool: "opencode", config: filepath.Join(home, ".config", "opencode", "opencode.jsonc")},
 		{tool: "pi", config: filepath.Join(home, ".pi", "agent", "settings.json")},
+		{tool: "grok", config: filepath.Join(home, ".grok", "config.toml")},
 	} {
 		t.Run(tc.tool, func(t *testing.T) {
 			writeFile(t, tc.config, "")
@@ -110,6 +111,7 @@ func TestEmptyConfigDirectoriesAreNotDetected(t *testing.T) {
 		filepath.Join(home, ".claude"),
 		filepath.Join(home, ".config", "opencode"),
 		filepath.Join(home, ".pi", "agent"),
+		filepath.Join(home, ".grok"),
 	} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
@@ -117,7 +119,7 @@ func TestEmptyConfigDirectoriesAreNotDetected(t *testing.T) {
 	}
 	// Claude detection checks the macOS Keychain after finding no config, so do not
 	// call it from a test that must never access the real Keychain.
-	for _, name := range []string{"codex", "opencode", "pi"} {
+	for _, name := range []string{"codex", "opencode", "pi", "grok"} {
 		if Find(name).Detected() {
 			t.Errorf("%s should not be detected via an empty config directory", name)
 		}
@@ -648,7 +650,7 @@ func TestEnsureOnlyCharonChanged(t *testing.T) {
 func TestNotDetectedInEmptyHome(t *testing.T) {
 	sandboxHome(t)
 	t.Setenv("PATH", t.TempDir())
-	for _, name := range []string{"codex", "opencode", "pi"} {
+	for _, name := range []string{"codex", "opencode", "pi", "grok"} {
 		if Find(name).Detected() {
 			t.Errorf("%s should not be detected in empty HOME", name)
 		}
@@ -778,6 +780,175 @@ func TestClaudeCustomEndpointFetchReplacesRegisteredList(t *testing.T) {
 	ids, _, _ := readClaudePicker(t, home)
 	if strings.Join(ids, ",") != "deepseek-v3,qwen3-max" {
 		t.Errorf("modelPicker ids = %v, want the freshly fetched list only", ids)
+	}
+}
+
+func TestGrokDescribeAndApply(t *testing.T) {
+	home := sandboxHome(t)
+	configPath := filepath.Join(home, ".grok", "config.toml")
+	authPath := filepath.Join(home, ".grok", "auth.json")
+	writeFile(t, configPath, `
+[ui]
+yolo = true
+
+[models]
+default = "grok-4.6"
+web_search = "grok-4.6"
+
+[model.mine]
+model = "mine-model"
+base_url = "https://mine.example/v1"
+api_key = "sk-mine"
+
+[model.charon-old]
+model = "old-slug"
+base_url = "https://old.example/v1"
+api_key = "sk-old"
+`)
+	writeFile(t, authPath, `{"https://accounts.x.ai/sign-in":{"key":"session-token"}}`)
+
+	c := Find("grok")
+	if !c.Detected() {
+		t.Fatal("grok should be detected via config.toml")
+	}
+
+	if err := c.ApplyAuth(AuthSpec{
+		Endpoint:  "https://gateway.example/v1",
+		Key:       "sk-gw-123456789",
+		Model:     "kimi-k2",
+		AllModels: []string{"kimi-k2", "glm-4.6"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := c.Describe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Model != "kimi-k2" || info.Endpoint != "https://gateway.example/v1" || info.Secret != "sk-gw-123456789" || info.AuthMode != "api" {
+		t.Errorf("after apply: %+v", info)
+	}
+
+	var cfg struct {
+		UI struct {
+			Yolo bool `toml:"yolo"`
+		} `toml:"ui"`
+		Models struct {
+			Default   string `toml:"default"`
+			WebSearch string `toml:"web_search"`
+		} `toml:"models"`
+		Model map[string]struct {
+			Model   string `toml:"model"`
+			BaseURL string `toml:"base_url"`
+			APIKey  string `toml:"api_key"`
+		} `toml:"model"`
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.UI.Yolo {
+		t.Error("apply rewrote unrelated [ui] settings")
+	}
+	if cfg.Models.WebSearch != "grok-4.6" {
+		t.Errorf("[models].web_search = %q, want the user's grok-4.6 left in place", cfg.Models.WebSearch)
+	}
+	if cfg.Models.Default != "charon-kimi-k2" {
+		t.Errorf("[models].default = %q, want charon-kimi-k2", cfg.Models.Default)
+	}
+	if p := cfg.Model["mine"]; p.Model != "mine-model" || p.BaseURL != "https://mine.example/v1" || p.APIKey != "sk-mine" {
+		t.Errorf("user model table changed: %+v", p)
+	}
+	if _, ok := cfg.Model["charon-old"]; ok {
+		t.Error("previous charon model table survived a list replacement")
+	}
+	for _, slug := range []string{"kimi-k2", "glm-4.6"} {
+		p, ok := cfg.Model["charon-"+slug]
+		if !ok || p.Model != slug || p.BaseURL != "https://gateway.example/v1" || p.APIKey != "sk-gw-123456789" {
+			t.Errorf("model %s = %+v, ok=%v", slug, p, ok)
+		}
+	}
+	auth, _ := os.ReadFile(authPath)
+	if !strings.Contains(string(auth), "session-token") {
+		t.Error("apply rewrote auth.json")
+	}
+	if info, err := os.Stat(configPath); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("config.toml perm = %v, want 0600", info.Mode().Perm())
+	}
+
+	// A key rotation with no AllModels keeps the registered slugs and updates the key.
+	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gateway.example/v1", Key: "sk-rotated", Model: "kimi-k2"}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(configPath)
+	cfg.Model = nil
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.Model["charon-glm-4.6"]; !ok {
+		t.Error("key rotation dropped a registered model")
+	}
+	if cfg.Model["charon-kimi-k2"].APIKey != "sk-rotated" || cfg.Model["charon-glm-4.6"].APIKey != "sk-rotated" {
+		t.Errorf("rotated key not written to every owned model: %+v", cfg.Model)
+	}
+	if cfg.Model["mine"].APIKey != "sk-mine" {
+		t.Error("key rotation rewrote the user's api_key")
+	}
+
+	// A fetched list replaces the previous endpoint's models.
+	if err := c.ApplyAuth(AuthSpec{
+		Endpoint:  "https://other.example/v1",
+		Key:       "sk-other",
+		Model:     "deepseek-v3",
+		AllModels: []string{"deepseek-v3"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(configPath)
+	cfg.Model = nil
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.Model["charon-kimi-k2"]; ok {
+		t.Errorf("new list kept the previous endpoint's model\n%s", data)
+	}
+	if p := cfg.Model["charon-deepseek-v3"]; p.BaseURL != "https://other.example/v1" {
+		t.Errorf("replacement model = %+v", p)
+	}
+	if cfg.Models.Default != "charon-deepseek-v3" {
+		t.Errorf("default = %q after replacement", cfg.Models.Default)
+	}
+}
+
+func TestGrokRefusesUserModelEdits(t *testing.T) {
+	home := sandboxHome(t)
+	writeFile(t, filepath.Join(home, ".grok", "config.toml"), "model = \"not-a-table\"\n")
+
+	c := Find("grok")
+	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk", Model: "m"}); err == nil {
+		t.Fatal("a non-table [model] key must be refused")
+	}
+}
+
+func TestGrokDescribeOAuthAccount(t *testing.T) {
+	home := sandboxHome(t)
+	// Header is base64url({"alg":"none"}), payload is base64url({"email":"ada@x.ai"}).
+	token := "eyJhbGciOiJub25lIn0.eyJlbWFpbCI6ImFkYUB4LmFpIn0.sig"
+	writeFile(t, filepath.Join(home, ".grok", "auth.json"),
+		`{"https://accounts.x.ai/sign-in":{"key":"`+token+`"}}`)
+
+	info, err := Find("grok").Describe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.AuthMode != "oauth" || info.Account != "ada@x.ai" {
+		t.Errorf("oauth describe = %+v", info)
+	}
+	if info.Endpoint != "api.x.ai (default)" {
+		t.Errorf("endpoint = %q", info.Endpoint)
 	}
 }
 

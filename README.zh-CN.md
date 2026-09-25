@@ -15,8 +15,8 @@
   <a href="README.md">English</a> · <b>简体中文</b>
 </p>
 
-Charon 是一个用 Go 编写的 CLI，可检测 Codex、Claude Code、OpenCode
-与 Pi，并在命名绑定（binding）之间切换各工具使用的 endpoint 和凭据。
+Charon 是一个用 Go 编写的 CLI，可检测 Codex、Claude Code、OpenCode、
+Pi 与 Grok，并在命名绑定（binding）之间切换各工具使用的 endpoint 和凭据。
 一条绑定包含 endpoint、API key 和可供工具选择的模型，不保存工具配置中的其他内容。
 切换绑定时，Charon 会将绑定中的设置写入工具配置，只修改由 Charon 管理的配置项。
 
@@ -26,15 +26,15 @@ Charon 是一个用 Go 编写的 CLI，可检测 Codex、Claude Code、OpenCode
 
 ## 功能
 
-- 一条命令，四个工具。用一个交互式菜单或可脚本化的 CLI 管理 Codex、Claude
-  Code、OpenCode 和 Pi。
+- 一条命令，五个工具。用一个交互式菜单或可脚本化的 CLI 管理 Codex、Claude
+  Code、OpenCode、Pi 和 Grok。
 - 命名绑定。保存 endpoint、API key 和该服务提供的模型，然后在不同绑定之间切换。
   同一个 endpoint 可供多个工具使用。
 - 获取模型列表。提供 endpoint 和 API key 即可添加绑定；Charon 会获取模型列表供你选择，
   也可以手动输入模型 ID。
 - 在工具内切换模型。勾选你常用的那几个模型，Charon 会把它们注册进工具自身的
-  选择器（Claude Code 的 `/model`、OpenCode 的 `/models`、Pi 的 `/model`），可以在会话中
-  更换模型，无需返回 Charon。
+  选择器（Claude Code 的 `/model`、OpenCode 的 `/models`、Pi 的 `/model`、Grok 的
+  `/model`），可以在会话中更换模型，无需返回 Charon。
 - 单页表单。在同一屏新增或编辑绑定（Name、URL、Token、Model），可直接输入，
   并使用 [ Save ] / [ Cancel ] 按钮。
 - 快速复制与搜索。按 c 可直接复制绑定；在模型列表中输入文字即可实时模糊搜索。
@@ -51,6 +51,7 @@ Charon 是一个用 Go 编写的 CLI，可检测 Codex、Claude Code、OpenCode
 | Claude Code | `~/.claude/settings.json`（`env.ANTHROPIC_BASE_URL`） | `settings.json` 的环境变量键 |
 | OpenCode | `~/.config/opencode/opencode.jsonc`（`provider.*.options.baseURL`） | `opencode.jsonc`（`provider.charon.options.apiKey`） |
 | Pi | `~/.pi/agent/extensions/charon.ts`（`baseUrl`） | `~/.pi/agent/extensions/charon.ts`（`apiKey`） |
+| Grok | `~/.grok/config.toml`（`[model.charon-*].base_url`） | `~/.grok/config.toml`（`[model.charon-*].api_key`） |
 
 ## 安装
 
@@ -159,7 +160,8 @@ charon completion fish | source
 
 绑定中保存的模型会出现在工具自身的菜单中，因此可以在当前会话内更换模型：Claude Code
 的 `/model`（通过 `modelPicker`）、OpenCode 的 `/models`（读取 `charon` provider 的模型
-映射）以及 Pi 的 `/model`（由 Charon 生成的扩展）。切换绑定时，工具中的模型列表也会更新。
+映射）、Pi 的 `/model`（由 Charon 生成的扩展）以及 Grok 的 `/model`（一组
+`[model.charon-<slug>]` 表）。切换绑定时，工具中的模型列表也会更新。
 只有一个模型的绑定会将工具中的模型列表替换为该模型，不会保留上一条绑定的列表。Codex 是
 例外：它的配置里没有注册额外模型的位置，所以一条 Codex 绑定只带一个模型
 （`charon edit codex <b> --model ...`）。
@@ -204,7 +206,8 @@ charon edit claude gateway --models glm-4.6   # 只在模型菜单中注册 glm-
 每个工具都会在它自己的配置格式里写入一个专属的 `charon` provider 条目
 （Codex 的 `[model_providers.charon]`、Claude 的 `env.ANTHROPIC_*`、OpenCode 的一个
 `@ai-sdk/openai-compatible` provider、Pi 的 `pi.registerProvider("charon", ...)`
-扩展）。因此切换到其他配置后再切回时，Charon 仍可重新应用该绑定。
+扩展、Grok 的每个模型一张 `[model.charon-<slug>]` 表）。因此切换到其他配置后再切回时，
+Charon 仍可重新应用该绑定。
 
 示例：先运行 `charon add codex --name work-key --key sk-... --model gpt-5`，再运行
 `charon add codex --name proxy --endpoint https://gateway.example/v1 --key sk-...
@@ -239,7 +242,7 @@ x 表示可以遍历该目录。各工具配置也采用相同的权限方式，
 ```
 cmd/charon/          入口 + 子命令
 internal/artifact/   原子写入
-internal/tools/      各工具适配器（codex、claude、opencode、pi）
+internal/tools/      各工具适配器（codex、claude、opencode、pi、grok）
 internal/catalog/    provider、凭据、模型、绑定、当前指针
 internal/models/     从 provider API 拉取模型列表（openai/anthropic 协议）
 internal/tui/        bubbletea 交互式菜单（单页表单、模糊模型搜索）

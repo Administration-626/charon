@@ -61,7 +61,7 @@ func detected(executable string, paths ...string) bool {
 
 // All returns the supported tools in a stable display order.
 func All() []*Tool {
-	return []*Tool{newCodex(), newClaude(), newOpenCode(), newPi()}
+	return []*Tool{newCodex(), newClaude(), newOpenCode(), newPi(), newGrok()}
 }
 
 // ResolveEndpoint returns ep, or DefaultEndpoint when ep is empty.
