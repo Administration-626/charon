@@ -543,6 +543,11 @@ func (m model) handleConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // reproduce the exact picker selection.
 func (m model) finishAdd(name string) (tea.Model, tea.Cmd) {
 	slugs := m.pickerModels()
+	// The binding's initial model is the first checked id. The tool's own model
+	// menu switches it later; the picker does not keep a separate default.
+	if len(slugs) > 0 && (m.wiz.model == "" || !containsID(slugs, m.wiz.model)) {
+		m.wiz.model = slugs[0]
+	}
 	if len(slugs) == 0 && m.wiz.model != "" {
 		slugs = []string{m.wiz.model}
 	}
@@ -620,6 +625,16 @@ func splitModelIDs(val string) []string {
 		}
 	}
 	return ids
+}
+
+// containsID reports whether id is already in ids.
+func containsID(ids []string, id string) bool {
+	for _, s := range ids {
+		if s == id {
+			return true
+		}
+	}
+	return false
 }
 
 // pickerModels is the model list to register with the tool: the curated selection when

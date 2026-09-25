@@ -136,21 +136,18 @@ func (m model) View() string {
 		return m.confirmDialog()
 	}
 	out := m.list.View()
-	if m.view == viewPickModel {
-		tip := `💡 Tip: type to search · enter sets the default model`
-		if m.tool != nil {
-			if m.tool.ModelMenu != "" {
-				tip = `💡 Tip: space selects · ctrl+a selects all for ` + m.tool.ModelMenu +
-					` · enter sets default & returns`
-			} else {
-				tip = `💡 Tip: enter chooses a model · type to search (` + m.tool.Title + ` only supports a single model)`
-			}
+	switch m.view {
+	case viewPickModel:
+		n, total := len(m.wiz.models), len(m.allModels)
+		tip := fmt.Sprintf("%d of %d selected · space toggle · ctrl+a all · enter finish · m type ids · esc back", n, total)
+		if m.tool != nil && m.tool.ModelMenu == "" {
+			tip = "choose one model · enter finish · esc back (" + m.tool.Title + " only supports a single model)"
 		}
 		if m.modelFilter != "" {
-			tip = fmt.Sprintf(`🔍 Filter: %q (%d matches) · Esc: clear filter`, m.modelFilter, len(m.list.Items())-2)
+			tip = fmt.Sprintf("🔍 Filter: %q (%d matches) · Esc: clear filter", m.modelFilter, len(m.list.Items()))
 		}
 		out += "\n\n" + hintStyle.Render(tip)
-	} else if m.view == viewTools {
+	case viewTools:
 		out = banner(m.version) + "\n\n" + out // blank line between the banner and the list title
 	}
 	if line := statusRender(m.statusLvl, m.status); line != "" {

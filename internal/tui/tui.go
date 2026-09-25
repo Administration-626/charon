@@ -9,7 +9,6 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"charon/internal/catalog"
@@ -57,17 +56,13 @@ const (
 )
 
 const (
-	addSentinel = "\x00add"         // the "add new" list row
-	customModel = "\x00custommodel" // the "custom model" list row
-	doneModels  = "\x00donemodels"  // the "finish curating the model list" row
-	backModel   = "\x00back"        // the "back to previous step" list row
-	sepSentinel = "\x00sep"         // a blank divider row (inert; cursor skips it)
+	addSentinel = "\x00add" // the "add new" list row
+	sepSentinel = "\x00sep" // a blank divider row (inert; cursor skips it)
 )
 
 // isSentinel reports whether v is a synthetic action row rather than a binding.
 func isSentinel(v string) bool {
-	return v == addSentinel || v == customModel ||
-		v == doneModels || v == backModel || v == sepSentinel
+	return v == addSentinel || v == sepSentinel
 }
 
 type item struct {
@@ -691,44 +686,6 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case viewPickModel:
-		if it.value == backModel {
-			m.view = viewEditForm
-			m.loadEditForm()
-			return m, nil
-		}
-		if it.value == doneModels {
-			// Finish curating without changing the default: an unset default is filled in
-			// from the first checked id when the binding is saved.
-			return m.leavePicker()
-		}
-		if it.value == customModel {
-			m.view = viewAddCustomModel
-			m.clearStatus()
-			m.startInput("model ids, e.g. gpt-4o, kimi-k2, deepseek-v3", false)
-			if prefill := strings.Join(m.wiz.models, ", "); prefill != "" {
-				m.input.SetValue(prefill)
-			} else if m.wiz.model != "" {
-				m.input.SetValue(m.wiz.model)
-			}
-			return m, textinput.Blink
-		}
-		m.wiz.model = it.value
-		// Picking a default implies wanting it available, so it joins the selection
-		// rather than sitting outside the list that gets registered.
-		if len(m.wiz.models) > 0 && !m.modelSelected(it.value) {
-			m.toggleModel(it.value)
-		}
-		return m.leavePicker()
 	}
-	return m, nil
-}
-
-// leavePicker returns from the model picker to the form, keeping the wizard's
-// model choice and selection as they stand.
-func (m model) leavePicker() (tea.Model, tea.Cmd) {
-	m.editField = fieldModel
-	m.view = viewEditForm
-	m.loadEditForm()
 	return m, nil
 }

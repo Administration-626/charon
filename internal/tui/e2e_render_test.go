@@ -59,8 +59,11 @@ func TestInteractiveFlowVisualAudit(t *testing.T) {
 	m.showModels(allModels)
 
 	pickerView := m.View()
-	if !strings.Contains(pickerView, "ctrl+a selects all") {
-		t.Fatal("Picker missing ctrl+a in tip")
+	if !strings.Contains(pickerView, "ctrl+a all") {
+		t.Fatal("Picker missing ctrl+a in the footer")
+	}
+	if !strings.Contains(pickerView, "0 of 3 selected") {
+		t.Fatal("Picker footer missing the empty selection count")
 	}
 
 	// Step 4: Press Space on first model
@@ -69,34 +72,50 @@ func TestInteractiveFlowVisualAudit(t *testing.T) {
 	next, _ = m.updatePickModel(tea.KeyMsg{Type: tea.KeySpace})
 	m = next.(model)
 	afterSpaceView := m.View()
-	if !strings.Contains(afterSpaceView, "Done — register these 1 model(s)") {
-		t.Fatal("Picker missing Done row after Space")
+	if !strings.Contains(afterSpaceView, "1 of 3 selected") {
+		t.Fatal("Picker footer missing 1 of 3 selected after Space")
+	}
+	if len(m.wiz.models) != 1 {
+		t.Fatalf("models = %v, want the one toggled id", m.wiz.models)
 	}
 
 	// Step 5: Press Ctrl+A to select all
 	next, _ = m.updatePickModel(tea.KeyMsg{Type: tea.KeyCtrlA})
 	m = next.(model)
 	afterCtrlAView := m.View()
-	if !strings.Contains(afterCtrlAView, "Done — register these 3 model(s)") {
-		t.Fatal("Picker missing Done row for all 3 models after Ctrl+A")
+	if !strings.Contains(afterCtrlAView, "3 of 3 selected") {
+		t.Fatal("Picker footer missing 3 of 3 selected after Ctrl+A")
+	}
+	if len(m.wiz.models) != 3 {
+		t.Fatalf("models = %v, want all 3 ids", m.wiz.models)
 	}
 
 	// Step 6: Press Ctrl+A again to deselect all
 	next, _ = m.updatePickModel(tea.KeyMsg{Type: tea.KeyCtrlA})
 	m = next.(model)
 	afterDeselectView := m.View()
-	if strings.Contains(afterDeselectView, "Done — register these") {
-		t.Fatal("Done row should disappear after clearing all selections")
+	if !strings.Contains(afterDeselectView, "0 of 3 selected") {
+		t.Fatal("Picker footer should report 0 of 3 selected after clearing")
+	}
+	if strings.Contains(afterDeselectView, "Done") {
+		t.Fatal("Picker footer must not mention a Done row")
+	}
+	if len(m.wiz.models) != 0 {
+		t.Fatalf("models = %v, want none selected", m.wiz.models)
 	}
 
-	// Step 7: Press Enter on Done row when models are selected
+	// Step 7: Enter on the first model row returns to the form.
 	m.wiz.models = []string{"claude-3-5-sonnet", "claude-3-opus"}
+	m.fromForm = true
 	m.renderModels()
-	m.list.Select(0) // Done row
+	m.list.Select(indexOfValue(m.list.Items(), "claude-3-5-sonnet"))
 	next, _ = m.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
 	if m.view != viewEditForm {
-		t.Fatalf("view = %v, want viewEditForm after Enter on Done", m.view)
+		t.Fatalf("view = %v, want viewEditForm after Enter on a model row", m.view)
+	}
+	if m.wiz.model != "claude-3-5-sonnet" {
+		t.Fatalf("model = %q, want the first checked id", m.wiz.model)
 	}
 
 	// Step 8: Codex rejection and clean single-model view check
@@ -106,20 +125,20 @@ func TestInteractiveFlowVisualAudit(t *testing.T) {
 	mCodex.resize()
 	mCodex.tool = &tools.Tool{Name: "codex", Title: "Codex", ModelMenu: ""}
 	mCodex.view = viewPickModel
-	mCodex.wiz.models = []string{"gpt-5.5", "gpt-5.4"}
+	mCodex.wiz.models = []string{"gpt-5.5"}
 	mCodex.wiz.model = "gpt-5.5"
 	mCodex.showModels([]string{"gpt-5.5", "gpt-5.4"})
 	mCodex.list.Select(indexOfValue(mCodex.list.Items(), "gpt-5.5"))
 
 	codexView := mCodex.View()
-	if strings.Contains(codexView, "Done — register") {
-		t.Fatal("Codex must never show Done row")
+	if strings.Contains(codexView, "Done") {
+		t.Fatal("Codex footer must not mention Done")
 	}
 	if strings.Contains(codexView, "• gpt") {
 		t.Fatal("Codex must never show bullet selection marks on model rows")
 	}
-	if !strings.Contains(codexView, "Codex only supports a single model") {
-		t.Fatal("Codex tip must state it only supports a single model")
+	if !strings.Contains(codexView, "enter finish") || !strings.Contains(codexView, "Codex only supports a single model") {
+		t.Fatal("Codex tip must offer enter to finish and state the single-model limit")
 	}
 
 	next, _ = mCodex.updatePickModel(tea.KeyMsg{Type: tea.KeySpace})

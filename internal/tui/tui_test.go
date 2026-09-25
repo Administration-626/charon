@@ -220,8 +220,6 @@ func TestIsSentinel(t *testing.T) {
 		want  bool
 	}{
 		{addSentinel, true},
-		{customModel, true},
-		{backModel, true},
 		{sepSentinel, true},
 		{"work", false},
 		{"default", false},
@@ -546,23 +544,12 @@ func TestSetModelFieldParsesCommaSeparatedIDs(t *testing.T) {
 	}
 }
 
-func TestModelRowTitleMarksDefaultAndCheckedRows(t *testing.T) {
-	cases := []struct {
-		name               string
-		isDefault, checked bool
-		want               string
-	}{
-		{"default model", true, false, "✓ m"},
-		{"checked into picker", false, true, "• m"},
-		{"default wins over checked", true, true, "✓ m"},
-		{"plain row stays aligned", false, false, "  m"},
+func TestModelRowTitleMarksCheckedRows(t *testing.T) {
+	if got := modelRowTitle("m", true); got != "[✓] m" {
+		t.Errorf("checked modelRowTitle = %q, want %q", got, "[✓] m")
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := modelRowTitle("m", tc.isDefault, tc.checked); got != tc.want {
-				t.Errorf("modelRowTitle = %q, want %q", got, tc.want)
-			}
-		})
+	if got := modelRowTitle("m", false); got != "[ ] m" {
+		t.Errorf("unchecked modelRowTitle = %q, want %q", got, "[ ] m")
 	}
 }
 
@@ -650,18 +637,27 @@ func TestSpaceRejectedForToolWithoutModelMenu(t *testing.T) {
 func TestCodexPickerDoesNotShowDoneRowOrBullets(t *testing.T) {
 	m := pickerModel(t, []string{"gpt-5.5", "gpt-5.4"})
 	m.tool = &tools.Tool{Title: "Codex", ModelMenu: ""}
-	m.wiz.models = []string{"gpt-5.5", "gpt-5.4"}
+	m.wiz.models = []string{"gpt-5.5"}
 	m.wiz.model = "gpt-5.5"
 	m.renderModels()
 
+	view := m.View()
+	if strings.Contains(view, "Done") {
+		t.Errorf("Codex picker status must not mention Done: %q", view)
+	}
 	for _, it := range m.list.Items() {
-		if row, ok := it.(item); ok {
-			if row.value == doneModels {
-				t.Error("Codex picker must not show Done row")
-			}
-			if strings.HasPrefix(row.title, "• ") {
-				t.Errorf("Codex picker must not show bullet mark on %q", row.title)
-			}
+		row, ok := it.(item)
+		if !ok {
+			continue
+		}
+		if strings.Contains(row.title, "•") {
+			t.Errorf("Codex picker must not show a bullet mark on %q", row.title)
+		}
+		if row.value == "gpt-5.5" && !strings.HasPrefix(row.title, "[✓] ") {
+			t.Errorf("checked Codex row = %q, want [✓] prefix", row.title)
+		}
+		if row.value == "gpt-5.4" && !strings.HasPrefix(row.title, "[ ] ") {
+			t.Errorf("unchecked Codex row = %q, want [ ] prefix", row.title)
 		}
 	}
 	if strings.Contains(m.list.Title, "in picker") {
@@ -698,60 +694,55 @@ func TestPickerNote(t *testing.T) {
 	}
 }
 
-func TestPickerDoneRow(t *testing.T) {
+func TestPickerEnterFinishesOnModelRow(t *testing.T) {
+	// Editing an existing binding: enter on a model row returns to the form, and
+	// the stored model becomes the first checked id.
 	m := pickerModel(t, []string{"kimi-k2", "glm-4.6", "deepseek-v3"})
-
-	// Initially no models are checked, so no Done row should exist.
-	for _, it := range m.list.Items() {
-		if row, ok := it.(item); ok && row.value == doneModels {
-			t.Fatal("found Done row before any model was checked")
-		}
-	}
-
-	// Checking models should surface the Done row at the top.
+	m.wiz.edit = true
 	m.toggleModel("glm-4.6")
 	m.toggleModel("kimi-k2")
-	m.renderModels()
-
-	items := m.list.Items()
-	if len(items) == 0 {
-		t.Fatal("picker items empty")
-	}
-	top, ok := items[0].(item)
-	if !ok || top.value != doneModels {
-		t.Fatalf("first item = %+v, want Done row", items[0])
-	}
-	if !strings.Contains(top.title, "register these 2 model(s)") {
-		t.Errorf("Done row title = %q, want it to count 2 models", top.title)
-	}
-	// Without an explicit default, the first checked model is labeled as default.
-	if !strings.Contains(top.desc, "Default: glm-4.6") {
-		t.Errorf("Done row desc = %q, want it to name first checked model glm-4.6", top.desc)
-	}
-
-	// With an explicit default, that default is described.
 	m.wiz.model = "kimi-k2"
 	m.renderModels()
-	top = m.list.Items()[0].(item)
-	if !strings.Contains(top.desc, "Default: kimi-k2") {
-		t.Errorf("Done row desc with explicit default = %q, want Default: kimi-k2", top.desc)
-	}
 
-	// Pressing Enter on the Done row returns to edit form without modifying choices.
-	m.list.Select(0)
+	for _, it := range m.list.Items() {
+		row, ok := it.(item)
+		if ok && isSentinel(row.value) {
+			t.Fatalf("picker list still contains an action row: %+v", row)
+		}
+	}
+	idx := indexOfValue(m.list.Items(), "kimi-k2")
+	m.list.Select(idx)
+
 	next, _ := m.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
 	got, ok := next.(model)
 	if !ok {
 		t.Fatalf("updatePickModel returned %T, want model", next)
 	}
 	if got.view != viewEditForm {
-		t.Errorf("view after Enter on Done = %v, want viewEditForm", got.view)
+		t.Errorf("view after enter while editing = %v, want viewEditForm", got.view)
 	}
-	if got.wiz.model != "kimi-k2" {
-		t.Errorf("model = %q, want unchanged kimi-k2", got.wiz.model)
+	if got.wiz.model != "glm-4.6" {
+		t.Errorf("model = %q, want the first checked id glm-4.6", got.wiz.model)
 	}
 	if strings.Join(got.wiz.models, ",") != "glm-4.6,kimi-k2" {
 		t.Errorf("models = %v, want glm-4.6,kimi-k2 preserved", got.wiz.models)
+	}
+
+	// A brand-new binding still needs a name, so enter advances to that step.
+	fresh := pickerModel(t, []string{"kimi-k2", "glm-4.6"})
+	fresh.toggleModel("glm-4.6")
+	fresh.renderModels()
+	fresh.list.Select(indexOfValue(fresh.list.Items(), "glm-4.6"))
+	next, _ = fresh.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
+	got, ok = next.(model)
+	if !ok {
+		t.Fatalf("updatePickModel returned %T, want model", next)
+	}
+	if got.view != viewAddName {
+		t.Errorf("view after enter on a new binding = %v, want viewAddName", got.view)
+	}
+	if got.wiz.model != "glm-4.6" {
+		t.Errorf("model = %q, want the first checked id glm-4.6", got.wiz.model)
 	}
 }
 
@@ -769,17 +760,19 @@ func TestPickerLandingRules(t *testing.T) {
 		t.Errorf("selected item = %+v, want first model", m.list.SelectedItem())
 	}
 
-	// Rule 2: when models are checked but no explicit default is set, land on Done row.
+	// Rule 2: a checked list lands on its first id, ahead of a stored model.
 	m.toggleModel("glm-4.6")
+	m.wiz.model = "deepseek-v3"
 	m.renderModels()
-	if got := m.landingValue(); got != doneModels {
-		t.Errorf("landingValue() = %q, want %q", got, doneModels)
+	if got := m.landingValue(); got != "glm-4.6" {
+		t.Errorf("landingValue() = %q, want the first checked id glm-4.6", got)
 	}
-	if sel, ok := m.list.SelectedItem().(item); !ok || sel.value != doneModels {
-		t.Errorf("selected item = %+v, want Done row", m.list.SelectedItem())
+	if sel, ok := m.list.SelectedItem().(item); !ok || sel.value != "glm-4.6" {
+		t.Errorf("selected item = %+v, want glm-4.6", m.list.SelectedItem())
 	}
 
-	// Rule 3: when a default model is chosen, land on that model row.
+	// Rule 3: with nothing checked, land on the stored model.
+	m.wiz.models = nil
 	m.wiz.model = "deepseek-v3"
 	m.renderModels()
 	if got := m.landingValue(); got != "deepseek-v3" {
@@ -807,23 +800,14 @@ func TestPickerHasNoSkipRow(t *testing.T) {
 	}
 }
 
-func TestPickerEnterOnModelSelectsAsDefaultAndAddsToSelection(t *testing.T) {
+func TestPickerEnterOnModelFinishesAndKeepsFirstChecked(t *testing.T) {
 	m := pickerModel(t, []string{"kimi-k2", "glm-4.6", "deepseek-v3"})
+	m.fromForm = true
 	m.wiz.models = []string{"kimi-k2"}
 	m.wiz.model = "kimi-k2"
 	m.renderModels()
 
-	// Select glm-4.6 which is not yet in m.wiz.models
-	idx := -1
-	for i, it := range m.list.Items() {
-		if row, ok := it.(item); ok && row.value == "glm-4.6" {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		t.Fatal("glm-4.6 not found in picker")
-	}
+	idx := indexOfValue(m.list.Items(), "glm-4.6")
 	m.list.Select(idx)
 
 	next, _ := m.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
@@ -834,11 +818,74 @@ func TestPickerEnterOnModelSelectsAsDefaultAndAddsToSelection(t *testing.T) {
 	if got.view != viewEditForm {
 		t.Errorf("view = %v, want viewEditForm", got.view)
 	}
-	if got.wiz.model != "glm-4.6" {
-		t.Errorf("model = %q, want glm-4.6", got.wiz.model)
+	if got.wiz.model != "kimi-k2" {
+		t.Errorf("model = %q, want the first checked id kimi-k2", got.wiz.model)
 	}
 	if gotStr := strings.Join(got.wiz.models, ","); gotStr != "kimi-k2,glm-4.6" {
 		t.Errorf("models = %q, want glm-4.6 joined into [kimi-k2 glm-4.6]", gotStr)
+	}
+}
+
+func TestEnterKeyFinishesPicker(t *testing.T) {
+	// Editing an existing binding returns to the form.
+	editing := pickerModel(t, []string{"kimi-k2", "glm-4.6"})
+	editing.wiz.edit = true
+	editing.wiz.models = []string{"glm-4.6", "kimi-k2"}
+	editing.renderModels()
+	editing.list.Select(indexOfValue(editing.list.Items(), "kimi-k2"))
+	next, _ := editing.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(model)
+	if got.view != viewEditForm {
+		t.Errorf("edit: view = %v, want viewEditForm", got.view)
+	}
+	if got.wiz.model != "glm-4.6" {
+		t.Errorf("edit: model = %q, want first checked glm-4.6", got.wiz.model)
+	}
+
+	// A new binding with a fetched list advances to the name step.
+	fetched := pickerModel(t, []string{"kimi-k2", "glm-4.6"})
+	fetched.wiz.models = []string{"kimi-k2"}
+	fetched.renderModels()
+	fetched.list.Select(indexOfValue(fetched.list.Items(), "kimi-k2"))
+	next, _ = fetched.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
+	got = next.(model)
+	if got.view != viewAddName {
+		t.Errorf("fetched: view = %v, want viewAddName", got.view)
+	}
+	if got.wiz.model != "kimi-k2" {
+		t.Errorf("fetched: model = %q, want kimi-k2", got.wiz.model)
+	}
+
+	// A new binding whose ids were typed (no fetched list) also advances to the name step.
+	manual := pickerModel(t, nil)
+	manual.wiz.models = []string{"glm-4.6", "kimi-k2"}
+	manual.wiz.model = ""
+	manual.renderModels()
+	next, _ = manual.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
+	got = next.(model)
+	if got.view != viewAddName {
+		t.Errorf("manual: view = %v, want viewAddName", got.view)
+	}
+	if got.wiz.model != "glm-4.6" {
+		t.Errorf("manual: model = %q, want first checked glm-4.6", got.wiz.model)
+	}
+}
+
+func TestMKeyOpensManualEntry(t *testing.T) {
+	m := pickerModel(t, []string{"kimi-k2", "glm-4.6"})
+	m.wiz.models = []string{"glm-4.6", "kimi-k2"}
+	m.wiz.model = "kimi-k2"
+
+	next, _ := m.updatePickModel(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	got, ok := next.(model)
+	if !ok {
+		t.Fatalf("updatePickModel returned %T, want model", next)
+	}
+	if got.view != viewAddCustomModel {
+		t.Errorf("view = %v, want viewAddCustomModel", got.view)
+	}
+	if v := got.input.Value(); v != "kimi-k2, glm-4.6" {
+		t.Errorf("input = %q, want the default id first, then the rest of the selection", v)
 	}
 }
 
