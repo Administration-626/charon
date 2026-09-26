@@ -629,8 +629,9 @@ func TestFailedFetchFallsBackToManualEntry(t *testing.T) {
 	}
 }
 
-// TestManualEntryRegistersTypedIDs covers the typed-list path end to end: every id is
-// registered and the first becomes the default model.
+// TestManualEntryRegistersTypedIDs covers the typed-list path: every id is registered,
+// the first becomes the default model, and the commit lands back on the form (one level
+// up) rather than saving the binding outright.
 func TestManualEntryRegistersTypedIDs(t *testing.T) {
 	m := pickerModel(t, nil)
 	m.wiz = wizard{endpoint: "https://relay.example/v1", key: "sk-x", name: "relay", edit: true}
@@ -642,11 +643,109 @@ func TestManualEntryRegistersTypedIDs(t *testing.T) {
 	if !ok {
 		t.Fatalf("updateInput returned %T, want model", next)
 	}
+	if got.view != viewEditForm {
+		t.Errorf("view = %v, want viewEditForm (one level back, not a save)", got.view)
+	}
 	if got.wiz.model != "glm-4.6" {
 		t.Errorf("default model = %q, want the first typed id", got.wiz.model)
 	}
 	if strings.Join(got.wiz.models, ",") != "glm-4.6,kimi-k2,deepseek-v3" {
 		t.Errorf("models = %v, want every typed id registered", got.wiz.models)
+	}
+}
+
+// TestManualEntryFromFormReturnsToForm pins the navigation contract the user sees:
+// [ Type Model IDs Manually ] opened from the single-page form must come back to that
+// form, with the ids in place and [ Save ] still to press — not skip a level and store
+// the binding.
+func TestManualEntryFromFormReturnsToForm(t *testing.T) {
+	m := pickerModel(t, nil)
+	m.wiz = wizard{name: "relay", endpoint: "https://relay.example/v1", key: "sk-x"}
+	m.fromForm = true
+	m.view = viewAddCustomModel
+	m.input.SetValue("glm-4.6, kimi-k2")
+
+	next, _ := m.updateInput(tea.KeyMsg{Type: tea.KeyEnter})
+	got, ok := next.(model)
+	if !ok {
+		t.Fatalf("updateInput returned %T, want model", next)
+	}
+	if got.view != viewEditForm {
+		t.Errorf("view = %v, want viewEditForm", got.view)
+	}
+	if got.fromForm {
+		t.Error("fromForm stayed set while the form is showing again")
+	}
+	if got.formFocus != focusManual {
+		t.Errorf("formFocus = %d, want focusManual (the row that opened manual entry)", got.formFocus)
+	}
+	if strings.Join(got.wiz.models, ",") != "glm-4.6,kimi-k2" || got.wiz.model != "glm-4.6" {
+		t.Errorf("models = %v, model = %q, want the typed ids with the first as default", got.wiz.models, got.wiz.model)
+	}
+	if v := got.formInputs[focusModel].Value(); v != "glm-4.6" {
+		t.Errorf("form model field = %q, want the first typed id", v)
+	}
+	if view := got.View(); !strings.Contains(view, "▌ └── [ Type Model IDs Manually ]") {
+		t.Errorf("highlight did not stay on the manual row:\n%s", view)
+	}
+}
+
+// TestFormCursorSurvivesModelSubScreens: coming back from a sub-screen must leave the
+// cursor on the row that was left — manual ids on the manual row (both on enter and on
+// esc), the picker on the fetch row — instead of resetting it to the name row.
+func TestFormCursorSurvivesModelSubScreens(t *testing.T) {
+	manual := pickerModel(t, nil)
+	manual.wiz = wizard{name: "relay", endpoint: "https://relay.example/v1", key: "sk-x"}
+	manual.fromForm = true
+	manual.view = viewAddCustomModel
+	manual.input.SetValue("glm-4.6")
+	next, _ := manual.updateInput(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := next.(model); got.formFocus != focusManual {
+		t.Errorf("manual enter: formFocus = %d, want focusManual", got.formFocus)
+	}
+
+	escManual := pickerModel(t, nil)
+	escManual.wiz = wizard{name: "relay", endpoint: "https://relay.example/v1", key: "sk-x"}
+	escManual.fromForm = true
+	escManual.view = viewAddCustomModel
+	next, _ = escManual.updateInput(tea.KeyMsg{Type: tea.KeyEsc})
+	if got := next.(model); got.formFocus != focusManual {
+		t.Errorf("manual esc: formFocus = %d, want focusManual", got.formFocus)
+	}
+
+	for _, tc := range []struct {
+		name string
+		msg  tea.KeyMsg
+	}{
+		{"enter", tea.KeyMsg{Type: tea.KeyEnter}},
+		{"esc", tea.KeyMsg{Type: tea.KeyEsc}},
+	} {
+		m := pickerModel(t, []string{"glm-4.6", "kimi-k2"})
+		m.wiz = wizard{name: "relay", endpoint: "https://relay.example/v1", key: "sk-x"}
+		m.fromForm = true
+		next, _ := m.updatePickModel(tc.msg)
+		if got := next.(model); got.formFocus != focusFetch {
+			t.Errorf("picker %s: formFocus = %d, want focusFetch", tc.name, got.formFocus)
+		}
+	}
+}
+
+// TestManualEntryFromStepFlowAdvancesToName keeps the wizard path working: when manual
+// entry is reached without a form behind it (a fetch failure after the key screen),
+// committing the ids still advances to naming the binding.
+func TestManualEntryFromStepFlowAdvancesToName(t *testing.T) {
+	m := pickerModel(t, nil)
+	m.wiz = wizard{endpoint: "https://relay.example/v1", key: "sk-x"}
+	m.view = viewAddCustomModel
+	m.input.SetValue("glm-4.6")
+
+	next, _ := m.updateInput(tea.KeyMsg{Type: tea.KeyEnter})
+	got, ok := next.(model)
+	if !ok {
+		t.Fatalf("updateInput returned %T, want model", next)
+	}
+	if got.view != viewAddName {
+		t.Errorf("view = %v, want viewAddName", got.view)
 	}
 }
 
@@ -1005,4 +1104,81 @@ func TestPickerCtrlARejectedForToolWithoutModelMenu(t *testing.T) {
 	if !strings.Contains(got.status, "can't be given a model list") {
 		t.Errorf("status = %q, want explanation that tool can't be given model list", got.status)
 	}
+}
+
+// TestChromePinnedToTheBottom pins the layout rule every screen shares: the key legend
+// is the last row of the terminal, the status line sits directly above it, and the
+// legend stays on that row when a message appears — reserving the status row is what
+// keeps the chrome from moving between screens and between states.
+func TestChromePinnedToTheBottom(t *testing.T) {
+	st := openTestCatalog(t, false)
+	cases := []struct {
+		name   string
+		view   view
+		setup  func(*model)
+		legend string
+	}{
+		{"tools", viewTools, nil, "enter open • q/esc quit"},
+		{"bindings", viewProfiles, func(m *model) { m.loadProfiles("") }, "enter switch • e edit"},
+		{"form", viewEditForm, func(m *model) { m.loadEditForm() }, "↑/↓ move • tab next field • enter select • esc cancel"},
+		{"input step", viewAddEndpoint, nil, "enter continue • esc back"},
+		{"picker", viewPickModel, func(m *model) { m.showModels([]string{"glm-4.6", "kimi-k2"}) }, "enter finish • esc back"},
+		{"fetching", viewFetching, nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newModel(st, "v1.0.0")
+			m.width, m.height = 100, 30
+			m.tool = m.findTool("claude")
+			m.view = tc.view
+			if tc.view == viewTools {
+				m.loadTools()
+			}
+			if tc.setup != nil {
+				tc.setup(&m)
+			}
+			m.resize()
+
+			lines := strings.Split(m.View(), "\n")
+			if len(lines) != m.height {
+				t.Fatalf("view is %d rows, want %d — the chrome occupies the bottom", len(lines), m.height)
+			}
+			if tc.legend != "" && !strings.Contains(lines[len(lines)-1], tc.legend) {
+				t.Errorf("last row = %q, want the legend %q", lines[len(lines)-1], tc.legend)
+			}
+
+			m.setStatus(statusOK, "saved")
+			lines = strings.Split(m.View(), "\n")
+			if len(lines) != m.height {
+				t.Fatalf("view with a status is %d rows, want %d", len(lines), m.height)
+			}
+			if !strings.Contains(lines[len(lines)-2], "saved") {
+				t.Errorf("status row = %q, want it directly above the legend", lines[len(lines)-2])
+			}
+			if tc.legend != "" && !strings.Contains(lines[len(lines)-1], tc.legend) {
+				t.Errorf("a status message moved the legend: last row = %q", lines[len(lines)-1])
+			}
+		})
+	}
+}
+
+// TestPickerFooterFollowsTheFilter: esc means "clear the search" while a query is
+// active, so the legend has to say that instead of promising a way out.
+func TestPickerFooterFollowsTheFilter(t *testing.T) {
+	m := pickerModel(t, []string{"glm-4.6", "kimi-k2"})
+	m.renderModels()
+	if got := lastRow(m.View()); !strings.Contains(got, "esc back") {
+		t.Errorf("unfiltered legend = %q, want esc back", got)
+	}
+
+	m.modelFilter = "glm"
+	m.renderModels()
+	if got := lastRow(m.View()); !strings.Contains(got, "esc clear filter") {
+		t.Errorf("filtered legend = %q, want esc clear filter", got)
+	}
+}
+
+func lastRow(view string) string {
+	lines := strings.Split(view, "\n")
+	return lines[len(lines)-1]
 }

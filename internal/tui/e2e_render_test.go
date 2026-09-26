@@ -62,8 +62,8 @@ func TestInteractiveFlowVisualAudit(t *testing.T) {
 	if !strings.Contains(pickerView, "ctrl+a all") {
 		t.Fatal("Picker missing ctrl+a in the footer")
 	}
-	if !strings.Contains(pickerView, "0 of 3 selected") {
-		t.Fatal("Picker footer missing the empty selection count")
+	if !strings.Contains(pickerView, "none checked — all 3 will be registered") {
+		t.Fatal("Picker title must spell out what an empty checklist registers")
 	}
 
 	// Step 4: Press Space on first model
@@ -73,7 +73,7 @@ func TestInteractiveFlowVisualAudit(t *testing.T) {
 	m = next.(model)
 	afterSpaceView := m.View()
 	if !strings.Contains(afterSpaceView, "1 of 3 selected") {
-		t.Fatal("Picker footer missing 1 of 3 selected after Space")
+		t.Fatal("Picker title missing 1 of 3 selected after Space")
 	}
 	if len(m.wiz.models) != 1 {
 		t.Fatalf("models = %v, want the one toggled id", m.wiz.models)
@@ -84,7 +84,7 @@ func TestInteractiveFlowVisualAudit(t *testing.T) {
 	m = next.(model)
 	afterCtrlAView := m.View()
 	if !strings.Contains(afterCtrlAView, "3 of 3 selected") {
-		t.Fatal("Picker footer missing 3 of 3 selected after Ctrl+A")
+		t.Fatal("Picker title missing 3 of 3 selected after Ctrl+A")
 	}
 	if len(m.wiz.models) != 3 {
 		t.Fatalf("models = %v, want all 3 ids", m.wiz.models)
@@ -94,11 +94,11 @@ func TestInteractiveFlowVisualAudit(t *testing.T) {
 	next, _ = m.updatePickModel(tea.KeyMsg{Type: tea.KeyCtrlA})
 	m = next.(model)
 	afterDeselectView := m.View()
-	if !strings.Contains(afterDeselectView, "0 of 3 selected") {
-		t.Fatal("Picker footer should report 0 of 3 selected after clearing")
+	if !strings.Contains(afterDeselectView, "none checked — all 3 will be registered") {
+		t.Fatal("Picker title should say the whole list is registered after clearing")
 	}
 	if strings.Contains(afterDeselectView, "Done") {
-		t.Fatal("Picker footer must not mention a Done row")
+		t.Fatal("Picker must not mention a Done row")
 	}
 	if len(m.wiz.models) != 0 {
 		t.Fatalf("models = %v, want none selected", m.wiz.models)
@@ -137,8 +137,8 @@ func TestInteractiveFlowVisualAudit(t *testing.T) {
 	if strings.Contains(codexView, "• gpt") {
 		t.Fatal("Codex must never show bullet selection marks on model rows")
 	}
-	if !strings.Contains(codexView, "enter finish") || !strings.Contains(codexView, "Codex only supports a single model") {
-		t.Fatal("Codex tip must offer enter to finish and state the single-model limit")
+	if !strings.Contains(codexView, "enter choose") || !strings.Contains(codexView, "single model only") {
+		t.Fatal("Codex must offer enter to pick one model and state the single-model limit")
 	}
 
 	next, _ = mCodex.updatePickModel(tea.KeyMsg{Type: tea.KeySpace})

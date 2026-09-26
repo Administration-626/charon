@@ -87,11 +87,25 @@ var (
 	keyQuit      = key.NewBinding(key.WithKeys("q", "esc"), key.WithHelp("q/esc", "quit"))
 	keyOpen      = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open"))
 	keyChoose    = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "choose"))
-	keyToggle    = key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "select"))
-	keyToggleAll = key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "select all"))
+	keyToggle    = key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "toggle"))
+	keyToggleAll = key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "all"))
 	// keyFilter never matches a real press; it only advertises type-to-search.
 	keyFilter  = key.NewBinding(key.WithKeys("\x00filter"), key.WithHelp("type", "search"))
 	keyRefresh = key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl+r", "refresh"))
+	keyManual  = key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "type ids"))
+	// keyEsc names only esc: on a text input "q" has to stay a letter.
+	keyEsc          = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back"))
+	keyClearFilter  = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter"))
+	keyMove         = key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "move"))
+	keyNextField    = key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next field"))
+	keySelectAction = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select"))
+	keySaveAction   = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save"))
+	keyContinue     = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "continue"))
+	keyCancel       = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel"))
+	keyConfirm      = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "delete"))
+	keyFinish       = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "finish"))
+	keyDuplicate    = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "duplicate"))
+	keyRegister     = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "register"))
 )
 
 // exampleEndpoint is placeholder text; a real endpoint is never prefilled.
@@ -111,6 +125,8 @@ type model struct {
 	dupSource   string // binding being duplicated
 	copySource  string // binding being copied to another tool
 	showConfirm bool   // when true, render a confirmation dialog over the binding list
+
+	footerKeys []key.Binding // keys the current screen answers to, shown in the bottom legend
 
 	formInputs []textinput.Model // native form inputs for Name, URL, Token, Model
 	formFocus  int               // index of focused form element (0: Name, 1: URL, 2: Token, 3: Model, 4: Save, 5: Cancel)
@@ -151,13 +167,19 @@ func (m *model) findTool(name string) *tools.Tool {
 	return nil
 }
 
-// resize sizes the list, reserving space for the banner on the tools screen.
+// footerRows is the chrome every screen keeps at the bottom of the terminal: the
+// status line and, under it, the key legend. The status row stays reserved while
+// empty, so a message appearing never shifts the legend off the last row.
+const footerRows = 2
+
+// resize sizes the list, reserving space for the banner on the tools screen and the
+// footer on every screen; the legend then lands on the last row of the terminal.
 func (m *model) resize() {
 	header := 1
 	if m.view == viewTools {
 		header = bannerHeight + 1
 	}
-	h := m.height - header
+	h := m.height - header - footerRows
 	if h < 3 {
 		h = 3
 	}
@@ -167,6 +189,7 @@ func (m *model) resize() {
 func newModel(store *catalog.Catalog, version string) model {
 	l := list.New(nil, themedDelegate(), 0, 0)
 	l.SetShowStatusBar(false)
+	l.SetShowHelp(false) // the model draws the legend itself, pinned to the bottom
 	l.SetFilteringEnabled(false)
 	l.InfiniteScrolling = true
 	l.KeyMap.Quit.SetEnabled(false) // "q"/"esc" must not quit; only ctrl+c does
@@ -204,10 +227,10 @@ func newModel(store *catalog.Catalog, version string) model {
 	return m
 }
 
-// setHelpKeys registers the contextual bindings shown in the list's help footer.
-func (m *model) setHelpKeys(bindings ...key.Binding) {
-	m.list.AdditionalShortHelpKeys = func() []key.Binding { return bindings }
-	m.list.AdditionalFullHelpKeys = func() []key.Binding { return bindings }
+// setFooterKeys records the keys the current screen answers to; View renders them as
+// the one-line legend pinned to the bottom row.
+func (m *model) setFooterKeys(bindings ...key.Binding) {
+	m.footerKeys = bindings
 }
 
 // setDelegate installs an item delegate while keeping the Quit key disabled.
@@ -275,7 +298,7 @@ func (m *model) loadTools() {
 	m.list.SetItems(items)
 	m.list.Select(selectedIndex)
 	m.list.Title = "Charon — select a tool"
-	m.setHelpKeys(keyOpen, keyQuit)
+	m.setFooterKeys(keyOpen, keyQuit)
 	m.setDelegate(themedDelegate()) // two-line rows show each tool's status
 }
 
@@ -302,7 +325,7 @@ func (m *model) loadCopyTools() {
 	m.list.SetItems(items)
 	m.list.Select(0)
 	m.list.Title = "Copy " + m.copySource + " to"
-	m.setHelpKeys(keyChoose, keyBack)
+	m.setFooterKeys(keyChoose, keyBack)
 	m.setDelegate(themedDelegate())
 }
 
@@ -354,7 +377,7 @@ func (m *model) loadProfiles(selectName string) {
 	m.list.SetItems(items)
 	m.list.Select(selectedIndex)
 	m.list.Title = m.tool.Title + " bindings"
-	m.setHelpKeys(keySwitch, keyEdit, keyBackup, keyCopy, keyDelete, keyBack)
+	m.setFooterKeys(keySwitch, keyEdit, keyBackup, keyCopy, keyDelete, keyBack)
 	m.setDelegate(themedDelegate())
 	if len(saved) == 0 && m.status == "" && m.tool.ApplyAuth != nil {
 		m.setStatus(statusInfo, `No bindings yet — press enter on "Add new binding" or press 'a' to create one.`)
@@ -720,7 +743,7 @@ func (m model) onEsc() (tea.Model, tea.Cmd) {
 		return m, nil
 	case viewPickModel:
 		m.view = viewEditForm
-		m.loadEditForm()
+		m.loadEditFormAt(focusFetch)
 		return m, nil
 	}
 	return m, nil

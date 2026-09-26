@@ -147,6 +147,15 @@ func (m *model) loadEditForm() {
 	m.formInputs[focusName].Focus()
 }
 
+// loadEditFormAt repopulates the form with the cursor left on focus, so stepping back
+// from a sub-screen (the picker, manual model ids) keeps the highlighted row where it
+// was instead of jumping to the name row. A fresh open uses loadEditForm instead.
+func (m *model) loadEditFormAt(focus int) {
+	m.loadEditForm()
+	m.formFocus = focus
+	m.applyFormFocus()
+}
+
 func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
@@ -216,6 +225,13 @@ func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) syncFormFocus() (tea.Model, tea.Cmd) {
+	m.applyFormFocus()
+	return *m, textinput.Blink
+}
+
+// applyFormFocus focuses the input under formFocus and blurs the rest; an action row
+// leaves every input blurred, so typing never lands in a field the cursor left.
+func (m *model) applyFormFocus() {
 	for i := 0; i < formInputCount; i++ {
 		if i == m.formFocus {
 			m.formInputs[i].Focus()
@@ -223,7 +239,6 @@ func (m *model) syncFormFocus() (tea.Model, tea.Cmd) {
 			m.formInputs[i].Blur()
 		}
 	}
-	return *m, textinput.Blink
 }
 
 func (m model) submitForm() (tea.Model, tea.Cmd) {
@@ -345,7 +360,7 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.fromForm = false
 				m.view = viewEditForm
 				m.clearStatus()
-				m.loadEditForm()
+				m.loadEditFormAt(focusManual)
 				return m, nil
 			}
 			m.view = viewAddKey
@@ -455,13 +470,15 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.wiz.model = ids[0]
 			}
 			m.clearStatus()
-			if m.fromForm {
+			// Manual entry is one level below the form, so a commit returns there exactly
+			// like the picker's enter does; [ Save ] is still the step that stores the
+			// binding. Only the step flow (a fetch that failed after the key screen, with
+			// no form to go back to) advances to naming the new binding.
+			if m.fromForm || m.wiz.edit {
 				m.fromForm = false
-				m.editField = ""
-				return m.finishAdd(m.wiz.name)
-			}
-			if m.wiz.edit {
-				return m.finishAdd(m.wiz.name)
+				m.view = viewEditForm
+				m.loadEditFormAt(focusManual)
+				return m, nil
 			}
 			m.view = viewAddName
 			m.startInput("binding name (e.g. openrouter-fast)", false)

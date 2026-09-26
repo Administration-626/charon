@@ -8,6 +8,7 @@ import (
 
 	"charon/internal/models"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -215,15 +216,6 @@ func (m *model) modelSelected(id string) bool {
 	return false
 }
 
-// pickerSummary describes the curated list for the status line after a toggle.
-func (m *model) pickerSummary() string {
-	n := len(m.wiz.models)
-	if n == 0 {
-		return "selection cleared — the whole fetched list will be registered"
-	}
-	return fmt.Sprintf("%d of %d selected", n, len(m.allModels))
-}
-
 // landingValue is the row the picker should open on: the first checked id, else
 // the stored model, else the first fetched model.
 func (m *model) landingValue() string {
@@ -277,20 +269,41 @@ func (m *model) renderModels() {
 	}
 	m.list.Select(selectedIndex)
 	title := m.tool.Title + " — choose a model"
-	if m.tool != nil && m.tool.ModelMenu != "" {
-		if n := len(m.wiz.models); n > 0 {
-			title += fmt.Sprintf(" · %d in picker", n)
-		}
+	multi := m.tool != nil && m.tool.ModelMenu != ""
+	switch n := len(m.wiz.models); {
+	case !multi:
+		title += " · single model only"
+	case len(m.allModels) == 0:
+	case n == 0 && m.modelFilter == "":
+		// An empty checklist is not an empty registration: it means the whole fetched
+		// list goes in, and the title is where that rule stays visible. While a search
+		// is running the match count matters more, so the rule waits for the query to
+		// clear rather than crowding the query out of the title bar.
+		title += fmt.Sprintf(" · none checked — all %d will be registered", len(m.allModels))
+	default:
+		title += fmt.Sprintf(" · %d of %d selected", n, len(m.allModels))
 	}
 	if m.modelFilter != "" {
 		title += fmt.Sprintf(" · search: %s (%d matches)", m.modelFilter, len(ids))
 	}
 	m.list.Title = title
-	if m.tool != nil && m.tool.ModelMenu != "" {
-		m.setHelpKeys(keyChoose, keyToggle, keyToggleAll, keyFilter, keyRefresh, keyBack)
-	} else {
-		m.setHelpKeys(keyChoose, keyFilter, keyRefresh, keyBack)
+	// The checked count lives in the title, so the legend carries keys only. Enter
+	// finishes a checklist; a tool that holds a single model picks the highlighted one.
+	// esc stands second so a narrow terminal truncates the tail, never the way out.
+	keys := []key.Binding{keyFinish}
+	if !multi {
+		keys = []key.Binding{keyChoose}
 	}
+	if m.modelFilter != "" {
+		keys = append(keys, keyClearFilter)
+	} else {
+		keys = append(keys, keyEsc)
+	}
+	if multi {
+		keys = append(keys, keyToggle, keyToggleAll, keyManual)
+	}
+	keys = append(keys, keyFilter, keyRefresh)
+	m.setFooterKeys(keys...)
 	m.setDelegate(themedCompactDelegate())
 }
 
@@ -355,7 +368,6 @@ func (m model) updatePickModel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.toggleAllModels()
 		m.renderModels()
 		m.list.Select(cursor)
-		m.setStatus(statusInfo, m.pickerSummary())
 		return m, nil
 	case tea.KeySpace:
 		return m.toggleHighlighted()
@@ -384,7 +396,6 @@ func (m model) toggleHighlighted() (tea.Model, tea.Cmd) {
 	m.toggleModel(it.value)
 	m.renderModels()
 	m.list.Select(cursor) // toggling must not move the cursor off the row just checked
-	m.setStatus(statusInfo, m.pickerSummary())
 	return m, nil
 }
 
@@ -407,7 +418,7 @@ func (m model) finishPicker() (tea.Model, tea.Cmd) {
 		m.fromForm = false
 		m.editField = fieldModel
 		m.view = viewEditForm
-		m.loadEditForm()
+		m.loadEditFormAt(focusFetch)
 		return m, nil
 	}
 	m.view = viewAddName

@@ -6,6 +6,7 @@ import (
 
 	"charon/internal/secret"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -49,24 +50,66 @@ func statusRender(level statusLevel, msg string) string {
 	}
 }
 
+// helpKeys adapts a binding list to bubbles' help renderer, so every screen draws its
+// shortcuts with the same component instead of hand-written prose.
+type helpKeys []key.Binding
+
+func (h helpKeys) ShortHelp() []key.Binding  { return h }
+func (h helpKeys) FullHelp() [][]key.Binding { return [][]key.Binding{h} }
+
+// helpLine renders that legend for one screen, truncated to width.
+func (m model) helpLine(width int, bindings ...key.Binding) string {
+	if len(bindings) == 0 {
+		return ""
+	}
+	h := m.list.Help
+	h.Width = width
+	return h.View(helpKeys(bindings))
+}
+
+// withFooter pins the chrome to the bottom of the terminal: the status line, then the
+// key legend on the last row. Content shorter than the screen is padded above, so the
+// legend sits in the same place on every screen and content that grows eats the gap
+// instead of pushing the legend down.
+func (m model) withFooter(body string, bindings ...key.Binding) string {
+	footer := statusRender(m.statusLvl, m.status) + "\n" + m.helpLine(m.width, bindings...)
+	pad := m.height - footerRows - lipgloss.Height(body)
+	if pad < 0 {
+		pad = 0
+	}
+	return body + strings.Repeat("\n", pad+1) + footer
+}
+
+// stepHelp is the legend for the current input step: exactly the keys that screen
+// answers to, so no step has to spell its shortcuts out by hand.
+func (m model) stepHelp() []key.Binding {
+	switch m.view {
+	case viewAddName:
+		return []key.Binding{keySaveAction, keyEsc}
+	case viewEditField:
+		return []key.Binding{keySaveAction, keyCancel}
+	case viewDupName:
+		return []key.Binding{keyDuplicate, keyCancel}
+	case viewAddCustomModel:
+		return []key.Binding{keyRegister, keyEsc}
+	}
+	return []key.Binding{keyContinue, keyEsc}
+}
+
 func (m model) View() string {
 	switch m.view {
 	case viewFetching:
-		return m.wizardHeader() +
+		return m.withFooter(m.wizardHeader() +
 			promptStyle.Render(m.spinner.View()+m.loadingMsg) +
-			"\n\n" + hintStyle.Render("fetching models from "+m.wiz.endpoint)
+			"\n\n" + hintStyle.Render("fetching models from "+m.wiz.endpoint))
 	case viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField, viewAddCustomModel:
 		body := m.wizardHeader() +
 			promptStyle.Render(m.prompt()) +
-			"\n\n  " + m.input.View() +
-			"\n\n" + hintStyle.Render(m.optionsHelp())
+			"\n\n  " + m.input.View()
 		if m.view == viewAddCustomModel {
 			body += "\n\n" + hintStyle.Render(m.modelMenuNote())
 		}
-		if line := statusRender(m.statusLvl, m.status); line != "" {
-			body += "\n" + line
-		}
-		return body
+		return m.withFooter(body, m.stepHelp()...)
 	case viewEditForm:
 		title := m.tool.Title + " · Edit Binding"
 		if !m.wiz.edit {
@@ -109,51 +152,27 @@ func (m model) View() string {
 			}
 		}
 
-		saveBtn := "  [ Save ]"
-		cancelBtn := "  [ Cancel ]"
+		saveBtn := hintStyle.Render("  [ Save ]")
 		if m.formFocus == focusSave {
 			saveBtn = promptStyle.Render("▌ [ Save ]")
-		} else {
-			saveBtn = hintStyle.Render("  [ Save ]")
 		}
+		cancelBtn := hintStyle.Render("  [ Cancel ]")
 		if m.formFocus == focusCancel {
 			cancelBtn = promptStyle.Render("▌ [ Cancel ]")
-		} else {
-			cancelBtn = hintStyle.Render("  [ Cancel ]")
 		}
 
-		btnLine := "\n  " + saveBtn + "\n  " + cancelBtn
-		hint := "\n\n" + hintStyle.Render("Shortcuts: ↑/↓: move · tab: switch · enter: select button · esc: cancel")
-
-		body := header + strings.Join(formLines, "\n") + "\n" + btnLine + hint
-		if line := statusRender(m.statusLvl, m.status); line != "" {
-			body += "\n" + line
-		}
-		return body
+		body := header + strings.Join(formLines, "\n") + "\n  " + saveBtn + "\n  " + cancelBtn
+		return m.withFooter(body, keyMove, keyNextField, keySelectAction, keyCancel)
 	}
 
 	if m.showConfirm {
 		return m.confirmDialog()
 	}
 	out := m.list.View()
-	switch m.view {
-	case viewPickModel:
-		n, total := len(m.wiz.models), len(m.allModels)
-		tip := fmt.Sprintf("%d of %d selected · space toggle · ctrl+a all · enter finish · m type ids · esc back", n, total)
-		if m.tool != nil && m.tool.ModelMenu == "" {
-			tip = "choose one model · enter finish · esc back (" + m.tool.Title + " only supports a single model)"
-		}
-		if m.modelFilter != "" {
-			tip = fmt.Sprintf("🔍 Filter: %q (%d matches) · Esc: clear filter", m.modelFilter, len(m.list.Items()))
-		}
-		out += "\n\n" + hintStyle.Render(tip)
-	case viewTools:
+	if m.view == viewTools {
 		out = banner(m.version) + "\n\n" + out // blank line between the banner and the list title
 	}
-	if line := statusRender(m.statusLvl, m.status); line != "" {
-		out += "\n" + line
-	}
-	return out
+	return m.withFooter(out, m.footerKeys...)
 }
 
 // wizardHeader renders the titled bar for add-flow screens.
@@ -197,28 +216,6 @@ func (m model) prompt() string {
 	}
 }
 
-func (m model) optionsHelp() string {
-	switch m.view {
-	case viewAddEndpoint:
-		return "Options:\n  • [ Enter ] Continue to API Key\n  • [ Esc   ] Cancel & Return"
-	case viewAddKey:
-		return "Options:\n  • [ Enter ] Continue to Fetch Models\n  • [ Esc   ] ← Back to API Base URL"
-	case viewAddCustomModel:
-		return "Options:\n  • [ Enter ] Register These Model IDs\n  • [ Esc   ] ← Back"
-	case viewAddName:
-		if len(m.allModels) > 0 {
-			return "Options:\n  • [ Enter ] Save\n  • [ Esc   ] ← Back to Model Selection"
-		}
-		return "Options:\n  • [ Enter ] Save\n  • [ Esc   ] ← Back to API Key"
-	case viewEditField:
-		return "Options:\n  • [ Enter ] Save Field\n  • [ Esc   ] Cancel Field Edit"
-	case viewDupName:
-		return "Options:\n  • [ Enter ] Duplicate\n  • [ Esc   ] Cancel"
-	default:
-		return ""
-	}
-}
-
 // confirmDialog renders a centered confirmation box covering the full screen.
 func (m model) confirmDialog() string {
 	if !m.showConfirm || m.delTarget == "" {
@@ -232,7 +229,7 @@ func (m model) confirmDialog() string {
 
 	content := warnStyle.Render("Delete binding "+m.delTarget+"?") + "\n" +
 		"This can't be undone.\n\n" +
-		hintStyle.Render("enter: delete · esc: cancel")
+		m.helpLine(min(40, m.width-8), keyConfirm, keyCancel)
 
 	dialog := dialogStyle.Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
