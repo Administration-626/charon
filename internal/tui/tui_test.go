@@ -1182,3 +1182,120 @@ func lastRow(view string) string {
 	lines := strings.Split(view, "\n")
 	return lines[len(lines)-1]
 }
+
+func TestDeleteActiveBindingRejectsInlineWithStatusErr(t *testing.T) {
+	st := openTestCatalog(t, false)
+	p, err := st.PutProvider("https://api.anthropic.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr, err := st.PutCredential(p.ID, "sk-test-123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutModel(p.ID, "claude-sonnet-4-5"); err != nil {
+		t.Fatal(err)
+	}
+	bed, err := st.AddBinding("claude", "alpha", cr.ID, "claude-sonnet-4-5", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Activate(bed.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newModel(st, "test")
+	m.width, m.height = 100, 30
+	m.resize()
+	m.tool = tools.Find("claude")
+	m.view = viewProfiles
+	m.loadProfiles("alpha")
+
+	// Pressing 'd' on active binding must reject inline with statusErr without modal interruption or bell.
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	mm := next.(model)
+	if mm.showConfirm {
+		t.Errorf("expected showConfirm to be false (non-modal feedback)")
+	}
+	if cmd != nil {
+		t.Errorf("expected no cmd (no bell) on rejected action, got %v", cmd)
+	}
+	if mm.statusLvl != statusErr {
+		t.Errorf("statusLvl = %v, want statusErr", mm.statusLvl)
+	}
+	if !strings.Contains(mm.status, `cannot delete active binding "alpha"`) {
+		t.Errorf("status = %q, want cannot delete active binding...", mm.status)
+	}
+	view := mm.View()
+	if !strings.Contains(view, "cannot delete active binding") {
+		t.Errorf("view missing status error message:\n%s", view)
+	}
+
+	// Navigation remains immediately unblocked: pressing up/down moves cursor without needing esc/enter.
+	next, _ = mm.Update(tea.KeyMsg{Type: tea.KeyUp})
+	mm = next.(model)
+	if mm.showConfirm {
+		t.Errorf("navigation should not be blocked by modal")
+	}
+}
+
+func TestDeleteInactiveBindingFlow(t *testing.T) {
+	st := openTestCatalog(t, false)
+	p, err := st.PutProvider("https://api.anthropic.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr, err := st.PutCredential(p.ID, "sk-test-123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutModel(p.ID, "claude-sonnet-4-5"); err != nil {
+		t.Fatal(err)
+	}
+	bed, err := st.AddBinding("claude", "alpha", cr.ID, "claude-sonnet-4-5", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.AddBinding("claude", "beta", cr.ID, "claude-sonnet-4-5", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Activate(bed.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newModel(st, "test")
+	m.width, m.height = 100, 30
+	m.resize()
+	m.tool = tools.Find("claude")
+	m.view = viewProfiles
+	m.loadProfiles("beta")
+
+	// Pressing 'd' on inactive binding opens normal confirmation dialog.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	mm := next.(model)
+	if !mm.showConfirm {
+		t.Errorf("showConfirm = %v; want true", mm.showConfirm)
+	}
+	view := mm.View()
+	if !strings.Contains(view, "Delete binding beta?") {
+		t.Errorf("view missing 'Delete binding beta?':\n%s", view)
+	}
+
+	// Pressing enter confirms deletion.
+	next, _ = mm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	mm = next.(model)
+	if mm.showConfirm {
+		t.Errorf("expected showConfirm to be false after deletion")
+	}
+	if mm.statusLvl != statusOK {
+		t.Errorf("statusLvl = %v, want statusOK", mm.statusLvl)
+	}
+	if !strings.Contains(mm.status, "Deleted beta") {
+		t.Errorf("status = %q, want 'Deleted beta'", mm.status)
+	}
+	bs, _ := st.Bindings("claude")
+	if len(bs) != 1 || bs[0].Name != "alpha" {
+		t.Errorf("bindings after delete = %+v, want only alpha", bs)
+	}
+}

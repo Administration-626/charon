@@ -584,7 +584,7 @@ func (m model) onDeleteKey() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if active, found, err := m.cat.Active(m.tool.Name); err == nil && found && active.Name == it.value {
-		m.setStatus(statusInfo, "switch to another binding before deleting the active one")
+		m.setStatus(statusErr, fmt.Sprintf("cannot delete active binding %q; switch to another binding first", it.value))
 		return m, nil
 	}
 	m.delTarget = it.value
