@@ -86,6 +86,7 @@ Usage:
   charon edit <tool> <b>     change a binding's endpoint/key/model/models/name
   charon rename <tool> <o> <n>  rename a saved binding
   charon cp <tool> <src> <dst>  duplicate a saved binding
+  charon cp <tool> <src> <tool> <dst>  copy a binding to another tool
   charon switch <tool> <b>   render a saved binding into the tool
   charon rm <tool> <b>       delete a saved binding (not the active one)
   charon completion <shell>  print a bash/zsh/fish completion script

@@ -596,23 +596,7 @@ func (m model) finishAdd(name string) (tea.Model, tea.Cmd) {
 
 // cloneBinding copies a binding under a new name, sharing its credential and models.
 func (m model) cloneBinding(src, dst string) error {
-	b, found, err := m.cat.BindingByName(m.tool.Name, src)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return fmt.Errorf("no binding named %s", src)
-	}
-	slugs, err := m.cat.ModelSlugs(b.Models)
-	if err != nil {
-		return err
-	}
-	slug, err := m.cat.ModelSlug(b.ModelID)
-	if err != nil {
-		return err
-	}
-	_, err = m.cat.AddBinding(b.Tool, dst, b.CredentialID, slug, slugs)
-	return err
+	return m.copyBindingToTool(src, m.tool.Name)
 }
 
 // splitModelIDs parses a typed model field ("a, b ,c") into ids, dropping blanks so a

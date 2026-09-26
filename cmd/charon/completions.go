@@ -24,6 +24,8 @@ _charon() {
                 COMPREPLY=( $(compgen -W "$tools" -- "$cur") )
             elif [ "$cword" -eq 3 ]; then
                 COMPREPLY=( $(compgen -W "$(charon __profiles "${COMP_WORDS[2]}" 2>/dev/null)" -- "$cur") )
+            elif [ "$sub" = cp ] && [ "$cword" -eq 4 ]; then
+                COMPREPLY=( $(compgen -W "$tools" -- "$cur") )
             fi
             ;;
         ls|models|add|status)
@@ -59,6 +61,8 @@ _charon() {
                 compadd -- $tools
             elif (( CURRENT == 4 )); then
                 compadd -- ${(f)"$(charon __profiles ${words[3]} 2>/dev/null)"}
+            elif [[ ${words[2]} == cp && CURRENT == 5 ]]; then
+                compadd -- $tools
             fi
             ;;
         ls|models|add|status)
@@ -95,6 +99,12 @@ function __charon_needs_profile
     return 1
 end
 
+function __charon_cp_needs_tool
+    set -l cmd (commandline -opc)
+    test (count $cmd) -eq 4
+    and test $cmd[2] = cp
+end
+
 function __charon_profiles
     set -l cmd (commandline -opc)
     if test (count $cmd) -ge 3
@@ -106,4 +116,5 @@ complete -c charon -f
 complete -c charon -n '__fish_use_subcommand' -a 'status ls models add edit rename cp switch use rm completion version help'
 complete -c charon -n '__charon_needs_tool' -a 'codex claude opencode pi grok'
 complete -c charon -n '__charon_needs_profile' -a '(__charon_profiles)'
+complete -c charon -n '__charon_cp_needs_tool' -a 'codex claude opencode pi grok'
 `

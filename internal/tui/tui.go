@@ -42,6 +42,7 @@ const (
 	viewAddCustomModel // wizard: enter custom model ID
 	viewAddName        // wizard: name the binding
 	viewDupName        // clone: name the duplicate
+	viewCopyTool       // copy: choose the destination tool
 	viewEditForm       // edit: field picker (url/name/token/model)
 	viewEditField      // edit: single-field text input
 )
@@ -80,6 +81,7 @@ var (
 	keySwitch    = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "switch"))
 	keyEdit      = key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit"))
 	keyBackup    = key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "clone"))
+	keyCopy      = key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "copy"))
 	keyDelete    = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete"))
 	keyBack      = key.NewBinding(key.WithKeys("esc", "q"), key.WithHelp("esc", "back"))
 	keyQuit      = key.NewBinding(key.WithKeys("q", "esc"), key.WithHelp("q/esc", "quit"))
@@ -107,6 +109,7 @@ type model struct {
 	fromForm    bool   // model picker/fetch was launched from the edit form
 	delTarget   string // binding name pending delete confirmation
 	dupSource   string // binding being duplicated
+	copySource  string // binding being copied to another tool
 	showConfirm bool   // when true, render a confirmation dialog over the binding list
 
 	formInputs []textinput.Model // native form inputs for Name, URL, Token, Model
@@ -276,6 +279,33 @@ func (m *model) loadTools() {
 	m.setDelegate(themedDelegate()) // two-line rows show each tool's status
 }
 
+// loadCopyTools shows every other tool that can receive the pending binding.
+func (m *model) loadCopyTools() {
+	var items []list.Item
+	for _, t := range m.allTools {
+		if t.Name == m.tool.Name {
+			continue
+		}
+		desc := "not installed — copy will be saved without switching"
+		if catalog.SingleModelTools[t.Name] {
+			desc = "single model only — list will use the default model"
+		}
+		if t.Detected != nil && t.Detected() {
+			if catalog.SingleModelTools[t.Name] {
+				desc = "installed · single model only — list will use the default model"
+			} else {
+				desc = "installed"
+			}
+		}
+		items = append(items, item{title: t.Title, desc: desc, value: t.Name})
+	}
+	m.list.SetItems(items)
+	m.list.Select(0)
+	m.list.Title = "Copy " + m.copySource + " to"
+	m.setHelpKeys(keyChoose, keyBack)
+	m.setDelegate(themedDelegate())
+}
+
 // loadProfiles rebuilds the binding list for the current tool. selectName, if
 // non-empty, is the row the cursor should land on (e.g. the binding just
 // edited or cloned); otherwise the cursor defaults to the active binding.
@@ -324,7 +354,7 @@ func (m *model) loadProfiles(selectName string) {
 	m.list.SetItems(items)
 	m.list.Select(selectedIndex)
 	m.list.Title = m.tool.Title + " bindings"
-	m.setHelpKeys(keySwitch, keyEdit, keyBackup, keyDelete, keyBack)
+	m.setHelpKeys(keySwitch, keyEdit, keyBackup, keyCopy, keyDelete, keyBack)
 	m.setDelegate(themedDelegate())
 	if len(saved) == 0 && m.status == "" && m.tool.ApplyAuth != nil {
 		m.setStatus(statusInfo, `No bindings yet — press enter on "Add new binding" or press 'a' to create one.`)
@@ -465,6 +495,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+		case "x":
+			if m.view == viewProfiles {
+				if it, ok := m.selectedBinding(); ok {
+					m.copySource = it.value
+					m.view = viewCopyTool
+					m.clearStatus()
+					m.loadCopyTools()
+					return m, nil
+				}
+			}
 		case "d":
 			if m.view == viewProfiles {
 				return m.onDeleteKey()
@@ -568,6 +608,51 @@ func (m model) startBackup(name string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// copyBindingToTool copies a saved binding to another tool without activating it.
+func (m model) copyBindingToTool(src, toolName string) error {
+	dstTool := m.findTool(toolName)
+	if dstTool == nil {
+		return fmt.Errorf("unknown tool %s", toolName)
+	}
+	b, found, err := m.cat.BindingByName(m.tool.Name, src)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("no binding named %s", src)
+	}
+	cr, err := m.cat.Credential(b.CredentialID)
+	if err != nil {
+		return err
+	}
+	p, err := m.cat.Provider(cr.ProviderID)
+	if err != nil {
+		return err
+	}
+	slug, err := m.cat.ModelSlug(b.ModelID)
+	if err != nil {
+		return err
+	}
+	slugs, err := m.cat.ModelSlugs(b.Models)
+	if err != nil {
+		return err
+	}
+	if dstTool.Name != b.Tool && catalog.SingleModelTools[dstTool.Name] {
+		slugs = []string{slug}
+	}
+	saved, err := m.cat.Bindings(dstTool.Name)
+	if err != nil {
+		return err
+	}
+	names := make([]string, len(saved))
+	for i, row := range saved {
+		names[i] = row.Name
+	}
+	dst := nextDuplicateName(names, src)
+	_, err = catalog.StoreBinding(m.cat, dstTool, nil, dst, p.BaseURL, cr.Key, slug, slugs, true)
+	return err
+}
+
 // nextDuplicateName returns the first free "<src>-copy" (then "<src>-copy-2", …).
 func nextDuplicateName(existing []string, src string) string {
 	taken := make(map[string]bool, len(existing))
@@ -621,6 +706,11 @@ func (m model) onEsc() (tea.Model, tea.Cmd) {
 		m.loadTools()
 		m.resize() // banner returns → shrink the list
 		return m, nil
+	case viewCopyTool:
+		m.view = viewProfiles
+		m.clearStatus()
+		m.loadProfiles(m.copySource)
+		return m, nil
 	case viewEditForm:
 		m.editField = ""
 		m.dupSource = ""
@@ -656,6 +746,16 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 		m.clearStatus()
 		m.loadProfiles("") // land on the active binding
 		m.resize()         // banner hidden → grow the list
+
+	case viewCopyTool:
+		if err := m.copyBindingToTool(m.copySource, it.value); err != nil {
+			m.setStatus(statusErr, err.Error())
+			return m, nil
+		}
+		m.view = viewProfiles
+		m.setStatus(statusOK, "Copied "+m.copySource+" to "+it.title)
+		m.loadProfiles(m.copySource)
+		return m, nil
 
 	case viewProfiles:
 		if it.value == addSentinel {

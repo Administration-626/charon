@@ -37,7 +37,7 @@ Pi 与 Grok，并在命名绑定（binding）之间切换各工具使用的 endp
   `/model`），可以在会话中更换模型，无需返回 Charon。
 - 单页表单。在同一屏新增或编辑绑定（Name、URL、Token、Model），可直接输入，
   并使用 [ Save ] / [ Cancel ] 按钮。
-- 快速复制与搜索。按 c 可直接复制绑定；在模型列表中输入文字即可实时模糊搜索。
+- 快速复制与搜索。按 c 复制绑定，按 x 复制到其他工具；在模型列表中输入文字即可实时模糊搜索。
 - Unicode 名称。绑定名支持中文等文字；不允许空白或控制字符。
 - 默认安全。写入采用原子替换。正在使用的绑定不能删除；删除前须切换到另一条绑定。
 - 非破坏性。Charon 只修改每个工具配置中由它管理的 `charon` provider 条目，
@@ -104,6 +104,7 @@ charon add <tool>            # 添加并激活一条绑定（--name --key，并�
 charon edit <tool> <b>       # 修改某绑定的 endpoint/key/model/models（--name 可改名）
 charon rename <tool> <o> <n> # 重命名已保存的绑定
 charon cp <tool> <src> <dst> # 复制已保存的绑定
+charon cp <tool> <src> <tool> <dst> # 将已保存的绑定复制到另一个工具
 charon switch <tool> <b>     # 将已保存的绑定应用到工具配置
 charon rm <tool> <b>         # 删除一条绑定（正在使用的不能删）
 charon completion <shell>    # 输出 bash/zsh/fish 补全脚本
@@ -112,7 +113,8 @@ charon uninstall             # 卸载已安装的 charon 二进制
 ```
 
 `status` 和 `ls` 支持 `--json`，便于脚本与编辑器集成。`status` 读工具的实时配置，
-`ls` 读已保存的绑定。在工具里通过 `/model` 更改的模型，下次重新应用这条绑定时会被覆盖。
+`ls` 读已保存的绑定。在工具里通过 `/model` 更改的模型，只要这条绑定仍是当前绑定就会保留；
+应用另一条绑定时会替换模型列表。
 
 ### Shell 补全
 
@@ -165,11 +167,11 @@ charon completion fish | source
 只有一个模型的绑定会将工具中的模型列表替换为该模型，不会保留上一条绑定的列表。Codex 是
 例外：它的配置里没有注册额外模型的位置，所以一条 Codex 绑定只带一个模型
 （`charon edit codex <b> --model ...`）。
-在工具内更改模型不会更新 Charon 保存的绑定；下次激活这条绑定时，Charon 会重新应用其中保存的
-默认模型。
+在工具内更改模型不会更新 Charon 保存的绑定；只要这条绑定仍是当前绑定，Charon 会保留实况模型。
+应用另一条绑定时会替换模型列表。
 
-在菜单里按 c 可直接复制绑定，并命名为 `<name>-copy`。界面会选中刚创建的副本。
-副本与原绑定共用 API key 和模型列表，创建后不会自动激活。
+在菜单里按 c 可直接复制绑定，并命名为 `<name>-copy`；按 x 可选择其他工具并复制为
+`<name>-copy`。副本与原绑定共用 API key，创建后不会自动激活。
 
 ### 编辑已有绑定
 

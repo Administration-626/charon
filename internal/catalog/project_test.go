@@ -33,6 +33,42 @@ func TestProjectRendersBinding(t *testing.T) {
 	}
 }
 
+func TestActivateSameBindingPreservesLiveModel(t *testing.T) {
+	c := openTest(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	_, cr := seed(t, c, "https://gateway.example", "sk-secret", "kimi-k2", "glm-4.6")
+	b, err := c.AddBinding("opencode", "work", cr.ID, "kimi-k2", []string{"kimi-k2", "glm-4.6"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Activate(b.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(home, ".config", "opencode", "opencode.jsonc")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(string(data), `"model": "charon/kimi-k2"`, `"model": "charon/glm-4.6"`, 1))
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := c.Activate(b.ID); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"model": "charon/glm-4.6"`) {
+		t.Fatalf("Activate(same binding) reset the live model:\n%s", data)
+	}
+}
+
 func TestProjectSingleModelReplacesExistingList(t *testing.T) {
 	c := openTest(t)
 	home := t.TempDir()

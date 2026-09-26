@@ -473,11 +473,20 @@ func cmdRename(cat *catalog.Catalog, args []string) error {
 
 func cmdDuplicate(cat *catalog.Catalog, args []string) error {
 	if len(args) < 3 {
-		return fmt.Errorf("usage: charon cp <tool> <src> <dst>")
+		return fmt.Errorf("usage: charon cp <tool> <src> <dst> | charon cp <tool> <src> <tool> <dst>")
 	}
 	t, err := requireTool(args[0])
 	if err != nil {
 		return err
+	}
+	dstTool := t
+	dstName := args[2]
+	if len(args) >= 4 {
+		dstTool, err = requireTool(args[2])
+		if err != nil {
+			return err
+		}
+		dstName = args[3]
 	}
 	b, found, err := cat.BindingByName(t.Name, args[1])
 	if err != nil {
@@ -494,10 +503,21 @@ func cmdDuplicate(cat *catalog.Catalog, args []string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := cat.AddBinding(b.Tool, args[2], b.CredentialID, slug, slugs); err != nil {
+	if dstTool.Name != b.Tool && catalog.SingleModelTools[dstTool.Name] {
+		slugs = []string{slug}
+	}
+	cr, err := cat.Credential(b.CredentialID)
+	if err != nil {
 		return err
 	}
-	fmt.Printf("Copied %s binding %q → %q\n", t.Title, args[1], args[2])
+	p, err := cat.Provider(cr.ProviderID)
+	if err != nil {
+		return err
+	}
+	if _, err := catalog.StoreBinding(cat, dstTool, nil, dstName, p.BaseURL, cr.Key, slug, slugs, true); err != nil {
+		return err
+	}
+	fmt.Printf("Copied %s binding %q → %s %q\n", t.Title, args[1], dstTool.Title, dstName)
 	return nil
 }
 

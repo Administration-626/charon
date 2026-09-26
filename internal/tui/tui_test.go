@@ -79,6 +79,12 @@ func TestStatusRender(t *testing.T) {
 	}
 }
 
+func TestThemedDelegateUsesTightSpacing(t *testing.T) {
+	if got := themedDelegate().Spacing(); got != 1 {
+		t.Fatalf("themedDelegate spacing = %d, want 1", got)
+	}
+}
+
 func TestWizardStep(t *testing.T) {
 	tests := []struct {
 		view      view
@@ -407,6 +413,51 @@ func TestAKeyInProfilesOpensAddForm(t *testing.T) {
 	}
 	if updated.wiz.edit {
 		t.Error("wiz.edit should be false for a new binding")
+	}
+}
+
+func TestXKeyCopiesBindingToAnotherTool(t *testing.T) {
+	st := openTestCatalog(t, false)
+	m := newModel(st, "v0.0.0")
+	m.tool = m.findTool("claude")
+	m.view = viewProfiles
+
+	if _, err := catalog.StoreBinding(st, m.tool, nil, "work", "https://gateway.example", "sk-test", "kimi-k2", []string{"kimi-k2", "glm-4.6"}, true); err != nil {
+		t.Fatal(err)
+	}
+	m.loadProfiles("work")
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	if got := m2.(model).view; got != viewCopyTool {
+		t.Fatalf("pressing x = %v, want viewCopyTool", got)
+	}
+
+	updated := m2.(model)
+	updated.width = 100
+	updated.height = 30
+	updated.resize()
+	var downModel tea.Model
+	for range 8 {
+		downModel, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+		updated = downModel.(model)
+		if row, ok := updated.list.SelectedItem().(item); ok && row.value == "opencode" {
+			break
+		}
+	}
+	if row, ok := updated.list.SelectedItem().(item); !ok || row.value != "opencode" {
+		t.Fatal("could not move cursor to opencode")
+	}
+	enteredModel, _ := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	final := enteredModel.(model)
+	if final.view != viewProfiles {
+		t.Fatalf("Enter on target tool = %v, want viewProfiles; status = %q", final.view, final.status)
+	}
+
+	copied, found, err := st.BindingByName("opencode", "work-copy")
+	if err != nil || !found {
+		t.Fatalf("copied binding missing: found=%v err=%v", found, err)
+	}
+	if slugs, err := st.ModelSlugs(copied.Models); err != nil || len(slugs) != 2 {
+		t.Fatalf("copied models = %v, err=%v; want two models", slugs, err)
 	}
 }
 

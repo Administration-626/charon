@@ -115,6 +115,33 @@ func TestRunBindingLifecycle(t *testing.T) {
 	}
 }
 
+func TestRunCopyBindingAcrossTools(t *testing.T) {
+	home := sandbox(t)
+	seedCodex(t, home)
+	if err := run([]string{"add", "opencode", "--name", "work", "--key", "sk-test", "--endpoint", "https://example.com/v1", "--model", "kimi-k2", "--models", "kimi-k2,glm-4.6"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := run([]string{"cp", "opencode", "work", "codex", "work"}); err != nil {
+		t.Fatalf("cross-tool cp: %v", err)
+	}
+
+	c := openCatalog(t)
+	copied, found, err := c.BindingByName("codex", "work")
+	if err != nil || !found {
+		t.Fatalf("copied binding missing: found=%v err=%v", found, err)
+	}
+	credential, err := c.Credential(copied.CredentialID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credential.Key != "sk-test" {
+		t.Fatalf("copied key = %q, want sk-test", credential.Key)
+	}
+	if slugs, err := c.ModelSlugs(copied.Models); err != nil || len(slugs) != 1 || slugs[0] != "kimi-k2" {
+		t.Fatalf("copied models = %v, err=%v; want single kimi-k2 for Codex", slugs, err)
+	}
+}
+
 func TestRunValidatesBindingNames(t *testing.T) {
 	home := sandbox(t)
 	seedCodex(t, home)

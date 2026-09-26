@@ -85,10 +85,17 @@ func (c *Catalog) Activate(id string) (Binding, error) {
 		return Binding{}, fmt.Errorf("binding %q: %w", id, ErrNotFound)
 	}
 	b := bs[idx]
+	active, err := c.readActive()
+	if err != nil {
+		return Binding{}, err
+	}
+	if active[b.Tool] == id {
+		return b, nil
+	}
 	if err := c.project(b); err != nil {
 		return Binding{}, err
 	}
-	if err := c.setActiveForTool(b.Tool, b.ID); err != nil {
+	if err := c.setActiveForTool(b.Tool, id); err != nil {
 		return Binding{}, err
 	}
 	return b, nil

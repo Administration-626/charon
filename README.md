@@ -39,8 +39,8 @@ binding into the tool, overwriting only the keys charon owns.
   means going back through Charon.
 - Single-page form. Add or edit a binding on one screen (Name, URL, Token,
   Model) with direct typing and [ Save ] / [ Cancel ] buttons.
-- Instant clone & search. Press c to duplicate a binding without prompts,
-  and type to fuzzy-filter the model list in real time.
+- Instant clone & cross-tool copy. Press c to duplicate a binding, or x to
+  copy it to another tool; type to fuzzy-filter the model list in real time.
 - Unicode names. Binding names support any script, including Chinese; spaces
   and control characters are rejected.
 - Safe by default. Writes are atomic. Deleting the binding a tool is
@@ -111,6 +111,7 @@ charon add <tool>            # add + activate a binding (--name --key and at lea
 charon edit <tool> <b>       # change a binding's endpoint/key/model/models (--name to rename)
 charon rename <tool> <o> <n> # rename a saved binding
 charon cp <tool> <src> <dst> # duplicate a saved binding
+charon cp <tool> <src> <tool> <dst> # copy a saved binding to another tool
 charon switch <tool> <b>     # render a saved binding into the tool
 charon rm <tool> <b>         # delete a binding (refused while it is the active one)
 charon completion <shell>    # print a bash/zsh/fish completion script
@@ -120,8 +121,8 @@ charon uninstall             # remove the installed charon binary
 
 `status` and `ls` accept `--json` for scripting and editor integrations.
 `status` reads the tool's live config; `ls` reads the saved bindings. A model
-change made with the tool's own `/model` is overwritten the next time that
-binding is rendered.
+change made with the tool's own `/model` is kept while that binding stays
+active; rendering a different binding replaces the model list.
 
 ### Shell completions
 
@@ -188,12 +189,13 @@ The list travels with the binding — switch bindings and the menu switches too.
 Codex is the exception: its config has no place to register extra models, so a
 Codex binding carries exactly one (`charon edit codex <b> --model ...`).
 A binding with one model replaces the previous binding's list with that one model.
-Changing the model in the tool does not update the saved binding. Charon reapplies
-the binding's saved default when it renders that binding again.
+Changing the model in the tool does not update the saved binding, and Charon
+keeps the live model while that binding stays active. Rendering another binding
+replaces the model list.
 
-In the menu, press c on a binding to clone it instantly into
-`<name>-copy` with no prompts — focus jumps to the new copy, which shares the
-same key and model list and is not activated.
+In the menu, press c on a binding to clone it instantly into `<name>-copy`;
+press x to pick another tool and copy it there as `<name>-copy`. Both copies
+share the source key and are not activated.
 
 ### Editing an existing binding
 
