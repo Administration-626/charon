@@ -1,14 +1,15 @@
 # AGENTS.md
 
 Guidance for AI coding agents (and humans) working in this repository.
-`charon` is a small Go CLI that detects the Codex, Claude Code, OpenCode, Pi, and
-Grok CLIs and switches each one's **endpoint + credentials** between named bindings.
+`charon` is a small Go CLI that detects the Codex, Claude Code, OpenCode, Pi, Oh My
+Pi (omp), and Grok CLIs and switches each one's **endpoint + credentials** between
+named bindings.
 
 ## Golden rule: this tool edits real user credentials
 
 `charon` reads and writes live config for other tools (`~/.codex`, `~/.claude`,
-`~/.config/opencode`, `~/.local/share/opencode`, `~/.pi/agent`, `~/.grok`). It
-stores API keys of its own under `~/.config/charon/`.
+`~/.config/opencode`, `~/.local/share/opencode`, `~/.pi/agent`, `~/.grok`,
+`~/.omp/agent`). It stores API keys of its own under `~/.config/charon/`.
 
 - **Never** run `charon add`, `charon switch`, `charon edit`, or the interactive menu
   against your real `$HOME` while developing. Always sandbox:
@@ -47,8 +48,8 @@ internal/artifact/  atomic writes
 internal/tools/     per-tool adapters
   tool.go           Tool struct, AuthSpec, registry (All/Find)
   providers.go      guards for the shared "charon" provider entry (codex/opencode)
-  edit.go           JSON/TOML load-merge-write helpers (preserve unknown keys)
-  codex.go / claude.go / opencode.go / pi.go / grok.go   one file per tool
+  edit.go           JSON/TOML/YAML load-merge-write helpers (preserve unknown keys)
+  codex.go / claude.go / opencode.go / pi.go / omp.go / grok.go   one file per tool
 internal/catalog/   the store: providers, credentials, models, bindings, active pointer
 internal/models/    fetch model lists from a provider API (openai/anthropic wire)
 internal/secret/    masking
@@ -92,9 +93,10 @@ provider name `"charon"`).
 ### Model lists (`AuthSpec.AllModels`)
 
 A binding's model list is what charon registers in the **tool's own** model picker
-(Claude `modelPicker`, OpenCode `provider.charon.models`, pi's extension, Grok
-`[model.charon-<slug>]`), so switching model mid-session doesn't need charon. It
-is passed to `ApplyAuth` as `AuthSpec.AllModels`. Two rules a new tool must honor:
+(Claude `modelPicker`, OpenCode `provider.charon.models`, pi's extension, omp
+`providers.charon.models`, Grok `[model.charon-<slug>]`), so switching model
+mid-session doesn't need charon. It is passed to `ApplyAuth` as
+`AuthSpec.AllModels`. Two rules a new tool must honor:
 
 - `AllModels` empty (nil) means **"keep what's registered"**, not "register nothing";
   this lets a direct `ApplyAuth` call that changes only a key or default model retain

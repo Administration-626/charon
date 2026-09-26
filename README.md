@@ -16,10 +16,10 @@
 </p>
 
 Charon is a tiny Go CLI that detects the Codex, Claude Code,
-OpenCode, Pi, and Grok CLIs and switches each one's endpoint + credentials
-between named bindings. A binding is an endpoint, an API key, and the models it
-should offer — not a snapshot of the tool's config. Switching re-renders that
-binding into the tool, overwriting only the keys charon owns.
+OpenCode, Pi, Oh My Pi (omp), and Grok CLIs and switches each one's endpoint +
+credentials between named bindings. A binding is an endpoint, an API key, and
+the models it should offer — not a snapshot of the tool's config. Switching
+re-renders that binding into the tool, overwriting only the keys charon owns.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Administration-626/charon/main/assets/screenshot.png" alt="Charon interactive menu" width="80%">
@@ -27,16 +27,16 @@ binding into the tool, overwriting only the keys charon owns.
 
 ## Features
 
-- One command, five tools. Manage Codex, Claude Code, OpenCode, Pi, and Grok
-  from a single interactive menu or a scriptable CLI.
+- One command, six tools. Manage Codex, Claude Code, OpenCode, Pi, Oh My Pi
+  (omp), and Grok from a single interactive menu or a scriptable CLI.
 - Named bindings. Save an endpoint, an API key, and its models, then switch
   between bindings. One endpoint can serve several tools.
 - Model discovery. Add a binding from an endpoint + key; Charon fetches the
   model list and lets you pick — or type model ids directly.
 - Switch models inside the tool. Check off the models you actually use and
   Charon registers them in the tool's own picker (Claude Code's `/model`, OpenCode's
-  `/models`, Pi's `/model`, Grok's `/model`), so changing model mid-session never
-  means going back through Charon.
+  `/models`, Pi's `/model`, Oh My Pi's `/model`, Grok's `/model`), so changing
+  model mid-session never means going back through Charon.
 - Single-page form. Add or edit a binding on one screen (Name, URL, Token,
   Model) with direct typing and [ Save ] / [ Cancel ] buttons.
 - Instant clone & cross-tool copy. Press c to duplicate a binding, or x to
@@ -56,6 +56,7 @@ binding into the tool, overwriting only the keys charon owns.
 | Claude Code | `~/.claude/settings.json` (`env.ANTHROPIC_BASE_URL`) | `settings.json` env key |
 | OpenCode | `~/.config/opencode/opencode.jsonc` (`provider.*.options.baseURL`) | `opencode.jsonc` (`provider.charon.options.apiKey`) |
 | Pi | `~/.pi/agent/extensions/charon.ts` (`baseUrl`) | `~/.pi/agent/extensions/charon.ts` (`apiKey`) |
+| Oh My Pi (omp) | `~/.omp/agent/models.yml` (`providers.charon.baseUrl`) | `~/.omp/agent/models.yml` (`providers.charon.apiKey`) |
 | Grok | `~/.grok/config.toml` (`[model.charon-*].base_url`) | `~/.grok/config.toml` (`[model.charon-*].api_key`) |
 
 ## Installation
@@ -184,7 +185,8 @@ status bar flags missing required values on submit.
 The models a binding registers land in the tool's own menu, so you can change model
 without leaving your session: Claude Code's `/model` (via `modelPicker`), OpenCode's
 `/models` (via the `charon` provider's model map), Pi's `/model` (via the
-generated extension), and Grok's `/model` (via `[model.charon-<slug>]` tables).
+generated extension), Oh My Pi's `/model` (via the `providers.charon` model
+list), and Grok's `/model` (via `[model.charon-<slug>]` tables).
 The list travels with the binding — switch bindings and the menu switches too.
 Codex is the exception: its config has no place to register extra models, so a
 Codex binding carries exactly one (`charon edit codex <b> --model ...`).
@@ -237,8 +239,9 @@ picker list.
 Each tool gets a dedicated `charon` provider entry written into its own config
 format (Codex `[model_providers.charon]`, Claude `env.ANTHROPIC_*`, OpenCode an
 `@ai-sdk/openai-compatible` provider, Pi a `pi.registerProvider("charon", ...)`
-extension, Grok a `[model.charon-<slug>]` table per model), so Charon can reapply
-a binding after you switch to another one.
+extension, Oh My Pi a `providers.charon` block in `models.yml`, Grok a
+`[model.charon-<slug>]` table per model), so Charon can reapply a binding after
+you switch to another one.
 
 For example, run `charon add codex --name work-key --key sk-... --model gpt-5`,
 then `charon add codex --name proxy --endpoint https://gateway.example/v1 --key sk-...
