@@ -113,6 +113,16 @@ Which wire dialect an endpoint speaks is **not stored**. `models.Fetch` is calle
 twice when listing models — the tool's historical dialect first, then the other —
 and the winner is not persisted.
 
+### Built-in context windows (`internal/models/builtin.go`)
+
+- Model context window sizes resolve in order of precedence:
+  1. Manual override (`catalog.WindowManual`), which takes priority and is never overwritten.
+  2. API response value (`catalog.WindowAPI`), when returned and > 0.
+  3. Built-in lookup table (`catalog.WindowBuiltin`), derived from **WorkBuddy** configurations and official provider specifications.
+  4. Fallback limit (`models.FallbackContextWindow`, 500,000 tokens) when unrecognized.
+- When extending or updating built-in rules, reference WorkBuddy model presets or official vendor specifications.
+  Use `scripts/extract_workbuddy_models.py --mainstream --format go` to extract up-to-date mappings from WorkBuddy's installation archive (`docs/workbuddy-context-sync.md`).
+
 ## Conventions
 
 - Standard Go style: `gofmt`/`goimports`, tabs, error wrapping with `%w`,

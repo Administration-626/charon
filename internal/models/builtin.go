@@ -1,3 +1,4 @@
+// Package models provides model discovery, metadata resolution, and built-in context window mappings.
 package models
 
 import (
@@ -11,7 +12,9 @@ type builtinRule struct {
 }
 
 // builtinModelWindows holds default context windows for modern mainstream models,
-// derived from WorkBuddy and official provider specifications.
+// derived from WorkBuddy model configurations and official provider specifications.
+// When an API endpoint does not report a context window, these presets populate
+// the window size for common models, falling back to FallbackContextWindow (500K) if unmatched.
 var builtinModelWindows = []builtinRule{
 	// OpenAI
 	{pattern: "gpt-5.6", window: 1_050_000},
