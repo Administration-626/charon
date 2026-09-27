@@ -261,7 +261,9 @@ func cmdModels(cat *catalog.Catalog, args []string) error {
 	if err := tools.ValidateEndpoint(*endpoint); err != nil {
 		return err
 	}
-	list, err := probeModels(t, t.ResolveEndpoint(*endpoint), *key)
+	resolvedEndpoint := t.ResolveEndpoint(*endpoint)
+	warnEndpointV1(t, resolvedEndpoint)
+	list, err := probeModels(t, resolvedEndpoint, *key)
 	if err != nil {
 		return err
 	}
@@ -428,6 +430,7 @@ func cmdAdd(cat *catalog.Catalog, args []string) error {
 	if err := tools.ValidateEndpoint(*endpoint); err != nil {
 		return err
 	}
+	warnEndpointV1(t, t.ResolveEndpoint(*endpoint))
 	explicit := false
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "models" {
@@ -514,6 +517,7 @@ func cmdEdit(cat *catalog.Catalog, args []string) error {
 	if err := tools.ValidateEndpoint(*endpoint); err != nil {
 		return err
 	}
+	warnEndpointV1(t, t.ResolveEndpoint(*endpoint))
 
 	b, err := catalog.StoreBinding(cat, t, &cur, target, *endpoint, *key, modelID, splitModels(*modelList), explicit, nil)
 	if err != nil {
@@ -530,6 +534,16 @@ func cmdEdit(cat *catalog.Catalog, args []string) error {
 	}
 	fmt.Printf("Updated %s binding %q (%s · %s)\n", t.Title, b.Name, stored.endpoint, describeModels(stored.slug, stored.slugs))
 	return nil
+}
+
+func warnEndpointV1(t *tools.Tool, endpoint string) {
+	if tools.EndpointHasClaudeV1(t, endpoint) {
+		fmt.Fprintln(os.Stderr, "warning: endpoint includes /v1; Claude Code requests /v1/messages, so confirm the gateway's documented base URL")
+		return
+	}
+	if tools.EndpointNeedsV1Hint(t, endpoint) {
+		fmt.Fprintln(os.Stderr, "warning: endpoint does not contain /v1; model discovery tries /v1/models, but actual requests depend on the gateway documentation")
+	}
 }
 
 func cmdRename(cat *catalog.Catalog, args []string) error {

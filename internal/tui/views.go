@@ -7,6 +7,7 @@ import (
 	"charon/internal/catalog"
 	"charon/internal/models"
 	"charon/internal/secret"
+	"charon/internal/tools"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/lipgloss"
@@ -25,6 +26,16 @@ func (m model) modelMenuNote() string {
 	}
 	return "All of them are offered in " + m.tool.Title + "'s own " + m.tool.ModelMenu +
 		", so you can switch model without leaving your session."
+}
+
+func (m model) endpointHint(endpoint string) string {
+	if tools.EndpointHasClaudeV1(m.tool, endpoint) {
+		return warnStyle.Render("Warning: this URL includes /v1; Claude Code requests /v1/messages. Confirm the gateway base URL.")
+	}
+	if !tools.EndpointNeedsV1Hint(m.tool, endpoint) {
+		return ""
+	}
+	return warnStyle.Render("Warning: no /v1; discovery adds /v1/models. Confirm the gateway base URL.")
 }
 
 // modelActionRow renders one of the tree-indented buttons under the Model Slug field,
@@ -114,11 +125,21 @@ func (m model) View() string {
 		if m.view == viewModelEndpoint && m.editingModel.ID != "" {
 			body += "\n\n" + hintStyle.Render("Endpoint: "+m.modelEditEndpoint)
 		}
+		if m.view == viewModelEndpoint {
+			if hint := m.endpointHint(m.input.Value()); hint != "" {
+				body += "\n\n" + hint
+			}
+		}
 		return m.withFooter(body, m.stepHelp()...)
 	case viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField, viewAddCustomModel:
 		body := m.wizardHeader() +
 			promptStyle.Render(m.prompt()) +
 			"\n\n  " + m.input.View()
+		if m.view == viewAddEndpoint || (m.view == viewEditField && m.editField == fieldURL) {
+			if hint := m.endpointHint(m.input.Value()); hint != "" {
+				body += "\n\n" + hint
+			}
+		}
 		if m.view == viewAddCustomModel {
 			body += "\n\n" + hintStyle.Render(m.modelMenuNote())
 		}
@@ -189,6 +210,9 @@ func (m model) View() string {
 		}
 
 		body := header + strings.Join(formLines, "\n") + "\n  " + saveBtn + "\n  " + cancelBtn
+		if hint := m.endpointHint(m.formInputs[focusURL].Value()); hint != "" {
+			body += "\n\n" + hint
+		}
 		return m.withFooter(body, keyMove, keyNextField, keySelectAction, keyCancel)
 	}
 

@@ -25,6 +25,40 @@ func ValidateEndpoint(ep string) error {
 	return nil
 }
 
+// EndpointNeedsV1Hint reports whether a custom endpoint may need an explicit
+// "/v1" path for OpenAI-compatible tools. Claude Code is excluded because it
+// appends "/v1/messages" itself and normalizes that suffix separately.
+func EndpointNeedsV1Hint(t *Tool, ep string) bool {
+	if t == nil || t.Name == "claude" || strings.TrimSpace(ep) == "" {
+		return false
+	}
+	if err := ValidateEndpoint(ep); err != nil {
+		return false
+	}
+	u, err := url.Parse(strings.TrimSpace(ep))
+	if err != nil {
+		return false
+	}
+	path := strings.TrimRight(u.Path, "/")
+	return !strings.HasSuffix(path, "/v1") && !strings.Contains(path, "/v1/")
+}
+
+// EndpointHasClaudeV1 reports whether Claude Code will strip a trailing "/v1"
+// before appending its own "/v1/messages" path.
+func EndpointHasClaudeV1(t *Tool, ep string) bool {
+	if t == nil || t.Name != "claude" || strings.TrimSpace(ep) == "" {
+		return false
+	}
+	if err := ValidateEndpoint(ep); err != nil {
+		return false
+	}
+	u, err := url.Parse(strings.TrimSpace(ep))
+	if err != nil {
+		return false
+	}
+	return strings.HasSuffix(strings.TrimRight(u.Path, "/"), "/v1")
+}
+
 // ValidateKey reports whether key is a non-empty API key/token once trimmed.
 func ValidateKey(key string) error {
 	if strings.TrimSpace(key) == "" {
