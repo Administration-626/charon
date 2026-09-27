@@ -309,8 +309,8 @@ func (m model) renderReviewTable() string {
 
 	windowSources := m.modelWindowSources()
 
-	hdrRow := fmt.Sprintf("    %-3s %-*s  %-14s  %s", "#", maxSlugLen, "Model ID", "Context Window", "Source")
-	divider := "    " + strings.Repeat("─", maxSlugLen+32)
+	hdrRow := fmt.Sprintf("  %-3s %-*s  %-14s  %s", "#", maxSlugLen, "Model ID", "Context Window", "Source")
+	divider := "  " + strings.Repeat("─", maxSlugLen+34)
 	lines := []string{hintStyle.Render(hdrRow), hintStyle.Render(divider)}
 
 	for i, slug := range m.wiz.models {
