@@ -63,7 +63,13 @@ func (c *Catalog) project(b Binding) error {
 		if err != nil {
 			return err
 		}
-		specs = append(specs, tools.ModelSpec{Slug: m.Slug, ContextWindow: m.ContextWindow})
+		window := m.ContextWindow
+		// Codex already knows the context window of official OpenAI models. A
+		// catalog builtin is an estimate for other tools, not an override for Codex.
+		if b.Tool == "codex" && m.ContextWindowSource == WindowBuiltin {
+			window = 0
+		}
+		specs = append(specs, tools.ModelSpec{Slug: m.Slug, ContextWindow: window})
 	}
 	spec.Models = specs
 	return t.ApplyAuth(spec)

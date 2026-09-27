@@ -39,6 +39,39 @@ func TestProjectRendersBinding(t *testing.T) {
 	}
 }
 
+func TestProjectCodexLeavesBuiltinOpenAIWindowToCodex(t *testing.T) {
+	c := openTest(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	p, err := c.PutProvider("https://api.openai.com/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr, err := c.PutCredential(p.ID, "sk-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.PutModel(p.ID, "gpt-5.5"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := c.AddBinding("codex", "official", cr.ID, "gpt-5.5", []string{"gpt-5.5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Activate(b.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "model_context_window") {
+		t.Fatalf("Codex builtin OpenAI window should remain native:\n%s", data)
+	}
+}
+
 func TestActivateSameBindingPreservesLiveModel(t *testing.T) {
 	c := openTest(t)
 	home := t.TempDir()
