@@ -32,8 +32,13 @@ func modelsURL(endpoint string) string {
 	return base + "/v1/models"
 }
 
-// Fetch returns the sorted model IDs offered by endpoint for the given key.
-func Fetch(provider Provider, endpoint, key string) ([]string, error) {
+// Info is one model id supplied by the endpoint.
+type Info struct {
+	ID string
+}
+
+// Fetch returns the sorted models offered by endpoint for the given key.
+func Fetch(provider Provider, endpoint, key string) ([]Info, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
@@ -82,15 +87,15 @@ func Fetch(provider Provider, endpoint, key string) ([]string, error) {
 		return nil, fmt.Errorf("could not parse model list: %w", err)
 	}
 
-	ids := make([]string, 0, len(out.Data))
+	infos := make([]Info, 0, len(out.Data))
 	for _, m := range out.Data {
 		if m.ID != "" {
-			ids = append(ids, m.ID)
+			infos = append(infos, Info{ID: m.ID})
 		}
 	}
-	if len(ids) == 0 {
+	if len(infos) == 0 {
 		return nil, fmt.Errorf("no models returned by %s", endpoint)
 	}
-	sort.Strings(ids)
-	return ids, nil
+	sort.Slice(infos, func(i, j int) bool { return infos[i].ID < infos[j].ID })
+	return infos, nil
 }

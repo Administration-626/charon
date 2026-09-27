@@ -9,6 +9,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"charon/internal/catalog"
@@ -35,11 +36,16 @@ type view int
 const (
 	viewTools view = iota
 	viewProfiles
+	viewModels
+	viewModelEndpoint
+	viewModelSlug
+	viewModelWindow
 	viewAddEndpoint    // wizard: enter endpoint
 	viewAddKey         // wizard: enter API key
 	viewFetching       // wizard: fetching models
 	viewPickModel      // wizard: choose a model
 	viewAddCustomModel // wizard: enter custom model ID
+	viewReviewModels   // wizard: compact review table
 	viewAddName        // wizard: name the binding
 	viewDupName        // clone: name the duplicate
 	viewCopyTool       // copy: choose the destination tool
@@ -59,11 +65,12 @@ const (
 const (
 	addSentinel = "\x00add" // the "add new" list row
 	sepSentinel = "\x00sep" // a blank divider row (inert; cursor skips it)
+	libSentinel = "\x00lib" // the model-library row on the tools screen
 )
 
 // isSentinel reports whether v is a synthetic action row rather than a binding.
 func isSentinel(v string) bool {
-	return v == addSentinel || v == sepSentinel
+	return v == addSentinel || v == sepSentinel || v == libSentinel
 }
 
 type item struct {
@@ -93,6 +100,7 @@ var (
 	keyFilter  = key.NewBinding(key.WithKeys("\x00filter"), key.WithHelp("type", "search"))
 	keyRefresh = key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl+r", "refresh"))
 	keyManual  = key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "type ids"))
+	keyWindow  = key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "context"))
 	// keyEsc names only esc: on a text input "q" has to stay a letter.
 	keyEsc          = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back"))
 	keyClearFilter  = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter"))
@@ -106,6 +114,10 @@ var (
 	keyFinish       = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "finish"))
 	keyDuplicate    = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "duplicate"))
 	keyRegister     = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "register"))
+
+	keyConfirmReview = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm"))
+	keyEditContext   = key.NewBinding(key.WithKeys("w", "e"), key.WithHelp("w/e", "context"))
+	keyDeleteRow     = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "remove"))
 )
 
 // exampleEndpoint is placeholder text; a real endpoint is never prefilled.
@@ -136,13 +148,19 @@ type model struct {
 	pending    *fetchedMsg // fetch result held back until the min-load window elapses
 	fetchStart time.Time   // when the current fetch began, for the min-load throttle
 
-	allModels   []string // full fetched model list, unfiltered
-	modelFilter string   // current type-to-search query in the model picker
-	status      string
-	statusLvl   statusLevel
-	width       int
-	height      int
-	version     string
+	allModels         []string      // full fetched model list, unfiltered
+	editTarget        string        // model whose context window the input view is editing
+	modelFilter       string        // current type-to-search query in the model picker
+	editingModel      catalog.Model // model being added or edited in the local library
+	modelEditEndpoint string        // the endpoint being edited for that model
+	reviewCursor      int           // highlighted row in viewReviewModels
+	fromReview        bool          // whether single-field edit returns to viewReviewModels
+	reviewSource      view          // view that launched reviewTable (viewAddCustomModel or viewPickModel)
+	status            string
+	statusLvl         statusLevel
+	width             int
+	height            int
+	version           string
 }
 
 // setStatus records a footer message at the given severity.
@@ -246,7 +264,8 @@ func (m model) inputView() bool {
 		return m.formFocus < formInputCount
 	}
 	switch m.view {
-	case viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField, viewAddCustomModel:
+	case viewModelEndpoint, viewModelSlug, viewModelWindow,
+		viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField, viewAddCustomModel:
 		return true
 	}
 	return false
@@ -262,19 +281,6 @@ func (m *model) selectedBinding() (item, bool) {
 		return item{}, false
 	}
 	return it, true
-}
-
-// selectByValue moves the cursor to the row matching v; a miss keeps the default.
-func (m *model) selectByValue(v string) {
-	if v == "" {
-		return
-	}
-	for i, it := range m.list.Items() {
-		if li, ok := it.(item); ok && li.value == v {
-			m.list.Select(i)
-			return
-		}
-	}
 }
 
 func (m *model) loadTools() {
@@ -296,10 +302,63 @@ func (m *model) loadTools() {
 		}
 	}
 	m.list.SetItems(items)
+	items = append(items, item{value: sepSentinel},
+		item{title: "Model Library", desc: "local models and context windows", value: libSentinel})
+	m.list.SetItems(items)
 	m.list.Select(selectedIndex)
 	m.list.Title = "Charon — select a tool"
 	m.setFooterKeys(keyOpen, keyQuit)
 	m.setDelegate(themedDelegate()) // two-line rows show each tool's status
+}
+
+func (m *model) loadModels() {
+	var items []list.Item
+	models, _ := m.cat.Models()
+	providerRows, _ := m.cat.Providers()
+	providers := map[string]string{}
+	for _, p := range providerRows {
+		providers[p.ID] = p.BaseURL
+	}
+	for _, stored := range models {
+		window := "context unknown"
+		if stored.ContextWindow > 0 {
+			window = fmt.Sprintf("context %d", stored.ContextWindow)
+		}
+		source := "unknown"
+		if stored.ContextWindowSource == catalog.WindowManual || stored.ContextWindowSource == catalog.WindowBuiltin {
+			source = string(stored.ContextWindowSource)
+		}
+		items = append(items, item{
+			title: stored.Slug,
+			desc:  fmt.Sprintf("%s · %s · %s", providers[stored.ProviderID], window, source),
+			value: stored.ID,
+		})
+	}
+	if len(models) == 0 {
+		items = append(items, item{title: "No models yet", desc: "add one without fetching a remote list", value: sepSentinel})
+	}
+	items = append(items, item{title: "＋ Add model…", desc: "endpoint, slug, context window", value: addSentinel})
+	m.list.SetItems(items)
+	m.list.Select(0)
+	m.list.Title = "Model Library — local"
+	m.setFooterKeys(keyOpen, keyEdit, keyDelete, keyBack)
+	m.setDelegate(themedDelegate())
+}
+
+func (m *model) editModelWindowByID(id string) error {
+	stored, err := m.cat.Model(id)
+	if err != nil {
+		return err
+	}
+	m.editingModel = stored
+	if p, err := m.cat.Provider(stored.ProviderID); err == nil {
+		m.modelEditEndpoint = p.BaseURL
+	}
+	m.startInput("context window in tokens (empty = unknown)", false)
+	if stored.ContextWindow > 0 {
+		m.input.SetValue(fmt.Sprint(stored.ContextWindow))
+	}
+	return nil
 }
 
 // loadCopyTools shows every other tool that can receive the pending binding.
@@ -483,18 +542,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == viewPickModel {
 			return m.updatePickModel(msg)
 		}
+		if m.view == viewReviewModels {
+			return m.updateReviewModels(msg)
+		}
 		switch msg.String() {
 		case "esc":
 			return m.onEsc()
 		case "q":
-			if m.view == viewTools || m.view == viewProfiles {
+			if m.view == viewTools || m.view == viewProfiles || m.view == viewModels {
 				return m.onEsc()
 			}
 		case "enter":
 			return m.onEnter()
 		case "a":
 			if m.view == viewProfiles {
-				m.wiz = wizard{}
+				m.wiz = wizard{windows: map[string]int{}}
 				m.view = viewEditForm
 				m.clearStatus()
 				m.loadEditForm()
@@ -510,6 +572,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.view == viewProfiles && m.tool.ApplyAuth != nil {
 				return m.onEditKey()
+			}
+			if m.view == viewModels {
+				if it, ok := m.list.SelectedItem().(item); ok && !isSentinel(it.value) {
+					m.view = viewModelWindow
+					if err := m.editModelWindowByID(it.value); err != nil {
+						m.setStatus(statusErr, err.Error())
+						m.view = viewModels
+						m.loadModels()
+						return m, nil
+					}
+					return m, textinput.Blink
+				}
 			}
 		case "c":
 			if m.view == viewProfiles {
@@ -531,6 +605,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "d":
 			if m.view == viewProfiles {
 				return m.onDeleteKey()
+			}
+			if m.view == viewModels {
+				if it, ok := m.list.SelectedItem().(item); ok && !isSentinel(it.value) {
+					if err := m.cat.RemoveModel(it.value); err != nil {
+						m.setStatus(statusErr, err.Error())
+					} else {
+						m.setStatus(statusOK, "Deleted "+it.title)
+					}
+					m.loadModels()
+				}
+				return m, nil
 			}
 		}
 	}
@@ -567,8 +652,14 @@ func (m model) onEditKey() (tea.Model, tea.Cmd) {
 	}
 	slug, _ := m.cat.ModelSlug(b.ModelID)
 	slugs, _ := m.cat.ModelSlugs(b.Models)
+	windows := make(map[string]int, len(b.Models))
+	for _, id := range b.Models {
+		if m, err := m.cat.Model(id); err == nil {
+			windows[m.Slug] = m.ContextWindow
+		}
+	}
 	m.wiz = wizard{name: it.value, origName: it.value, edit: true,
-		endpoint: p.BaseURL, key: cr.Key, model: slug, models: slugs}
+		endpoint: p.BaseURL, key: cr.Key, model: slug, models: slugs, windows: windows}
 	m.editField = ""
 	m.view = viewEditForm
 	m.clearStatus()
@@ -672,7 +763,7 @@ func (m model) copyBindingToTool(src, toolName string) error {
 		names[i] = row.Name
 	}
 	dst := nextDuplicateName(names, src)
-	_, err = catalog.StoreBinding(m.cat, dstTool, nil, dst, p.BaseURL, cr.Key, slug, slugs, true)
+	_, err = catalog.StoreBinding(m.cat, dstTool, nil, dst, p.BaseURL, cr.Key, slug, slugs, true, nil)
 	return err
 }
 
@@ -729,6 +820,12 @@ func (m model) onEsc() (tea.Model, tea.Cmd) {
 		m.loadTools()
 		m.resize() // banner returns → shrink the list
 		return m, nil
+	case viewModels:
+		m.view = viewTools
+		m.clearStatus()
+		m.loadTools()
+		m.resize()
+		return m, nil
 	case viewCopyTool:
 		m.view = viewProfiles
 		m.clearStatus()
@@ -759,6 +856,13 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 	}
 	switch m.view {
 	case viewTools:
+		if it.value == libSentinel {
+			m.view = viewModels
+			m.clearStatus()
+			m.loadModels()
+			m.resize()
+			return m, nil
+		}
 		t := m.findTool(it.value)
 		if t == nil || t.Detected == nil || !t.Detected() {
 			m.setStatus(statusInfo, it.title+" isn't installed yet — see the README to set it up")
@@ -779,6 +883,24 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 		m.setStatus(statusOK, "Copied "+m.copySource+" to "+it.title)
 		m.loadProfiles(m.copySource)
 		return m, nil
+
+	case viewModels:
+		if it.value == addSentinel {
+			m.editingModel = catalog.Model{}
+			m.modelEditEndpoint = ""
+			m.view = viewModelEndpoint
+			m.clearStatus()
+			m.startInput("endpoint URL, e.g. https://openrouter.ai/api/v1", false)
+			return m, textinput.Blink
+		}
+		m.view = viewModelWindow
+		if err := m.editModelWindowByID(it.value); err != nil {
+			m.setStatus(statusErr, err.Error())
+			m.view = viewModels
+			m.loadModels()
+			return m, nil
+		}
+		return m, textinput.Blink
 
 	case viewProfiles:
 		if it.value == addSentinel {
@@ -809,6 +931,111 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	}
+	return m, nil
+}
+
+func (m model) updateReviewModels(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyCtrlC:
+		return m, tea.Quit
+	case tea.KeyUp:
+		if m.reviewCursor > 0 {
+			m.reviewCursor--
+		}
+		return m, nil
+	case tea.KeyDown:
+		if m.reviewCursor < len(m.wiz.models)-1 {
+			m.reviewCursor++
+		}
+		return m, nil
+	case tea.KeyEsc:
+		if m.reviewSource == viewPickModel {
+			m.view = viewPickModel
+			m.clearStatus()
+			m.renderModels()
+			return m, nil
+		}
+		m.view = viewAddCustomModel
+		m.clearStatus()
+		m.startInput("Type model IDs separated by commas, optionally with context (e.g. glm-5:1m, kimi-k3, custom:200k)", false)
+		m.input.SetValue(strings.Join(m.wiz.models, ", "))
+		return m, textinput.Blink
+	case tea.KeyEnter:
+		if len(m.wiz.models) == 0 {
+			m.setStatus(statusErr, "at least one model is required")
+			return m, nil
+		}
+		m.wiz.model = m.wiz.models[0]
+		if m.fromForm || m.wiz.edit {
+			m.fromForm = false
+			m.editField = fieldModel
+			m.view = viewEditForm
+			focusPos := focusManual
+			if m.reviewSource == viewPickModel {
+				focusPos = focusFetch
+			}
+			m.loadEditFormAt(focusPos)
+			return m, nil
+		}
+		m.view = viewAddName
+		m.startInput("binding name (e.g. openrouter-fast)", false)
+		return m, textinput.Blink
+	case tea.KeyRunes:
+		if len(msg.Runes) == 1 {
+			switch msg.Runes[0] {
+			case 'k', 'K':
+				if m.reviewCursor > 0 {
+					m.reviewCursor--
+				}
+				return m, nil
+			case 'j', 'J':
+				if m.reviewCursor < len(m.wiz.models)-1 {
+					m.reviewCursor++
+				}
+				return m, nil
+			case 'w', 'W', 'e', 'E':
+				if len(m.wiz.models) == 0 {
+					return m, nil
+				}
+				if m.reviewCursor >= len(m.wiz.models) {
+					m.reviewCursor = 0
+				}
+				target := m.wiz.models[m.reviewCursor]
+				m.editTarget = target
+				m.editField = ""
+				m.fromReview = true
+				m.view = viewEditField
+				m.startInput("context window in tokens (e.g. 1m, 200k, 1048576, empty=unknown)", false)
+				if win, ok := m.wiz.windows[target]; ok && win > 0 {
+					m.input.SetValue(fmt.Sprint(win))
+				} else {
+					m.input.SetValue("")
+				}
+				return m, textinput.Blink
+			case 'd', 'D':
+				if len(m.wiz.models) <= 1 {
+					m.setStatus(statusErr, "at least one model is required")
+					return m, nil
+				}
+				if m.reviewCursor >= len(m.wiz.models) {
+					m.reviewCursor = 0
+				}
+				removed := m.wiz.models[m.reviewCursor]
+				var kept []string
+				for i, s := range m.wiz.models {
+					if i != m.reviewCursor {
+						kept = append(kept, s)
+					}
+				}
+				m.wiz.models = kept
+				if m.reviewCursor >= len(m.wiz.models) {
+					m.reviewCursor = len(m.wiz.models) - 1
+				}
+				m.setStatus(statusOK, "removed "+removed)
+				return m, nil
+			}
+		}
 	}
 	return m, nil
 }

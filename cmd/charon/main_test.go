@@ -251,6 +251,54 @@ func TestRunEditModelsPromotesFirstItemWhenOldDefaultIsRemoved(t *testing.T) {
 	}
 }
 
+func TestRunSetContextUpdatesModelWindow(t *testing.T) {
+	home := sandbox(t)
+	seedClaude(t, home)
+	if err := run([]string{"add", "claude", "--name", "gw", "--key", "sk-gw-123456789",
+		"--endpoint", "https://gateway.example/v1", "--models", "kimi-k2,glm-4.6"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := run([]string{"set-context", "claude", "gw", "kimi-k2", "256000"}); err != nil {
+		t.Fatalf("set-context: %v", err)
+	}
+
+	c := openCatalog(t)
+	b, found, err := c.BindingByName("claude", "gw")
+	if err != nil || !found {
+		t.Fatalf("binding: found=%v err=%v", found, err)
+	}
+	m, err := c.Model(b.ModelID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.ContextWindow != 256000 || m.ContextWindowSource != catalog.WindowManual {
+		t.Fatalf("model window = %+v, want manual 256000", m)
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s struct {
+		Env map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] != "256000" {
+		t.Fatalf("active Claude config does not carry the model window: %s", data)
+	}
+	if err := run([]string{"set-context", "claude", "gw", "kimi-k2", "unknown"}); err != nil {
+		t.Fatalf("clear set-context: %v", err)
+	}
+	m, err = c.Model(b.ModelID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.ContextWindow != 0 || m.ContextWindowSource != "" {
+		t.Fatalf("cleared model window = %+v", m)
+	}
+}
+
 func TestRunStatusAndVersion(t *testing.T) {
 	home := sandbox(t)
 	seedCodex(t, home)

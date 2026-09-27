@@ -76,17 +76,21 @@ func newOpenCode() *Tool {
 				// switch between them without re-adding the binding. Falls back to the
 				// previously-registered list, then just modelSlug, when the caller has no
 				// fetched list (e.g. the CLI --model flag or an edit of another field).
-				ids := a.AllModels
-				if len(ids) == 0 {
-					ids = existingModels
+				specs := a.Models
+				if specs == nil {
+					specs = opencodeSpecsFromIDs(existingModels)
 				}
-				if len(ids) == 0 {
-					ids = []string{modelSlug}
+				if specs == nil {
+					specs = []ModelSpec{{Slug: modelSlug}}
 				}
-				modelMap := make(map[string]any, len(ids))
-				for _, id := range ids {
-					cleanID := strings.TrimPrefix(strings.TrimSpace(id), "charon/")
-					modelMap[cleanID] = map[string]any{"name": cleanID}
+				modelMap := make(map[string]any, len(specs))
+				for _, spec := range specs {
+					cleanID := strings.TrimPrefix(strings.TrimSpace(spec.Slug), "charon/")
+					entry := map[string]any{"name": cleanID}
+					if w := spec.ContextWindow; w > 0 {
+						entry["limit"] = map[string]any{"context": w}
+					}
+					modelMap[cleanID] = entry
 				}
 				entry["models"] = modelMap
 				cfg["model"] = "charon/" + modelSlug
@@ -237,4 +241,17 @@ func newOpenCode() *Tool {
 			return info.withDefaults("(provider default)"), nil
 		},
 	}
+}
+
+func opencodeSpecsFromIDs(ids []string) []ModelSpec {
+	if ids == nil {
+		return nil
+	}
+	specs := make([]ModelSpec, 0, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			specs = append(specs, ModelSpec{Slug: id})
+		}
+	}
+	return specs
 }

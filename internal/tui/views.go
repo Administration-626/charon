@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"charon/internal/catalog"
+	"charon/internal/models"
 	"charon/internal/secret"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -92,16 +94,27 @@ func (m model) stepHelp() []key.Binding {
 		return []key.Binding{keyDuplicate, keyCancel}
 	case viewAddCustomModel:
 		return []key.Binding{keyRegister, keyEsc}
+	case viewReviewModels:
+		return []key.Binding{keyConfirmReview, keyEditContext, keyDeleteRow, keyMove, keyEsc}
 	}
 	return []key.Binding{keyContinue, keyEsc}
 }
 
 func (m model) View() string {
 	switch m.view {
+	case viewReviewModels:
+		return m.renderReviewTable()
 	case viewFetching:
 		return m.withFooter(m.wizardHeader() +
 			promptStyle.Render(m.spinner.View()+m.loadingMsg) +
 			"\n\n" + hintStyle.Render("fetching models from "+m.wiz.endpoint))
+	case viewModelEndpoint, viewModelSlug, viewModelWindow:
+		body := "\n" + titleStyle.Render("Model Library — local") + "\n\n" +
+			promptStyle.Render(m.prompt()) + "\n\n  " + m.input.View()
+		if m.view == viewModelEndpoint && m.editingModel.ID != "" {
+			body += "\n\n" + hintStyle.Render("Endpoint: "+m.modelEditEndpoint)
+		}
+		return m.withFooter(body, m.stepHelp()...)
 	case viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField, viewAddCustomModel:
 		body := m.wizardHeader() +
 			promptStyle.Render(m.prompt()) +
@@ -187,7 +200,24 @@ func (m model) wizardHeader() string {
 }
 
 func (m model) prompt() string {
+	switch m.view {
+	case viewModelEndpoint:
+		if m.editingModel.ID != "" {
+			return "Edit endpoint URL for " + m.editingModel.Slug + ":"
+		}
+		return "Model Library — endpoint URL:"
+	case viewModelSlug:
+		return "Model Library — model slug:"
+	case viewModelWindow:
+		if m.editingModel.ID != "" {
+			return "Edit context window for " + m.editingModel.Slug + " (empty = unknown):"
+		}
+		return "Model Library — context window (empty = unknown):"
+	}
 	if m.view == viewEditField {
+		if m.editTarget != "" {
+			return "Edit context window for " + m.editTarget + " (empty = unknown):"
+		}
 		switch m.editField {
 		case fieldName:
 			return "Edit name:"
@@ -208,7 +238,7 @@ func (m model) prompt() string {
 	case viewAddName:
 		return "Name this binding (e.g. work, openrouter-fast):"
 	case viewAddCustomModel:
-		return "Enter model IDs — comma-separated registers them all (first is the default):"
+		return "Enter model IDs — comma-separated (e.g. kimi-k3:1m, z-ai/glm-5.3, custom:200k):"
 	case viewDupName:
 		return "Name the duplicate of " + m.dupSource + ":"
 	default:
@@ -233,4 +263,79 @@ func (m model) confirmDialog() string {
 
 	dialog := dialogStyle.Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func formatTokens(n int) string {
+	if n <= 0 {
+		return "unknown"
+	}
+	s := fmt.Sprint(n)
+	var parts []string
+	for len(s) > 3 {
+		parts = append([]string{s[len(s)-3:]}, parts...)
+		s = s[:len(s)-3]
+	}
+	parts = append([]string{s}, parts...)
+	return strings.Join(parts, ",")
+}
+
+func (m model) renderReviewTable() string {
+	header := m.wizardHeader()
+	sub := promptStyle.Render("Review models to register:") + "\n\n"
+
+	maxSlugLen := 18
+	for _, s := range m.wiz.models {
+		if len(s) > maxSlugLen {
+			maxSlugLen = len(s)
+		}
+	}
+	if maxSlugLen > 40 {
+		maxSlugLen = 40
+	}
+
+	windowSources := m.modelWindowSources()
+
+	hdrRow := fmt.Sprintf("    %-3s %-*s  %-14s  %s", "#", maxSlugLen, "Model ID", "Context Window", "Source")
+	divider := "    " + strings.Repeat("─", maxSlugLen+32)
+	lines := []string{hintStyle.Render(hdrRow), hintStyle.Render(divider)}
+
+	for i, slug := range m.wiz.models {
+		win := m.wiz.windows[slug]
+		winStr := formatTokens(win)
+		src := windowSources[slug]
+
+		sourceTag := "[unknown]"
+		switch src {
+		case catalog.WindowManual:
+			sourceTag = "[manual]"
+		case catalog.WindowBuiltin:
+			if models.IsKnownBuiltin(slug) {
+				sourceTag = "[builtin]"
+			} else {
+				sourceTag = "[fallback: 500K] ✎"
+			}
+		}
+
+		cursorMark := "  "
+		numStr := fmt.Sprintf("%d.", i+1)
+		displaySlug := slug
+		if len(displaySlug) > maxSlugLen {
+			displaySlug = displaySlug[:maxSlugLen-1] + "…"
+		}
+
+		if i == m.reviewCursor {
+			cursorMark = "❯ "
+			row := fmt.Sprintf("%s%-3s %-*s  %-14s  %s", cursorMark, numStr, maxSlugLen, displaySlug, winStr, sourceTag)
+			lines = append(lines, promptStyle.Render(row))
+		} else {
+			row := fmt.Sprintf("%s%-3s %-*s  %-14s  %s", cursorMark, numStr, maxSlugLen, displaySlug, winStr, hintStyle.Render(sourceTag))
+			lines = append(lines, row)
+		}
+	}
+
+	lines = append(lines, hintStyle.Render(divider))
+	lines = append(lines, hintStyle.Render("Press w/e to edit context, d to remove row, enter to confirm."))
+
+	body := header + sub + strings.Join(lines, "\n")
+	return m.withFooter(body, keyConfirmReview, keyEditContext, keyDeleteRow, keyMove, keyEsc)
 }

@@ -6,16 +6,12 @@ import (
 	"charon/internal/tools"
 )
 
-// project renders a binding into its tool's live config: endpoint and key come
-// from the credential's provider, the default model and the picker list from the
-// models the binding references. It reuses the tool's ApplyAuth, which overwrites
-// only the charon-owned keys and leaves everything else in the file alone.
-//
-// The binding owns the complete picker list, including a single-model list.
-// Passing it on every projection prevents models from the previously active
-// endpoint leaking into this binding's picker.
 // ProjectIfActive re-renders the latest stored version of id only when its tool
 // still points to it as active. The check and write share the same lock as switch.
+// It renders a binding into its tool's live config: endpoint and key come from the
+// credential's provider, the default model and the picker list from the models the
+// binding references. It reuses the tool's ApplyAuth, which overwrites only the
+// charon-owned keys and leaves everything else in the file alone.
 func (c *Catalog) ProjectIfActive(id string) (bool, error) {
 	if err := c.lock(); err != nil {
 		return false, err
@@ -61,11 +57,15 @@ func (c *Catalog) project(b Binding) error {
 		return err
 	}
 	spec := tools.AuthSpec{Endpoint: p.BaseURL, Key: cr.Key, Model: slug}
-	slugs, err := c.ModelSlugs(b.Models)
-	if err != nil {
-		return err
+	specs := make([]tools.ModelSpec, 0, len(b.Models))
+	for _, id := range b.Models {
+		m, err := c.Model(id)
+		if err != nil {
+			return err
+		}
+		specs = append(specs, tools.ModelSpec{Slug: m.Slug, ContextWindow: m.ContextWindow})
 	}
-	spec.AllModels = slugs
+	spec.Models = specs
 	return t.ApplyAuth(spec)
 }
 

@@ -111,8 +111,13 @@ func TestInteractiveFlowVisualAudit(t *testing.T) {
 	m.list.Select(indexOfValue(m.list.Items(), "claude-3-5-sonnet"))
 	next, _ = m.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
+	if m.view != viewReviewModels {
+		t.Fatalf("view = %v, want viewReviewModels after Enter on model row", m.view)
+	}
+	next, _ = m.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
 	if m.view != viewEditForm {
-		t.Fatalf("view = %v, want viewEditForm after Enter on a model row", m.view)
+		t.Fatalf("view = %v, want viewEditForm after confirming review", m.view)
 	}
 	if m.wiz.model != "claude-3-5-sonnet" {
 		t.Fatalf("model = %q, want the first checked id", m.wiz.model)

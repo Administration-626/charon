@@ -62,25 +62,18 @@ func piEscapeValue(s string) string {
 	return s
 }
 
-// piContextWindow is the window pi records for a model. Pi has no catalog of its
-// own for a custom provider, so every model gets the 1M that current frontier
-// models advertise; one with a smaller real window still stops at its own limit.
-func piContextWindow(model string) int {
-	return 1_000_000
-}
-
 // piBuildModels turns a list of model ids into pi model entries.
-func piBuildModels(ids []string) []piModel {
-	models := make([]piModel, 0, len(ids))
-	for _, id := range ids {
-		if id == "" {
+func piBuildModels(specs []ModelSpec) []piModel {
+	models := make([]piModel, 0, len(specs))
+	for _, spec := range specs {
+		if spec.Slug == "" {
 			continue
 		}
 		models = append(models, piModel{
-			ID:            id,
-			Name:          id,
+			ID:            spec.Slug,
+			Name:          spec.Slug,
 			Input:         []string{"text", "image"},
-			ContextWindow: piContextWindow(id),
+			ContextWindow: spec.ContextWindow,
 			MaxTokens:     8192,
 		})
 	}
@@ -148,12 +141,12 @@ func newPi() *Tool {
 				}
 			}
 			modelSlug := strings.TrimSpace(a.Model)
-			ids := a.AllModels
-			if len(ids) == 0 {
-				ids = existingModels
+			specs := a.Models
+			if specs == nil {
+				specs = piSpecsFromIDs(existingModels)
 			}
-			if len(ids) == 0 && modelSlug != "" {
-				ids = []string{modelSlug}
+			if specs == nil && modelSlug != "" {
+				specs = []ModelSpec{{Slug: modelSlug}}
 			}
 
 			cfg := piProviderConfig{
@@ -161,7 +154,7 @@ func newPi() *Tool {
 				BaseURL: a.Endpoint,
 				APIKey:  piEscapeValue(a.Key),
 				API:     "openai-completions",
-				Models:  piBuildModels(ids),
+				Models:  piBuildModels(specs),
 			}
 			content, err := piExtensionContent(cfg)
 			if err != nil {
@@ -170,7 +163,7 @@ func newPi() *Tool {
 			if err := os.MkdirAll(filepath.Dir(extensionPath), 0o700); err != nil {
 				return err
 			}
-			if err := artifact.AtomicWrite(extensionPath, []byte(content), 0o600); err != nil {
+			if err := artifact.AtomicWrite(extensionPath, content, 0o600); err != nil {
 				return fmt.Errorf("write charon.ts: %w", err)
 			}
 
@@ -232,4 +225,17 @@ func newPi() *Tool {
 			return info.withDefaults("(provider default)"), nil
 		},
 	}
+}
+
+func piSpecsFromIDs(ids []string) []ModelSpec {
+	if ids == nil {
+		return nil
+	}
+	specs := make([]ModelSpec, 0, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			specs = append(specs, ModelSpec{Slug: id})
+		}
+	}
+	return specs
 }

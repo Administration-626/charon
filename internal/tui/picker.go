@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"charon/internal/catalog"
 	"charon/internal/models"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -20,7 +21,7 @@ const minLoadDuration = 1 * time.Second
 
 // fetchedMsg carries the async result of a models.Fetch call.
 type fetchedMsg struct {
-	list []string
+	list []models.Info
 	err  error
 }
 
@@ -36,7 +37,7 @@ func fetchModelsCmd(provider, endpoint, key string) tea.Cmd {
 
 // probeModels asks the endpoint for its model list in the tool's historical dialect
 // first, then the other. Which dialect answered is not stored.
-func probeModels(provider, endpoint, key string) ([]string, error) {
+func probeModels(provider, endpoint, key string) ([]models.Info, error) {
 	first := models.Provider(provider)
 	list, err := models.Fetch(first, endpoint, key)
 	if err == nil {
@@ -91,7 +92,7 @@ func (m model) applyFetched(msg fetchedMsg) (tea.Model, tea.Cmd) {
 	}
 	m.view = viewPickModel
 	m.setStatus(statusInfo, fmt.Sprintf("%d models found", len(msg.list)))
-	m.showModels(msg.list)
+	m.showModelInfos(msg.list)
 	return m, nil
 }
 
@@ -100,7 +101,7 @@ func (m model) applyFetched(msg fetchedMsg) (tea.Model, tea.Cmd) {
 // picker's m key and from a failed fetch.
 func (m model) startManualModels() (tea.Model, tea.Cmd) {
 	m.view = viewAddCustomModel
-	m.startInput("model ids, e.g. gpt-4o, kimi-k2, deepseek-v3", false)
+	m.startInput("e.g. kimi-k3:1m, z-ai/glm-5.3, custom:200k", false)
 	if prefill := strings.Join(m.wiz.modelIDs(), ", "); prefill != "" {
 		m.input.SetValue(prefill)
 	}
@@ -123,6 +124,9 @@ func filterModels(all []string, query string) []string {
 
 // showModels installs a freshly fetched model list and resets the search query.
 func (m *model) showModels(ids []string) {
+	if m.wiz.windows == nil {
+		m.wiz.windows = map[string]int{}
+	}
 	m.allModels = ids
 	m.modelFilter = ""
 	// A re-fetch from a different endpoint (or a refreshed catalog) can drop ids that
@@ -145,6 +149,70 @@ func (m *model) showModels(ids []string) {
 	m.renderModels()
 }
 
+func (m *model) showModelInfos(infos []models.Info) {
+	m.storeFetchedModels(infos)
+	m.showLocalModels()
+}
+
+func (m *model) storeFetchedModels(infos []models.Info) {
+	if m.cat == nil {
+		return
+	}
+	endpoint := m.tool.ResolveEndpoint(m.wiz.endpoint)
+	p, found, err := m.cat.ProviderByURL(endpoint)
+	if err != nil {
+		m.setStatus(statusErr, err.Error())
+		return
+	}
+	if !found {
+		p, err = m.cat.PutProvider(endpoint)
+		if err != nil {
+			m.setStatus(statusErr, err.Error())
+			return
+		}
+	}
+	for _, info := range infos {
+		if _, err := m.cat.PutModel(p.ID, info.ID); err != nil {
+			m.setStatus(statusErr, err.Error())
+			return
+		}
+	}
+}
+
+func (m *model) showLocalModels() {
+	m.allModels = nil
+	m.wiz.windows = nil
+	seen := make(map[string]bool)
+	if m.cat != nil {
+		if p, found, err := m.cat.ProviderByURL(m.tool.ResolveEndpoint(m.wiz.endpoint)); err == nil && found {
+			if ms, err := m.cat.ModelsForProvider(p.ID); err == nil {
+				for _, stored := range ms {
+					m.allModels = append(m.allModels, stored.Slug)
+					seen[stored.Slug] = true
+					if stored.ContextWindow > 0 {
+						if m.wiz.windows == nil {
+							m.wiz.windows = map[string]int{}
+						}
+						m.wiz.windows[stored.Slug] = stored.ContextWindow
+					}
+				}
+			}
+		}
+	}
+	var unlisted []string
+	for _, id := range m.wiz.models {
+		if !seen[id] {
+			unlisted = append(unlisted, id)
+			seen[id] = true
+		}
+	}
+	if len(unlisted) > 0 {
+		m.allModels = append(unlisted, m.allModels...)
+	}
+	m.modelFilter = ""
+	m.renderModels()
+}
+
 // singleListTool reports whether the picker is single-select: the tool has no
 // model menu (Codex), so checking a new id replaces the previous one.
 func (m *model) singleListTool() bool {
@@ -158,14 +226,26 @@ func (m *model) toggleModel(id string) {
 	for i, sel := range m.wiz.models {
 		if sel == id {
 			m.wiz.models = append(m.wiz.models[:i:i], m.wiz.models[i+1:]...)
+			if m.wiz.model == id {
+				if len(m.wiz.models) > 0 {
+					m.wiz.model = m.wiz.models[0]
+					m.setStatus(statusInfo, fmt.Sprintf("default model switched to %s", m.wiz.model))
+				} else {
+					m.wiz.model = ""
+				}
+			}
 			return
 		}
 	}
 	if m.singleListTool() {
 		m.wiz.models = []string{id}
+		m.wiz.model = id
 		return
 	}
 	m.wiz.models = append(m.wiz.models[:len(m.wiz.models):len(m.wiz.models)], id)
+	if m.wiz.model == "" {
+		m.wiz.model = id
+	}
 }
 
 // toggleAllModels selects all models when some or none are selected, or clears the
@@ -244,11 +324,28 @@ func indexOfValue(items []list.Item, value string) int {
 
 // modelRowTitle prefixes a model row with a two-state mark: "[✓]" when the id is
 // in the curated list, "[ ]" otherwise. The marks are the same width so ids line up.
-func modelRowTitle(id string, checked bool) string {
-	if checked {
-		return "[✓] " + id
+func modelRowTitle(id string, checked bool, window int) string {
+	windowText := "context unknown"
+	if window > 0 {
+		windowText = fmt.Sprintf("context %d", window)
 	}
-	return "[ ] " + id
+	if checked {
+		return "[✓] " + id + " · " + windowText
+	}
+	return "[ ] " + id + " · " + windowText
+}
+
+func modelRowDescription(id string, source catalog.WindowSource) string {
+	if source == catalog.WindowManual {
+		return "manual"
+	}
+	if source == catalog.WindowBuiltin {
+		if !models.IsKnownBuiltin(id) {
+			return "builtin (default 500K fallback)"
+		}
+		return "builtin"
+	}
+	return "unknown"
 }
 
 // renderModels rebuilds the picker rows for the current query (echoed in the title).
@@ -256,9 +353,11 @@ func modelRowTitle(id string, checked bool) string {
 func (m *model) renderModels() {
 	ids := filterModels(m.allModels, m.modelFilter)
 	items := make([]list.Item, 0, len(ids))
+	windowSources := m.modelWindowSources()
 	for _, id := range ids {
 		checked := m.modelSelected(id)
-		items = append(items, item{title: modelRowTitle(id, checked), value: id, active: checked})
+		items = append(items, item{title: modelRowTitle(id, checked, m.wiz.windows[id]),
+			desc: modelRowDescription(id, windowSources[id]), value: id, active: checked})
 	}
 	m.list.SetItems(items)
 	// No search: land on the row the current state points at; while searching, the best
@@ -275,10 +374,6 @@ func (m *model) renderModels() {
 		title += " · single model only"
 	case len(m.allModels) == 0:
 	case n == 0 && m.modelFilter == "":
-		// An empty checklist is not an empty registration: it means the whole fetched
-		// list goes in, and the title is where that rule stays visible. While a search
-		// is running the match count matters more, so the rule waits for the query to
-		// clear rather than crowding the query out of the title bar.
 		title += fmt.Sprintf(" · none checked — all %d will be registered", len(m.allModels))
 	default:
 		title += fmt.Sprintf(" · %d of %d selected", n, len(m.allModels))
@@ -287,9 +382,7 @@ func (m *model) renderModels() {
 		title += fmt.Sprintf(" · search: %s (%d matches)", m.modelFilter, len(ids))
 	}
 	m.list.Title = title
-	// The checked count lives in the title, so the legend carries keys only. Enter
-	// finishes a checklist; a tool that holds a single model picks the highlighted one.
-	// esc stands second so a narrow terminal truncates the tail, never the way out.
+
 	keys := []key.Binding{keyFinish}
 	if !multi {
 		keys = []key.Binding{keyChoose}
@@ -299,12 +392,32 @@ func (m *model) renderModels() {
 	} else {
 		keys = append(keys, keyEsc)
 	}
+	keys = append(keys, keyWindow)
 	if multi {
 		keys = append(keys, keyToggle, keyToggleAll, keyManual)
 	}
 	keys = append(keys, keyFilter, keyRefresh)
 	m.setFooterKeys(keys...)
 	m.setDelegate(themedCompactDelegate())
+}
+
+func (m *model) modelWindowSources() map[string]catalog.WindowSource {
+	sources := map[string]catalog.WindowSource{}
+	if m.cat == nil {
+		return sources
+	}
+	p, found, err := m.cat.ProviderByURL(m.tool.ResolveEndpoint(m.wiz.endpoint))
+	if err != nil || !found {
+		return sources
+	}
+	ms, err := m.cat.ModelsForProvider(p.ID)
+	if err != nil {
+		return sources
+	}
+	for _, stored := range ms {
+		sources[stored.Slug] = stored.ContextWindowSource
+	}
+	return sources
 }
 
 // updatePickModel drives the picker: printable keys search, space/x checks the
@@ -341,6 +454,8 @@ func (m model) updatePickModel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// underway they stay part of the filter, so ids containing those letters match.
 		if m.modelFilter == "" && len(msg.Runes) == 1 {
 			switch msg.Runes[0] {
+			case 'w', 'W':
+				return m.editModelWindow()
 			case 'm', 'M':
 				m.clearStatus()
 				return m.startManualModels()
@@ -399,29 +514,52 @@ func (m model) toggleHighlighted() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// finishPicker checks the highlighted model when it is not already checked, sets the
-// binding's initial model to the first checked id, and leaves the picker.
-// Back to the form when this picker was opened from it or an edit is in progress;
-// otherwise the new binding still needs a name.
+// finishPicker validates the selection and advances to the review table.
+// In single-select mode, the highlighted row is chosen. In multi-select mode,
+// at least one model must be checked; zero checked models is blocked with an error.
 func (m model) finishPicker() (tea.Model, tea.Cmd) {
 	if it, ok := m.list.SelectedItem().(item); ok && !isSentinel(it.value) {
 		if m.singleListTool() {
 			m.wiz.models = []string{it.value}
-		} else if !m.modelSelected(it.value) {
-			m.toggleModel(it.value)
+			m.wiz.model = it.value
 		}
 	}
-	if len(m.wiz.models) > 0 {
-		m.wiz.model = m.wiz.models[0]
-	}
-	if m.fromForm || m.wiz.edit {
-		m.fromForm = false
-		m.editField = fieldModel
-		m.view = viewEditForm
-		m.loadEditFormAt(focusFetch)
+	if len(m.wiz.models) == 0 {
+		m.setStatus(statusErr, "at least 1 model must be selected — press space to check models")
 		return m, nil
 	}
-	m.view = viewAddName
-	m.startInput("binding name (e.g. openrouter-fast)", false)
+	if m.wiz.model == "" || !m.modelSelected(m.wiz.model) {
+		m.wiz.model = m.wiz.models[0]
+	}
+	m.reviewSource = viewPickModel
+	m.view = viewReviewModels
+	m.reviewCursor = 0
+	m.clearStatus()
+	return m, nil
+}
+
+// editModelWindow opens the one-field editor for the highlighted model. Empty saves
+// unknown (0); only positive whole token counts are accepted.
+func (m model) editModelWindow() (tea.Model, tea.Cmd) {
+	it, ok := m.list.SelectedItem().(item)
+	if !ok || isSentinel(it.value) {
+		return m, nil
+	}
+	m.editTarget = it.value
+	m.editField = ""
+	m.view = viewEditField
+	m.startInput("context window in tokens (empty = unknown)", false)
+	m.input.SetValue("")
+	if m.cat != nil {
+		if p, found, err := m.cat.ProviderByURL(m.tool.ResolveEndpoint(m.wiz.endpoint)); err == nil && found {
+			if ms, err := m.cat.ModelsForProvider(p.ID); err == nil {
+				for _, stored := range ms {
+					if stored.Slug == it.value && stored.ContextWindow > 0 {
+						m.input.SetValue(fmt.Sprint(stored.ContextWindow))
+					}
+				}
+			}
+		}
+	}
 	return m, textinput.Blink
 }

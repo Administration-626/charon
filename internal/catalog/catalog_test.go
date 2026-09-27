@@ -102,6 +102,159 @@ func TestCredentialAndModelReuse(t *testing.T) {
 	}
 }
 
+func TestPutModelStoresContextWindow(t *testing.T) {
+	c := openTest(t)
+	p, err := c.PutProvider("https://gateway.example/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.PutModel(p.ID, "kimi-k2"); err != nil {
+		t.Fatal(err)
+	}
+	m, err := c.PutModelWithWindow(p.ID, "kimi-k2", 256000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.ContextWindow != 256000 {
+		t.Fatalf("context window = %d, want 256000", m.ContextWindow)
+	}
+	stored, err := c.Model(m.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ContextWindow != 256000 {
+		t.Fatalf("stored context window = %d, want 256000", stored.ContextWindow)
+	}
+	if stored.ContextWindowSource != WindowManual {
+		t.Fatalf("context window source = %q, want manual", stored.ContextWindowSource)
+	}
+	if _, err := c.PutModel(p.ID, "kimi-k2"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err = c.Model(m.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ContextWindow != 256000 || stored.ContextWindowSource != WindowManual {
+		t.Fatalf("subsequent PutModel overwrote manual window: %+v", stored)
+	}
+	if _, err := c.PutModelWithWindow(p.ID, "kimi-k2", 0); err != nil {
+		t.Fatal(err)
+	}
+	stored, err = c.Model(m.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ContextWindow != 0 || stored.ContextWindowSource != "" {
+		t.Fatalf("cleared window must return to unknown: %+v", stored)
+	}
+}
+
+func TestPutModelBuiltinContextWindow(t *testing.T) {
+	c := openTest(t)
+	p, err := c.PutProvider("https://gateway.example/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Zhipu AI variants automatically match builtin table
+	m1, err := c.PutModel(p.ID, "z-ai/glm-5.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m1.ContextWindow != 1_048_576 || m1.ContextWindowSource != WindowBuiltin {
+		t.Fatalf("z-ai/glm-5.3 window = %d (source %q), want 1048576 (builtin)", m1.ContextWindow, m1.ContextWindowSource)
+	}
+
+	m2, err := c.PutModel(p.ID, "zai.glm-5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m2.ContextWindow != 202_752 || m2.ContextWindowSource != WindowBuiltin {
+		t.Fatalf("zai.glm-5 window = %d (source %q), want 202752 (builtin)", m2.ContextWindow, m2.ContextWindowSource)
+	}
+
+	// 2. OpenAI GPT-5.6 Sol matches 1050000
+	m3, err := c.PutModel(p.ID, "openai/gpt-5.6-sol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m3.ContextWindow != 1_050_000 || m3.ContextWindowSource != WindowBuiltin {
+		t.Fatalf("gpt-5.6-sol window = %d, want 1050000", m3.ContextWindow)
+	}
+
+	// 3. Manual override upgrades builtin to manual source
+	m3Updated, err := c.PutModelWithWindow(p.ID, "openai/gpt-5.6-sol", 2_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m3Updated.ContextWindow != 2_000_000 || m3Updated.ContextWindowSource != WindowManual {
+		t.Fatalf("manual override should set manual source, got %+v", m3Updated)
+	}
+
+	// 4. Subsequent PutModel keeps manual window untouched
+	m3Same, err := c.PutModel(p.ID, "openai/gpt-5.6-sol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m3Same.ContextWindow != 2_000_000 || m3Same.ContextWindowSource != WindowManual {
+		t.Fatalf("subsequent PutModel must preserve manual window, got %+v", m3Same)
+	}
+
+	// 5. Unknown model falls back to 500K builtin
+	mUnknown, err := c.PutModel(p.ID, "unrecognized-custom-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mUnknown.ContextWindow != 500_000 || mUnknown.ContextWindowSource != WindowBuiltin {
+		t.Fatalf("unrecognized model must fall back to 500K builtin, got %+v", mUnknown)
+	}
+}
+
+func TestLocalModelLibrary(t *testing.T) {
+	c := openTest(t)
+	pa, _ := seed(t, c, "https://a.example/v1", "sk-a", "glm-4.7")
+	pb, _ := seed(t, c, "https://b.example/v1", "sk-b", "kimi-k2")
+	if _, err := c.PutModelWithWindow(pb.ID, "kimi-k2", 128000); err != nil {
+		t.Fatal(err)
+	}
+
+	models, err := c.Models()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 2 || models[0].Slug != "glm-4.7" || models[1].Slug != "kimi-k2" {
+		t.Fatalf("Models() = %+v", models)
+	}
+	forProvider, err := c.ModelsForProvider(pb.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(forProvider) != 1 || forProvider[0].Slug != "kimi-k2" {
+		t.Fatalf("ModelsForProvider() = %+v", forProvider)
+	}
+
+	if _, err := c.PutCredential(pa.ID, "sk-a"); err != nil {
+		t.Fatal(err)
+	}
+	cr, err := c.PutCredential(pa.ID, "sk-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.AddBinding("claude", "work", cr.ID, "glm-4.7", []string{"glm-4.7"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RemoveModel(models[0].ID); err == nil {
+		t.Fatal("RemoveModel must reject a model referenced by a binding")
+	}
+	if err := c.RemoveModel(models[1].ID); err != nil {
+		t.Fatalf("RemoveModel(unreferenced) = %v", err)
+	}
+	if _, err := c.Model(models[1].ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("removed model lookup = %v, want ErrNotFound", err)
+	}
+}
+
 func TestBindingSameProviderConstraint(t *testing.T) {
 	c := openTest(t)
 	_, cr := seed(t, c, "https://a.example/v1", "sk-a", "model-a")

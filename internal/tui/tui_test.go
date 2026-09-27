@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"charon/internal/catalog"
+	"charon/internal/models"
 	"charon/internal/tools"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -240,6 +241,70 @@ func TestIsSentinel(t *testing.T) {
 	}
 }
 
+func TestModelLibraryIsLocalEntryAndEditor(t *testing.T) {
+	st := openTestCatalog(t, false)
+	m := newModel(st, "test")
+	m.loadTools()
+
+	if got := len(m.list.Items()); got == 0 || m.list.Items()[got-1].(item).value != libSentinel {
+		t.Fatalf("tools list does not end with Model Library entry: %+v", m.list.Items())
+	}
+
+	m.list.Select(len(m.list.Items()) - 1)
+	if next, _ := m.onEnter(); true {
+		m = next.(model)
+	}
+	if m.view != viewModels {
+		t.Fatalf("view = %v, want viewModels", m.view)
+	}
+	if strings.Contains(m.list.Title, "local") == false {
+		t.Fatalf("model library title = %q, want local", m.list.Title)
+	}
+
+	m.view = viewModelEndpoint
+	m.modelEditEndpoint = "https://gateway.example/v1"
+	m.startInput("endpoint", false)
+	m.input.SetValue("https://gateway.example/v1")
+	if next, _ := m.updateInput(tea.KeyMsg{Type: tea.KeyEnter}); true {
+		m = next.(model)
+	}
+	if m.view != viewModelSlug {
+		t.Fatalf("view after endpoint = %v, want viewModelSlug", m.view)
+	}
+	m.input.SetValue("glm-4.7")
+	if next, _ := m.updateInput(tea.KeyMsg{Type: tea.KeyEnter}); true {
+		m = next.(model)
+	}
+	if m.view != viewModelWindow {
+		t.Fatalf("view after slug = %v, want viewModelWindow", m.view)
+	}
+	m.input.SetValue("200000")
+	if next, _ := m.updateInput(tea.KeyMsg{Type: tea.KeyEnter}); true {
+		m = next.(model)
+	}
+	if m.view != viewModels {
+		t.Fatalf("view after window = %v, want viewModels", m.view)
+	}
+
+	models, err := st.Models()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].Slug != "glm-4.7" || models[0].ContextWindow != 200000 || models[0].ContextWindowSource != catalog.WindowManual {
+		t.Fatalf("saved local model = %+v", models)
+	}
+	rows := m.list.Items()
+	if len(rows) == 0 || rows[0].(item).title != "glm-4.7" {
+		t.Fatalf("model library rows = %+v", rows)
+	}
+	if !strings.Contains(m.list.Title, "local") {
+		t.Fatalf("model library title = %q", m.list.Title)
+	}
+	if desc := rows[0].(item).desc; !strings.Contains(desc, "200000") || !strings.Contains(desc, "manual") {
+		t.Fatalf("model library description = %q, want window and source", desc)
+	}
+}
+
 func TestInputView(t *testing.T) {
 	m := model{}
 	for _, v := range []view{viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField, viewAddCustomModel} {
@@ -281,7 +346,7 @@ func TestFindTool(t *testing.T) {
 	}
 }
 
-func TestNewSpinner(t *testing.T) {
+func TestNewSpinner(_ *testing.T) {
 	s := newSpinner()
 	_ = s // spinner is created without panic; structural check is sufficient
 }
@@ -422,7 +487,7 @@ func TestXKeyCopiesBindingToAnotherTool(t *testing.T) {
 	m.tool = m.findTool("claude")
 	m.view = viewProfiles
 
-	if _, err := catalog.StoreBinding(st, m.tool, nil, "work", "https://gateway.example", "sk-test", "kimi-k2", []string{"kimi-k2", "glm-4.6"}, true); err != nil {
+	if _, err := catalog.StoreBinding(st, m.tool, nil, "work", "https://gateway.example", "sk-test", "kimi-k2", []string{"kimi-k2", "glm-4.6"}, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	m.loadProfiles("work")
@@ -596,11 +661,11 @@ func TestSetModelFieldParsesCommaSeparatedIDs(t *testing.T) {
 }
 
 func TestModelRowTitleMarksCheckedRows(t *testing.T) {
-	if got := modelRowTitle("m", true); got != "[✓] m" {
-		t.Errorf("checked modelRowTitle = %q, want %q", got, "[✓] m")
+	if got := modelRowTitle("m", true, 0); got != "[✓] m · context unknown" {
+		t.Errorf("checked modelRowTitle = %q, want %q", got, "[✓] m · context unknown")
 	}
-	if got := modelRowTitle("m", false); got != "[ ] m" {
-		t.Errorf("unchecked modelRowTitle = %q, want %q", got, "[ ] m")
+	if got := modelRowTitle("m", false, 200000); got != "[ ] m · context 200000" {
+		t.Errorf("unchecked modelRowTitle = %q, want %q", got, "[ ] m · context 200000")
 	}
 }
 
@@ -643,8 +708,8 @@ func TestManualEntryRegistersTypedIDs(t *testing.T) {
 	if !ok {
 		t.Fatalf("updateInput returned %T, want model", next)
 	}
-	if got.view != viewEditForm {
-		t.Errorf("view = %v, want viewEditForm (one level back, not a save)", got.view)
+	if got.view != viewReviewModels {
+		t.Errorf("view = %v, want viewReviewModels", got.view)
 	}
 	if got.wiz.model != "glm-4.6" {
 		t.Errorf("default model = %q, want the first typed id", got.wiz.model)
@@ -670,23 +735,97 @@ func TestManualEntryFromFormReturnsToForm(t *testing.T) {
 	if !ok {
 		t.Fatalf("updateInput returned %T, want model", next)
 	}
-	if got.view != viewEditForm {
-		t.Errorf("view = %v, want viewEditForm", got.view)
-	}
-	if got.fromForm {
-		t.Error("fromForm stayed set while the form is showing again")
-	}
-	if got.formFocus != focusManual {
-		t.Errorf("formFocus = %d, want focusManual (the row that opened manual entry)", got.formFocus)
+	if got.view != viewReviewModels {
+		t.Errorf("view = %v, want viewReviewModels", got.view)
 	}
 	if strings.Join(got.wiz.models, ",") != "glm-4.6,kimi-k2" || got.wiz.model != "glm-4.6" {
 		t.Errorf("models = %v, model = %q, want the typed ids with the first as default", got.wiz.models, got.wiz.model)
 	}
-	if v := got.formInputs[focusModel].Value(); v != "glm-4.6" {
-		t.Errorf("form model field = %q, want the first typed id", v)
+	if !strings.Contains(got.View(), "Review models to register:") {
+		t.Errorf("manual models must enter the review table:\n%s", got.View())
 	}
-	if view := got.View(); !strings.Contains(view, "▌ └── [ Type Model IDs Manually ]") {
-		t.Errorf("highlight did not stay on the manual row:\n%s", view)
+
+	// Pressing Enter in review table confirms and returns to form
+	nextForm, _ := got.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
+	gotForm := nextForm.(model)
+	if gotForm.view != viewEditForm {
+		t.Errorf("view = %v, want viewEditForm after confirming review", gotForm.view)
+	}
+}
+
+func TestManualEntryInlineContextSyntax(t *testing.T) {
+	m := pickerModel(t, nil)
+	m.wiz = wizard{name: "work", endpoint: "https://gateway.example/v1", key: "sk-secret"}
+	m.view = viewAddCustomModel
+	m.input.SetValue("moonshotai/kimi-k3:1m, z-ai/glm-5.3, custom-model:200k, other-model")
+
+	next, _ := m.updateInput(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(model)
+
+	if got.view != viewReviewModels {
+		t.Fatalf("view = %v, want viewReviewModels", got.view)
+	}
+	if got.reviewCursor != 0 {
+		t.Errorf("reviewCursor = %d, want 0", got.reviewCursor)
+	}
+
+	// kimi-k3:1m -> manual 1_000_000
+	if got.wiz.windows["moonshotai/kimi-k3"] != 1_000_000 {
+		t.Errorf("kimi-k3 window = %d, want 1000000", got.wiz.windows["moonshotai/kimi-k3"])
+	}
+	// z-ai/glm-5.3 -> builtin 1_048_576
+	if got.wiz.windows["z-ai/glm-5.3"] != 1_048_576 {
+		t.Errorf("z-ai/glm-5.3 window = %d, want 1048576", got.wiz.windows["z-ai/glm-5.3"])
+	}
+	// custom-model:200k -> manual 200_000
+	if got.wiz.windows["custom-model"] != 200_000 {
+		t.Errorf("custom-model window = %d, want 200000", got.wiz.windows["custom-model"])
+	}
+	// other-model -> fallback 500_000
+	if got.wiz.windows["other-model"] != 500_000 {
+		t.Errorf("other-model window = %d, want 500000", got.wiz.windows["other-model"])
+	}
+
+	// View rendering checks
+	viewOut := got.View()
+	if !strings.Contains(viewOut, "Review models to register:") {
+		t.Errorf("view missing header: %s", viewOut)
+	}
+	if !strings.Contains(viewOut, "1,000,000") || !strings.Contains(viewOut, "[manual]") {
+		t.Errorf("view missing manual context: %s", viewOut)
+	}
+	if !strings.Contains(viewOut, "1,048,576") || !strings.Contains(viewOut, "[builtin]") {
+		t.Errorf("view missing builtin context: %s", viewOut)
+	}
+	if !strings.Contains(viewOut, "[fallback: 500K] ✎") {
+		t.Errorf("view missing fallback tag: %s", viewOut)
+	}
+
+	// Pressing d removes the highlighted model (moonshotai/kimi-k3)
+	nextD, _ := got.updateReviewModels(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	afterD := nextD.(model)
+	if len(afterD.wiz.models) != 3 {
+		t.Fatalf("models length after d = %d, want 3", len(afterD.wiz.models))
+	}
+	if afterD.wiz.models[0] != "z-ai/glm-5.3" {
+		t.Errorf("first model after d = %q, want z-ai/glm-5.3", afterD.wiz.models[0])
+	}
+
+	// Pressing w on z-ai/glm-5.3 opens editField
+	nextW, _ := afterD.updateReviewModels(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}})
+	afterW := nextW.(model)
+	if afterW.view != viewEditField || afterW.editTarget != "z-ai/glm-5.3" {
+		t.Fatalf("view = %v, target = %q, want viewEditField for z-ai/glm-5.3", afterW.view, afterW.editTarget)
+	}
+	// Editing value to 2m and pressing Enter
+	afterW.input.SetValue("2m")
+	nextSaved, _ := afterW.updateInput(tea.KeyMsg{Type: tea.KeyEnter})
+	afterSaved := nextSaved.(model)
+	if afterSaved.view != viewReviewModels {
+		t.Fatalf("view after saving context = %v, want viewReviewModels", afterSaved.view)
+	}
+	if afterSaved.wiz.windows["z-ai/glm-5.3"] != 2_000_000 {
+		t.Errorf("z-ai/glm-5.3 window after edit = %d, want 2000000", afterSaved.wiz.windows["z-ai/glm-5.3"])
 	}
 }
 
@@ -700,8 +839,8 @@ func TestFormCursorSurvivesModelSubScreens(t *testing.T) {
 	manual.view = viewAddCustomModel
 	manual.input.SetValue("glm-4.6")
 	next, _ := manual.updateInput(tea.KeyMsg{Type: tea.KeyEnter})
-	if got := next.(model); got.formFocus != focusManual {
-		t.Errorf("manual enter: formFocus = %d, want focusManual", got.formFocus)
+	if got := next.(model); got.view != viewReviewModels {
+		t.Errorf("manual enter: view=%v, want viewReviewModels", got.view)
 	}
 
 	escManual := pickerModel(t, nil)
@@ -713,20 +852,26 @@ func TestFormCursorSurvivesModelSubScreens(t *testing.T) {
 		t.Errorf("manual esc: formFocus = %d, want focusManual", got.formFocus)
 	}
 
-	for _, tc := range []struct {
-		name string
-		msg  tea.KeyMsg
-	}{
-		{"enter", tea.KeyMsg{Type: tea.KeyEnter}},
-		{"esc", tea.KeyMsg{Type: tea.KeyEsc}},
-	} {
-		m := pickerModel(t, []string{"glm-4.6", "kimi-k2"})
-		m.wiz = wizard{name: "relay", endpoint: "https://relay.example/v1", key: "sk-x"}
-		m.fromForm = true
-		next, _ := m.updatePickModel(tc.msg)
-		if got := next.(model); got.formFocus != focusFetch {
-			t.Errorf("picker %s: formFocus = %d, want focusFetch", tc.name, got.formFocus)
-		}
+	m := pickerModel(t, []string{"glm-4.6", "kimi-k2"})
+	m.wiz = wizard{name: "relay", endpoint: "https://relay.example/v1", key: "sk-x"}
+	m.fromForm = true
+	escNext, _ := m.updatePickModel(tea.KeyMsg{Type: tea.KeyEsc})
+	if got := escNext.(model); got.formFocus != focusFetch {
+		t.Errorf("picker esc: formFocus = %d, want focusFetch", got.formFocus)
+	}
+
+	mEnter := pickerModel(t, []string{"glm-4.6", "kimi-k2"})
+	mEnter.wiz = wizard{name: "relay", endpoint: "https://relay.example/v1", key: "sk-x"}
+	mEnter.fromForm = true
+	mEnter.toggleModel("glm-4.6")
+	enterNext, _ := mEnter.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
+	reviewGot := enterNext.(model)
+	if reviewGot.view != viewReviewModels {
+		t.Errorf("picker enter: view = %v, want viewReviewModels", reviewGot.view)
+	}
+	formNext, _ := reviewGot.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := formNext.(model); got.formFocus != focusFetch {
+		t.Errorf("review enter: formFocus = %d, want focusFetch", got.formFocus)
 	}
 }
 
@@ -744,8 +889,13 @@ func TestManualEntryFromStepFlowAdvancesToName(t *testing.T) {
 	if !ok {
 		t.Fatalf("updateInput returned %T, want model", next)
 	}
-	if got.view != viewAddName {
-		t.Errorf("view = %v, want viewAddName", got.view)
+	if got.view != viewReviewModels {
+		t.Errorf("view = %v, want viewReviewModels", got.view)
+	}
+	nextName, _ := got.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
+	gotName := nextName.(model)
+	if gotName.view != viewAddName {
+		t.Errorf("view after confirm review = %v, want viewAddName", gotName.view)
 	}
 }
 
@@ -868,17 +1018,22 @@ func TestPickerEnterFinishesOnModelRow(t *testing.T) {
 	if !ok {
 		t.Fatalf("updatePickModel returned %T, want model", next)
 	}
-	if got.view != viewEditForm {
-		t.Errorf("view after enter while editing = %v, want viewEditForm", got.view)
+	if got.view != viewReviewModels {
+		t.Errorf("view after enter while editing = %v, want viewReviewModels", got.view)
 	}
-	if got.wiz.model != "glm-4.6" {
-		t.Errorf("model = %q, want the first checked id glm-4.6", got.wiz.model)
+	nextForm, _ := got.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
+	gotForm := nextForm.(model)
+	if gotForm.view != viewEditForm {
+		t.Errorf("view after confirm review = %v, want viewEditForm", gotForm.view)
 	}
-	if strings.Join(got.wiz.models, ",") != "glm-4.6,kimi-k2" {
-		t.Errorf("models = %v, want glm-4.6,kimi-k2 preserved", got.wiz.models)
+	if gotForm.wiz.model != "glm-4.6" {
+		t.Errorf("model = %q, want the first checked id glm-4.6", gotForm.wiz.model)
+	}
+	if strings.Join(gotForm.wiz.models, ",") != "glm-4.6,kimi-k2" {
+		t.Errorf("models = %v, want glm-4.6,kimi-k2 preserved", gotForm.wiz.models)
 	}
 
-	// A brand-new binding still needs a name, so enter advances to that step.
+	// A brand-new binding still needs a name, so review enter advances to that step.
 	fresh := pickerModel(t, []string{"kimi-k2", "glm-4.6"})
 	fresh.toggleModel("glm-4.6")
 	fresh.renderModels()
@@ -888,11 +1043,16 @@ func TestPickerEnterFinishesOnModelRow(t *testing.T) {
 	if !ok {
 		t.Fatalf("updatePickModel returned %T, want model", next)
 	}
-	if got.view != viewAddName {
-		t.Errorf("view after enter on a new binding = %v, want viewAddName", got.view)
+	if got.view != viewReviewModels {
+		t.Errorf("view after enter on a new binding = %v, want viewReviewModels", got.view)
 	}
-	if got.wiz.model != "glm-4.6" {
-		t.Errorf("model = %q, want the first checked id glm-4.6", got.wiz.model)
+	nextName, _ := got.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
+	gotName := nextName.(model)
+	if gotName.view != viewAddName {
+		t.Errorf("view after confirm review = %v, want viewAddName", gotName.view)
+	}
+	if gotName.wiz.model != "glm-4.6" {
+		t.Errorf("model = %q, want the first checked id glm-4.6", gotName.wiz.model)
 	}
 }
 
@@ -959,25 +1119,31 @@ func TestPickerEnterOnModelFinishesAndKeepsFirstChecked(t *testing.T) {
 
 	idx := indexOfValue(m.list.Items(), "glm-4.6")
 	m.list.Select(idx)
+	m.toggleModel("glm-4.6")
 
 	next, _ := m.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
 	got, ok := next.(model)
 	if !ok {
 		t.Fatalf("updatePickModel returned %T, want model", next)
 	}
-	if got.view != viewEditForm {
-		t.Errorf("view = %v, want viewEditForm", got.view)
+	if got.view != viewReviewModels {
+		t.Errorf("view = %v, want viewReviewModels", got.view)
 	}
-	if got.wiz.model != "kimi-k2" {
-		t.Errorf("model = %q, want the first checked id kimi-k2", got.wiz.model)
+	nextForm, _ := got.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
+	gotForm := nextForm.(model)
+	if gotForm.view != viewEditForm {
+		t.Errorf("view = %v, want viewEditForm", gotForm.view)
 	}
-	if gotStr := strings.Join(got.wiz.models, ","); gotStr != "kimi-k2,glm-4.6" {
+	if gotForm.wiz.model != "kimi-k2" {
+		t.Errorf("model = %q, want the first checked id kimi-k2", gotForm.wiz.model)
+	}
+	if gotStr := strings.Join(gotForm.wiz.models, ","); gotStr != "kimi-k2,glm-4.6" {
 		t.Errorf("models = %q, want glm-4.6 joined into [kimi-k2 glm-4.6]", gotStr)
 	}
 }
 
 func TestEnterKeyFinishesPicker(t *testing.T) {
-	// Editing an existing binding returns to the form.
+	// Editing an existing binding returns to the form via review.
 	editing := pickerModel(t, []string{"kimi-k2", "glm-4.6"})
 	editing.wiz.edit = true
 	editing.wiz.models = []string{"glm-4.6", "kimi-k2"}
@@ -985,39 +1151,54 @@ func TestEnterKeyFinishesPicker(t *testing.T) {
 	editing.list.Select(indexOfValue(editing.list.Items(), "kimi-k2"))
 	next, _ := editing.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
 	got := next.(model)
-	if got.view != viewEditForm {
-		t.Errorf("edit: view = %v, want viewEditForm", got.view)
+	if got.view != viewReviewModels {
+		t.Errorf("edit: view = %v, want viewReviewModels", got.view)
 	}
-	if got.wiz.model != "glm-4.6" {
-		t.Errorf("edit: model = %q, want first checked glm-4.6", got.wiz.model)
+	nextForm, _ := got.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
+	gotForm := nextForm.(model)
+	if gotForm.view != viewEditForm {
+		t.Errorf("edit: view = %v, want viewEditForm", gotForm.view)
+	}
+	if gotForm.wiz.model != "glm-4.6" {
+		t.Errorf("edit: model = %q, want first checked glm-4.6", gotForm.wiz.model)
 	}
 
-	// A new binding with a fetched list advances to the name step.
+	// A new binding with a fetched list advances to the name step via review.
 	fetched := pickerModel(t, []string{"kimi-k2", "glm-4.6"})
 	fetched.wiz.models = []string{"kimi-k2"}
 	fetched.renderModels()
 	fetched.list.Select(indexOfValue(fetched.list.Items(), "kimi-k2"))
 	next, _ = fetched.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
 	got = next.(model)
-	if got.view != viewAddName {
-		t.Errorf("fetched: view = %v, want viewAddName", got.view)
+	if got.view != viewReviewModels {
+		t.Errorf("fetched: view = %v, want viewReviewModels", got.view)
 	}
-	if got.wiz.model != "kimi-k2" {
-		t.Errorf("fetched: model = %q, want kimi-k2", got.wiz.model)
+	nextName, _ := got.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
+	gotName := nextName.(model)
+	if gotName.view != viewAddName {
+		t.Errorf("fetched: view = %v, want viewAddName", gotName.view)
+	}
+	if gotName.wiz.model != "kimi-k2" {
+		t.Errorf("fetched: model = %q, want kimi-k2", gotName.wiz.model)
 	}
 
-	// A new binding whose ids were typed (no fetched list) also advances to the name step.
+	// A new binding whose ids were typed (no fetched list) also advances to name via review.
 	manual := pickerModel(t, nil)
 	manual.wiz.models = []string{"glm-4.6", "kimi-k2"}
 	manual.wiz.model = ""
 	manual.renderModels()
 	next, _ = manual.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
 	got = next.(model)
-	if got.view != viewAddName {
-		t.Errorf("manual: view = %v, want viewAddName", got.view)
+	if got.view != viewReviewModels {
+		t.Errorf("manual: view = %v, want viewReviewModels", got.view)
 	}
-	if got.wiz.model != "glm-4.6" {
-		t.Errorf("manual: model = %q, want first checked glm-4.6", got.wiz.model)
+	nextName, _ = got.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
+	gotName = nextName.(model)
+	if gotName.view != viewAddName {
+		t.Errorf("manual: view = %v, want viewAddName", gotName.view)
+	}
+	if gotName.wiz.model != "glm-4.6" {
+		t.Errorf("manual: model = %q, want first checked glm-4.6", gotName.wiz.model)
 	}
 }
 
@@ -1297,5 +1478,109 @@ func TestDeleteInactiveBindingFlow(t *testing.T) {
 	bs, _ := st.Bindings("claude")
 	if len(bs) != 1 || bs[0].Name != "alpha" {
 		t.Errorf("bindings after delete = %+v, want only alpha", bs)
+	}
+}
+
+func TestUncheckingModelsAndDefaultShiftLogic(t *testing.T) {
+	st := openTestCatalog(t, false)
+	endpoint := "https://gateway.example.com/v1"
+	p, err := st.PutProvider(endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pre-populate catalog with a custom private model and a standard model
+	if _, err := st.PutModelWithWindow(p.ID, "custom-private", 1_000_000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutModel(p.ID, "remote-model-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newModel(st, "v1.0.0")
+	m.tool = tools.Find("opencode")
+	m.view = viewPickModel
+	m.wiz = wizard{
+		endpoint: endpoint,
+		key:      "sk-test",
+		models:   []string{"custom-private", "remote-model-1"},
+		model:    "custom-private",
+	}
+
+	// 1. Remote fetch returns new remote models without the private one
+	remoteList := []models.Info{{ID: "remote-model-1"}, {ID: "remote-model-2"}}
+	m.showModelInfos(remoteList)
+
+	// Verify custom-private is preserved and still checked
+	if !m.modelSelected("custom-private") {
+		t.Errorf("custom-private was dropped from selection: %v", m.wiz.models)
+	}
+	foundInList := false
+	for _, it := range m.list.Items() {
+		if row, ok := it.(item); ok && row.value == "custom-private" {
+			foundInList = true
+			break
+		}
+	}
+	if !foundInList {
+		t.Errorf("custom-private not displayed in picker: %v", m.allModels)
+	}
+
+	// 2. Unchecking the default model (custom-private) shifts default to remaining checked (remote-model-1)
+	m.toggleModel("custom-private")
+	if m.wiz.model != "remote-model-1" {
+		t.Errorf("default model = %q, want shifted to remote-model-1", m.wiz.model)
+	}
+	if !strings.Contains(m.status, "default model switched to remote-model-1") {
+		t.Errorf("status missing switch notification: %q", m.status)
+	}
+	// Verify catalog metadata for custom-private is NOT deleted
+	storedMods, err := st.ModelsForProvider(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var customMod *catalog.Model
+	for i := range storedMods {
+		if storedMods[i].Slug == "custom-private" {
+			customMod = &storedMods[i]
+			break
+		}
+	}
+	if customMod == nil || customMod.ContextWindow != 1_000_000 {
+		t.Errorf("catalog metadata was modified or deleted: customMod=%+v", customMod)
+	}
+
+	// 3. Unchecking all models and attempting enter -> blocked with error
+	m.toggleModel("remote-model-1")
+	if len(m.wiz.models) != 0 {
+		t.Fatalf("expected 0 models checked, got %v", m.wiz.models)
+	}
+	next, _ := m.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(model)
+	if got.view != viewPickModel {
+		t.Errorf("expected viewPickModel on zero models enter, got %v", got.view)
+	}
+	if !strings.Contains(got.status, "at least 1 model must be selected") {
+		t.Errorf("expected error status for 0 models, got %q", got.status)
+	}
+
+	// 4. Checking remote-model-2 and confirming enter transitions to reviewTable
+	got.toggleModel("remote-model-2")
+	nextRev, _ := got.updatePickModel(tea.KeyMsg{Type: tea.KeyEnter})
+	revGot := nextRev.(model)
+	if revGot.view != viewReviewModels {
+		t.Fatalf("expected viewReviewModels, got %v", revGot.view)
+	}
+	if revGot.reviewSource != viewPickModel {
+		t.Errorf("expected reviewSource viewPickModel, got %v", revGot.reviewSource)
+	}
+
+	// 5. Esc in reviewTable returns to viewPickModel with selection intact
+	nextEsc, _ := revGot.updateReviewModels(tea.KeyMsg{Type: tea.KeyEsc})
+	escGot := nextEsc.(model)
+	if escGot.view != viewPickModel {
+		t.Errorf("expected return to viewPickModel on Esc, got %v", escGot.view)
+	}
+	if !escGot.modelSelected("remote-model-2") {
+		t.Errorf("remote-model-2 should still be checked after Esc")
 	}
 }

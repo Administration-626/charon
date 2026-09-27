@@ -53,11 +53,13 @@ func run(args []string) error {
 	case "switch", "use":
 		return cmdSwitch(cat, args[1:])
 	case "models":
-		return cmdModels(args[1:])
+		return cmdModels(cat, args[1:])
 	case "add":
 		return cmdAdd(cat, args[1:])
 	case "edit":
 		return cmdEdit(cat, args[1:])
+	case "set-context":
+		return cmdSetContext(cat, args[1:])
 	case "rename", "mv":
 		return cmdRename(cat, args[1:])
 	case "cp":
@@ -81,9 +83,10 @@ Usage:
   charon                     interactive menu
   charon status              show each tool's live config and active binding (--json)
   charon ls <tool>           list saved bindings for a tool (--json)
-  charon models <tool>       list models from an API (--key, --endpoint)
+  charon models <tool>       list models from an API (--key, --endpoint; --local)
   charon add <tool>          add+activate a binding (--name --key plus a model id)
   charon edit <tool> <b>     change a binding's endpoint/key/model/models/name
+  charon set-context <tool> <b> <model> <tokens|unknown>
   charon rename <tool> <o> <n>  rename a saved binding
   charon cp <tool> <src> <dst>  duplicate a saved binding
   charon cp <tool> <src> <tool> <dst>  copy a binding to another tool

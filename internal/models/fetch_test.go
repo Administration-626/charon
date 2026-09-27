@@ -52,7 +52,7 @@ func TestFetchOpenAI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
-	want := []string{"a-model", "b-model"} // sorted, empty id dropped
+	want := []Info{{ID: "a-model"}, {ID: "b-model"}} // sorted, empty id dropped
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}

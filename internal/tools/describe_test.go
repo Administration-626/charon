@@ -42,7 +42,7 @@ func TestCodexContextWindow(t *testing.T) {
 		"":                0,
 	}
 	for model, want := range cases {
-		if got := codexContextWindow(model); got != want {
+		if got := codexContextWindow(model, 0); got != want {
 			t.Errorf("codexContextWindow(%q) = %d, want %d", model, got, want)
 		}
 	}

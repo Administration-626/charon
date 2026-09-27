@@ -25,8 +25,11 @@ func isOpenAISlug(model string) bool {
 
 // codexContextWindow returns the window to pin for an unrecognized model (1M), else 0.
 // OpenAI slugs Codex already sizes itself from its own catalog, so those stay unset.
-func codexContextWindow(model string) int {
+func codexContextWindow(model string, configured int) int {
 	model = strings.TrimSpace(model)
+	if configured > 0 {
+		return configured
+	}
 	if model == "" || isOpenAISlug(model) {
 		return 0
 	}
@@ -60,7 +63,14 @@ func newCodex() *Tool {
 			// Codex sizes unknown (non-OpenAI) slugs from its own catalog at 272K (~258K effective),
 			// which undersizes modern models; pin their window to 1M, clearing any stale prior value.
 			delete(cfg, "model_context_window")
-			if w := codexContextWindow(modelSlug); w != 0 {
+			var configuredWindow int
+			for _, spec := range a.Models {
+				if spec.Slug == modelSlug {
+					configuredWindow = spec.ContextWindow
+					break
+				}
+			}
+			if w := codexContextWindow(modelSlug, configuredWindow); w != 0 {
 				cfg["model_context_window"] = w
 			}
 			cfg["model_provider"] = "charon"

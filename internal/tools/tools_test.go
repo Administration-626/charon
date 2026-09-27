@@ -24,6 +24,14 @@ func sandboxHome(t *testing.T) string {
 	return dir
 }
 
+func specsFromIDs(ids []string) []ModelSpec {
+	specs := make([]ModelSpec, 0, len(ids))
+	for _, id := range ids {
+		specs = append(specs, ModelSpec{Slug: id})
+	}
+	return specs
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -163,6 +171,14 @@ func TestCodexPinsCustomContextWindow(t *testing.T) {
 	}
 	if w, ok := window(); ok {
 		t.Errorf("openai model must clear model_context_window, got %d", w)
+	}
+
+	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-k123456789", Model: "kimi-k2",
+		Models: []ModelSpec{{Slug: "kimi-k2", ContextWindow: 256000}}}); err != nil {
+		t.Fatal(err)
+	}
+	if w, ok := window(); !ok || w != 256000 {
+		t.Fatalf("configured context window = %d (set=%v), want 256000", w, ok)
 	}
 }
 
@@ -331,10 +347,36 @@ func TestClaudeCustomEndpointUsesBearer(t *testing.T) {
 	if s.Model != "" {
 		t.Errorf("custom endpoint must not set top-level model, got %q", s.Model)
 	}
-	// Without a declared window Claude Code clamps every unrecognized model id —
-	// which is all of them on a gateway — to 200K and compacts far too early.
-	if s.Env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] != "1000000" {
-		t.Errorf("custom endpoint should declare its context window, got env=%v", s.Env)
+	if _, hasKey := s.Env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"]; hasKey {
+		t.Errorf("unknown window must stay unset, got env=%v", s.Env)
+	}
+}
+
+func TestClaudeUsesModelContextWindow(t *testing.T) {
+	home := sandboxHome(t)
+	writeFile(t, filepath.Join(home, ".claude", "settings.json"), `{}`)
+
+	c := Find("claude")
+	if err := c.ApplyAuth(AuthSpec{
+		Endpoint: "https://gateway.example/v1",
+		Key:      "sk-gw-123456789",
+		Model:    "kimi-k2",
+		Models:   []ModelSpec{{Slug: "kimi-k2", ContextWindow: 256000}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var s struct {
+		Env map[string]string `json:"env"`
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] != "256000" {
+		t.Fatalf("context tokens = %q, want 256000", s.Env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"])
 	}
 }
 
@@ -377,10 +419,10 @@ func TestClaudeCustomEndpointRegistersWholeModelList(t *testing.T) {
 	fetched := []string{"deepseek-v3", "glm-4.6", "kimi-k2"}
 	c := Find("claude")
 	err := c.ApplyAuth(AuthSpec{
-		Endpoint:  "https://gateway.example/v1",
-		Key:       "sk-gw-123456789",
-		Model:     "kimi-k2",
-		AllModels: fetched,
+		Endpoint: "https://gateway.example/v1",
+		Key:      "sk-gw-123456789",
+		Model:    "kimi-k2",
+		Models:   specsFromIDs(fetched),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -670,10 +712,10 @@ func TestPiDescribeAndApply(t *testing.T) {
 		t.Fatal("pi should be detected via settings.json")
 	}
 	if err := c.ApplyAuth(AuthSpec{
-		Endpoint:  "https://openrouter.ai/api/v1",
-		Key:       "sk-or-123456789",
-		Model:     "x/y",
-		AllModels: []string{"x/y", "x/z"},
+		Endpoint: "https://openrouter.ai/api/v1",
+		Key:      "sk-or-123456789",
+		Model:    "x/y",
+		Models:   []ModelSpec{{Slug: "x/y", ContextWindow: 128000}, {Slug: "x/z", ContextWindow: 256000}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -700,6 +742,9 @@ func TestPiDescribeAndApply(t *testing.T) {
 	}
 	if len(cfg.Models) != 2 {
 		t.Errorf("models = %v, want 2 entries", cfg.Models)
+	}
+	if cfg.Models[0].ContextWindow != 128000 || cfg.Models[1].ContextWindow != 256000 {
+		t.Errorf("context windows = %v, want 128000/256000", cfg.Models)
 	}
 
 	settingsPath := filepath.Join(dir, "settings.json")
@@ -771,10 +816,10 @@ func TestClaudeCustomEndpointFetchReplacesRegisteredList(t *testing.T) {
 
 	c := Find("claude")
 	err := c.ApplyAuth(AuthSpec{
-		Endpoint:  "https://other.example/v1",
-		Key:       "sk-gw-3",
-		Model:     "deepseek-v3",
-		AllModels: []string{"deepseek-v3", "qwen3-max"},
+		Endpoint: "https://other.example/v1",
+		Key:      "sk-gw-3",
+		Model:    "deepseek-v3",
+		Models:   specsFromIDs([]string{"deepseek-v3", "qwen3-max"}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -816,10 +861,10 @@ api_key = "sk-old"
 	}
 
 	if err := c.ApplyAuth(AuthSpec{
-		Endpoint:  "https://gateway.example/v1",
-		Key:       "sk-gw-123456789",
-		Model:     "kimi-k2",
-		AllModels: []string{"kimi-k2", "glm-4.6"},
+		Endpoint: "https://gateway.example/v1",
+		Key:      "sk-gw-123456789",
+		Model:    "kimi-k2",
+		Models:   specsFromIDs([]string{"kimi-k2", "glm-4.6"}),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -903,10 +948,10 @@ api_key = "sk-old"
 
 	// A fetched list replaces the previous endpoint's models.
 	if err := c.ApplyAuth(AuthSpec{
-		Endpoint:  "https://other.example/v1",
-		Key:       "sk-other",
-		Model:     "deepseek-v3",
-		AllModels: []string{"deepseek-v3"},
+		Endpoint: "https://other.example/v1",
+		Key:      "sk-other",
+		Model:    "deepseek-v3",
+		Models:   specsFromIDs([]string{"deepseek-v3"}),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -971,10 +1016,10 @@ func TestModelMenuMatchesRegisteredModelList(t *testing.T) {
 				t.Skip("tool does not support ApplyAuth")
 			}
 			err := tl.ApplyAuth(AuthSpec{
-				Endpoint:  "https://gateway.example/v1",
-				Key:       "sk-gw-123456789",
-				Model:     "kimi-k2",
-				AllModels: fetched,
+				Endpoint: "https://gateway.example/v1",
+				Key:      "sk-gw-123456789",
+				Model:    "kimi-k2",
+				Models:   specsFromIDs(fetched),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -1066,10 +1111,10 @@ defaultThinkingLevel: high
 	}
 
 	if err := c.ApplyAuth(AuthSpec{
-		Endpoint:  "https://gateway.example/v1",
-		Key:       "sk-gw-123456789",
-		Model:     "kimi-k2",
-		AllModels: []string{"kimi-k2", "glm-4.6"},
+		Endpoint: "https://gateway.example/v1",
+		Key:      "sk-gw-123456789",
+		Model:    "kimi-k2",
+		Models:   specsFromIDs([]string{"kimi-k2", "glm-4.6"}),
 	}); err != nil {
 		t.Fatal(err)
 	}

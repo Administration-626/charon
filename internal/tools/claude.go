@@ -4,19 +4,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"charon/internal/secret"
 )
 
 const claudeKeychainService = "Claude Code-credentials"
-
-// claudeMaxContextTokens is what a custom endpoint declares as its context window.
-// Claude Code falls back to 200K for any model id it does not recognize, which is
-// every model served through a gateway. One million matches the largest window the
-// models routed this way advertise; a model with a smaller real window still stops
-// at its own limit, it just no longer compacts at 200K.
-const claudeMaxContextTokens = "1000000"
 
 // newClaude describes Claude Code: API keys in ~/.claude/settings.json, OAuth in the keychain.
 func newClaude() *Tool {
@@ -54,7 +48,16 @@ func newClaude() *Tool {
 				// Gateways want Bearer auth at a custom base URL.
 				env["ANTHROPIC_BASE_URL"] = normalizeClaudeBaseURL(a.Endpoint)
 				env["ANTHROPIC_AUTH_TOKEN"] = a.Key
-				env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = claudeMaxContextTokens
+				var window int
+				for _, spec := range a.Models {
+					if spec.Slug == a.Model {
+						window = spec.ContextWindow
+						break
+					}
+				}
+				if window > 0 {
+					env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = strconv.Itoa(window)
+				}
 				// Gateway models aren't in Claude Code's catalog; the top-level "model"
 				// selector validates against it and rejects them, so route via ANTHROPIC_MODEL.
 				delete(s, "model")
@@ -70,11 +73,11 @@ func newClaude() *Tool {
 				// model, not just the chosen one" move opencode.go and pi.go already make.
 				// Without it /model holds one row (ANTHROPIC_CUSTOM_MODEL_OPTION above) and
 				// switching model means going back through charon.
-				ids := a.AllModels
-				if len(ids) == 0 {
-					ids = existingModels
+				specs := a.Models
+				if specs == nil {
+					specs = claudeSpecsFromIDs(existingModels)
 				}
-				if picker := claudeModelPicker(ids, a.Model); picker != nil {
+				if picker := claudeModelPickerSpecs(specs, a.Model); picker != nil {
 					s["modelPicker"] = picker
 				} else {
 					delete(s, "modelPicker")
@@ -141,6 +144,29 @@ func newClaude() *Tool {
 			return info.withDefaults("api.anthropic.com (default)"), nil
 		},
 	}
+}
+
+func claudeSpecsFromIDs(ids []string) []ModelSpec {
+	if ids == nil {
+		return nil
+	}
+	specs := make([]ModelSpec, 0, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			specs = append(specs, ModelSpec{Slug: id})
+		}
+	}
+	return specs
+}
+
+func claudeModelPickerSpecs(specs []ModelSpec, current string) map[string]any {
+	ids := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		if spec.Slug != "" {
+			ids = append(ids, spec.Slug)
+		}
+	}
+	return claudeModelPicker(ids, current)
 }
 
 // claudeAccountEmail reads the logged-in account's email from ~/.claude.json for

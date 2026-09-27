@@ -73,7 +73,7 @@ func grokTable(m map[string]any, key string) (map[string]any, error) {
 	return table, nil
 }
 
-func grokModelEntry(slug, endpoint, key string) map[string]any {
+func grokModelEntry(slug, endpoint, key string, window int) map[string]any {
 	entry := map[string]any{
 		"model":    slug,
 		"name":     slug,
@@ -81,6 +81,9 @@ func grokModelEntry(slug, endpoint, key string) map[string]any {
 	}
 	if key != "" {
 		entry["api_key"] = key
+	}
+	if window > 0 {
+		entry["context_window"] = window
 	}
 	return entry
 }
@@ -132,34 +135,34 @@ func newGrok() *Tool {
 			}
 			original := grokSnapshotUserModels(modelTable)
 
-			ids := a.AllModels
-			if len(ids) == 0 {
-				ids = grokExistingModels(modelTable)
+			specs := a.Models
+			if specs == nil {
+				specs = grokSpecsFromIDs(grokExistingModels(modelTable))
 			}
 			modelSlug := strings.TrimSpace(a.Model)
-			if len(ids) == 0 && modelSlug != "" {
-				ids = []string{modelSlug}
+			if specs == nil && modelSlug != "" {
+				specs = []ModelSpec{{Slug: modelSlug}}
 			}
-			if modelSlug == "" && len(ids) > 0 {
-				modelSlug = strings.TrimSpace(ids[0])
+			if modelSlug == "" && len(specs) > 0 {
+				modelSlug = strings.TrimSpace(specs[0].Slug)
 			}
 
 			// Replace the owned tables outright so a shorter list cannot keep the
 			// previous endpoint's models. User-authored [model.*] tables stay.
-			if modelSlug != "" || len(ids) > 0 {
+			if modelSlug != "" || len(specs) > 0 {
 				for name := range modelTable {
 					if grokOwnedModel(name) {
 						delete(modelTable, name)
 					}
 				}
 				seen := map[string]bool{}
-				for _, id := range ids {
-					id = strings.TrimSpace(id)
+				for _, spec := range specs {
+					id := strings.TrimSpace(spec.Slug)
 					if id == "" || seen[id] {
 						continue
 					}
 					seen[id] = true
-					modelTable[grokMenuName(id)] = grokModelEntry(id, a.Endpoint, a.Key)
+					modelTable[grokMenuName(id)] = grokModelEntry(id, a.Endpoint, a.Key, spec.ContextWindow)
 				}
 			}
 			if err := ensureOnlyCharonChanged(original, modelTable); err != nil {
@@ -217,4 +220,17 @@ func newGrok() *Tool {
 			return info.withDefaults("api.x.ai (default)"), nil
 		},
 	}
+}
+
+func grokSpecsFromIDs(ids []string) []ModelSpec {
+	if ids == nil {
+		return nil
+	}
+	specs := make([]ModelSpec, 0, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			specs = append(specs, ModelSpec{Slug: id})
+		}
+	}
+	return specs
 }

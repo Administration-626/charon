@@ -13,6 +13,12 @@ func TestProjectRendersBinding(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	_, cr := seed(t, c, "https://gateway.example", "sk-secret", "kimi-k2", "glm-4.6")
+	if _, err := c.PutModelWithWindow("p1", "kimi-k2", 128000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.PutModelWithWindow("p1", "glm-4.6", 200000); err != nil {
+		t.Fatal(err)
+	}
 	b, err := c.AddBinding("claude", "work", cr.ID, "glm-4.6", []string{"kimi-k2", "glm-4.6"})
 	if err != nil {
 		t.Fatal(err)

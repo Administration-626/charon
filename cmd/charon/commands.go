@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -236,7 +237,7 @@ func cmdSwitch(cat *catalog.Catalog, args []string) error {
 	return nil
 }
 
-func cmdModels(args []string) error {
+func cmdModels(cat *catalog.Catalog, args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: charon models <tool> --key <key> [--endpoint <url>]")
 	}
@@ -247,8 +248,12 @@ func cmdModels(args []string) error {
 	fs := flag.NewFlagSet("models", flag.ContinueOnError)
 	endpoint := fs.String("endpoint", "", "API base URL")
 	key := fs.String("key", "", "API key")
+	local := fs.Bool("local", false, "list models saved in charon's catalog")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
+	}
+	if *local {
+		return listLocalModels(cat, t)
 	}
 	if err := tools.ValidateKey(*key); err != nil {
 		return err
@@ -261,7 +266,93 @@ func cmdModels(args []string) error {
 		return err
 	}
 	for _, m := range list {
-		fmt.Println(m)
+		if w := models.DefaultContextWindow(m.ID); w > 0 {
+			fmt.Printf("%s\t%d\n", m.ID, w)
+		} else {
+			fmt.Println(m.ID)
+		}
+	}
+	return nil
+}
+
+func listLocalModels(cat *catalog.Catalog, t *tools.Tool) error {
+	bindings, err := cat.Bindings(t.Name)
+	if err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	writer := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	for _, binding := range bindings {
+		for _, modelID := range binding.Models {
+			m, err := cat.Model(modelID)
+			if err != nil {
+				return err
+			}
+			if seen[m.Slug] {
+				continue
+			}
+			seen[m.Slug] = true
+			window := "unknown"
+			if m.ContextWindow > 0 {
+				window = strconv.Itoa(m.ContextWindow)
+			}
+			fmt.Fprintf(writer, "%s\t%s\n", m.Slug, window)
+		}
+	}
+	return writer.Flush()
+}
+
+func cmdSetContext(cat *catalog.Catalog, args []string) error {
+	if len(args) < 4 {
+		return fmt.Errorf("usage: charon set-context <tool> <binding> <model> <tokens|unknown>")
+	}
+	t, err := requireTool(args[0])
+	if err != nil {
+		return err
+	}
+	binding, found, err := cat.BindingByName(t.Name, args[1])
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("no %s binding named %q", t.Title, args[1])
+	}
+	slug := strings.TrimSpace(args[2])
+	if slug == "" {
+		return fmt.Errorf("model is required")
+	}
+	value := strings.TrimSpace(args[3])
+	window := 0
+	if value != "unknown" {
+		window, err = strconv.Atoi(value)
+		if err != nil || window <= 0 {
+			return fmt.Errorf("context window must be a positive whole number or unknown")
+		}
+	}
+	var model catalog.Model
+	for _, modelID := range binding.Models {
+		candidate, err := cat.Model(modelID)
+		if err != nil {
+			return err
+		}
+		if candidate.Slug == slug {
+			model = candidate
+			break
+		}
+	}
+	if model.ID == "" {
+		return fmt.Errorf("model %q is not registered in binding %q", slug, binding.Name)
+	}
+	if _, err := cat.SetModelWindow(model.ID, window); err != nil {
+		return err
+	}
+	if _, err := cat.ProjectIfActive(binding.ID); err != nil {
+		return err
+	}
+	if window == 0 {
+		fmt.Printf("Set context window for %s to unknown\n", slug)
+	} else {
+		fmt.Printf("Set context window for %s to %d\n", slug, window)
 	}
 	return nil
 }
@@ -269,7 +360,7 @@ func cmdModels(args []string) error {
 // probeModels asks the endpoint for its model list in the tool's historical dialect
 // first, then the other. Which dialect answered is not stored: the same site often
 // speaks both, and the next call can try again.
-func probeModels(t *tools.Tool, endpoint, key string) ([]string, error) {
+func probeModels(t *tools.Tool, endpoint, key string) ([]models.Info, error) {
 	first := models.Provider(t.Provider)
 	list, err := models.Fetch(first, endpoint, key)
 	if err == nil {
@@ -343,7 +434,7 @@ func cmdAdd(cat *catalog.Catalog, args []string) error {
 			explicit = true
 		}
 	})
-	b, err := catalog.StoreBinding(cat, t, nil, *name, *endpoint, *key, *model, splitModels(*modelList), explicit)
+	b, err := catalog.StoreBinding(cat, t, nil, *name, *endpoint, *key, *model, splitModels(*modelList), explicit, nil)
 	if err != nil {
 		return err
 	}
@@ -424,7 +515,7 @@ func cmdEdit(cat *catalog.Catalog, args []string) error {
 		return err
 	}
 
-	b, err := catalog.StoreBinding(cat, t, &cur, target, *endpoint, *key, modelID, splitModels(*modelList), explicit)
+	b, err := catalog.StoreBinding(cat, t, &cur, target, *endpoint, *key, modelID, splitModels(*modelList), explicit, nil)
 	if err != nil {
 		return err
 	}
@@ -514,7 +605,7 @@ func cmdDuplicate(cat *catalog.Catalog, args []string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := catalog.StoreBinding(cat, dstTool, nil, dstName, p.BaseURL, cr.Key, slug, slugs, true); err != nil {
+	if _, err := catalog.StoreBinding(cat, dstTool, nil, dstName, p.BaseURL, cr.Key, slug, slugs, true, nil); err != nil {
 		return err
 	}
 	fmt.Printf("Copied %s binding %q → %s %q\n", t.Title, args[1], dstTool.Title, dstName)
@@ -614,13 +705,13 @@ func cmdUpdate() error {
 		return fmt.Errorf("creating temp file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
+	defer func() { _ = os.Remove(tmpPath) }()
 
 	resp, err := http.Get(scriptURL) //nolint:noctx
 	if err != nil {
 		return fmt.Errorf("downloading install script: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download failed with status %s", resp.Status)

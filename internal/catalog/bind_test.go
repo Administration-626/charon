@@ -10,7 +10,7 @@ func TestStoreBindingValidatesBeforeWritingCredential(t *testing.T) {
 	c := openTest(t)
 	tool := &tools.Tool{Name: "claude", DefaultEndpoint: "https://gateway.example/v1"}
 
-	if _, err := StoreBinding(c, tool, nil, "line\nbreak", "", "sk-secret", "model-a", nil, false); err == nil {
+	if _, err := StoreBinding(c, tool, nil, "line\nbreak", "", "sk-secret", "model-a", nil, false, nil); err == nil {
 		t.Fatal("invalid name was accepted")
 	}
 	if credentials, err := c.credentials(); err != nil {
@@ -19,10 +19,10 @@ func TestStoreBindingValidatesBeforeWritingCredential(t *testing.T) {
 		t.Fatalf("failed add stored credentials: %+v", credentials)
 	}
 
-	if _, err := StoreBinding(c, tool, nil, "work", "", "sk-secret", "model-a", nil, false); err != nil {
+	if _, err := StoreBinding(c, tool, nil, "work", "", "sk-secret", "model-a", nil, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := StoreBinding(c, tool, nil, "work", "https://other.example/v1", "sk-orphan", "model-b", nil, false); err == nil {
+	if _, err := StoreBinding(c, tool, nil, "work", "https://other.example/v1", "sk-orphan", "model-b", nil, false, nil); err == nil {
 		t.Fatal("duplicate name was accepted")
 	}
 	credentials, err := c.credentials()
@@ -53,11 +53,11 @@ func TestStoreBindingCanEditLegacyName(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.Name = bs[0].Name
-	if _, err := StoreBinding(c, tool, &b, "bad name", "", "sk-rotated", "model-a", nil, false); err == nil {
+	if _, err := StoreBinding(c, tool, &b, "bad name", "", "sk-rotated", "model-a", nil, false, nil); err == nil {
 		t.Fatal("renaming to another invalid name was accepted")
 	}
 
-	updated, err := StoreBinding(c, tool, &b, b.Name, "", "sk-rotated", "model-b", nil, false)
+	updated, err := StoreBinding(c, tool, &b, b.Name, "", "sk-rotated", "model-b", nil, false, nil)
 	if err != nil {
 		t.Fatalf("editing without renaming legacy name: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestStoreBindingCanEditLegacyName(t *testing.T) {
 		t.Fatalf("updated model = %q, err=%v; want model-b", slug, err)
 	}
 
-	renamed, err := StoreBinding(c, tool, &updated, "work", "", "sk-rotated", "model-b", nil, false)
+	renamed, err := StoreBinding(c, tool, &updated, "work", "", "sk-rotated", "model-b", nil, false, nil)
 	if err != nil {
 		t.Fatalf("renaming legacy name: %v", err)
 	}

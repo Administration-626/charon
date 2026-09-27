@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charon/internal/catalog"
+	"charon/internal/models"
 	"charon/internal/tools"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -45,7 +46,9 @@ type wizard struct {
 	// models is the curated list to register in the tool's own model picker, built by
 	// space-toggling rows in the picker. Empty means "offer whatever was fetched", which
 	// keeps the pick-one flow registering the full list as it always has.
-	models []string
+	models        []string
+	windows       map[string]int
+	manualWindows map[string]bool
 }
 
 // modelIDs is the wizard's model choice as a flat list: the curated selection with the
@@ -111,6 +114,8 @@ func wizardStep(v view) (n, total int, label string) {
 		return 3, 4, "choose a model"
 	case viewAddCustomModel:
 		return 3, 4, "type the model ids"
+	case viewReviewModels:
+		return 3, 4, "review models"
 	case viewAddName:
 		return 4, 4, "name the binding"
 	}
@@ -336,14 +341,33 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "esc":
+		if m.view == viewModelEndpoint || m.view == viewModelSlug {
+			m.view = viewModels
+			m.clearStatus()
+			m.loadModels()
+			return m, nil
+		}
+		if m.view == viewModelWindow {
+			m.view = viewModels
+			m.clearStatus()
+			m.loadModels()
+			return m, nil
+		}
 		if m.view == viewEditForm && m.editField != "" {
 			m.editField = ""
 			m.loadEditForm()
 			return m, nil
 		}
 		if m.view == viewEditField {
-			m.view = viewEditForm // cancel a single field → back to the form
-			m.loadEditForm()
+			if m.fromReview {
+				m.fromReview = false
+				m.view = viewReviewModels
+				m.editTarget = ""
+				return m, nil
+			}
+			m.view = viewPickModel // cancel window editing → back to the picker
+			m.editTarget = ""
+			m.renderModels()
 			return m, nil
 		}
 		if m.view == viewAddCustomModel {
@@ -377,6 +401,11 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 		}
 		if m.view == viewAddName {
+			if len(m.wiz.models) > 0 {
+				m.view = viewReviewModels
+				m.clearStatus()
+				return m, nil
+			}
 			if len(m.allModels) > 0 {
 				m.view = viewPickModel
 				m.clearStatus()
@@ -398,6 +427,52 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		val := m.input.Value()
 		switch m.view {
 		case viewEditField, viewEditForm:
+			if m.editTarget != "" {
+				val = strings.TrimSpace(val)
+				window := 0
+				if val != "" {
+					var err error
+					if window, err = parseContextWindow(val); err != nil {
+						m.setStatus(statusErr, err.Error())
+						return m, nil
+					}
+				}
+				slug := m.editTarget
+				m.editTarget = ""
+				if m.cat != nil {
+					if p, found, err := m.cat.ProviderByURL(m.tool.ResolveEndpoint(m.wiz.endpoint)); err == nil && found {
+						if _, err := m.cat.PutModelWithWindow(p.ID, slug, window); err != nil {
+							m.setStatus(statusErr, err.Error())
+							return m, nil
+						}
+					}
+				}
+				if m.wiz.windows == nil {
+					m.wiz.windows = map[string]int{}
+				}
+				m.wiz.windows[slug] = window
+				if m.fromReview {
+					m.fromReview = false
+					m.view = viewReviewModels
+					m.clearStatus()
+					if window == 0 {
+						m.setStatus(statusOK, "cleared context window for "+slug)
+					} else {
+						m.setStatus(statusOK, fmt.Sprintf("saved context window for %s: %d", slug, window))
+					}
+					return m, nil
+				}
+				m.view = viewPickModel
+				m.clearStatus()
+				m.showLocalModels()
+				m.list.Select(indexOfValue(m.list.Items(), slug))
+				if window == 0 {
+					m.setStatus(statusOK, "cleared context window for "+slug)
+				} else {
+					m.setStatus(statusOK, fmt.Sprintf("saved context window for %s: %d", slug, window))
+				}
+				return m, nil
+			}
 			switch m.editField {
 			case fieldName:
 				val = strings.TrimSpace(val)
@@ -460,29 +535,47 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 
 		case viewAddCustomModel:
-			// The typed ids are the list registered with the tool, so an endpoint with no
-			// /v1/models still gets a full model menu; the first id is the default model.
-			ids := splitModelIDs(val)
-			m.wiz.models = ids
-			if len(ids) == 0 {
-				m.wiz.model = ""
-			} else {
-				m.wiz.model = ids[0]
-			}
-			m.clearStatus()
-			// Manual entry is one level below the form, so a commit returns there exactly
-			// like the picker's enter does; [ Save ] is still the step that stores the
-			// binding. Only the step flow (a fetch that failed after the key screen, with
-			// no form to go back to) advances to naming the new binding.
-			if m.fromForm || m.wiz.edit {
-				m.fromForm = false
-				m.view = viewEditForm
-				m.loadEditFormAt(focusManual)
+			parsed, err := parseTypedModelSpecs(val)
+			if err != nil {
+				m.setStatus(statusErr, err.Error())
 				return m, nil
 			}
-			m.view = viewAddName
-			m.startInput("binding name (e.g. openrouter-fast)", false)
-			return m, textinput.Blink
+			if len(parsed) == 0 {
+				m.setStatus(statusErr, "enter at least one model id")
+				return m, nil
+			}
+			p, err := m.cat.PutProvider(m.tool.ResolveEndpoint(m.wiz.endpoint))
+			if err != nil {
+				m.setStatus(statusErr, err.Error())
+				return m, nil
+			}
+			slugs := make([]string, 0, len(parsed))
+			if m.wiz.windows == nil {
+				m.wiz.windows = map[string]int{}
+			}
+			for _, pm := range parsed {
+				slugs = append(slugs, pm.Slug)
+				m.wiz.windows[pm.Slug] = pm.Window
+				if pm.Manual {
+					if _, err := m.cat.PutModelWithWindow(p.ID, pm.Slug, pm.Window); err != nil {
+						m.setStatus(statusErr, err.Error())
+						return m, nil
+					}
+				} else {
+					if _, err := m.cat.PutModel(p.ID, pm.Slug); err != nil {
+						m.setStatus(statusErr, err.Error())
+						return m, nil
+					}
+				}
+			}
+			m.wiz.models = append([]string(nil), slugs...)
+			m.wiz.model = slugs[0]
+			m.clearStatus()
+			m.view = viewReviewModels
+			m.reviewSource = viewAddCustomModel
+			m.reviewCursor = 0
+			m.setStatus(statusOK, "models loaded — enter to confirm, w to edit context, d to remove")
+			return m, nil
 
 		case viewAddName:
 			val = strings.TrimSpace(val)
@@ -491,6 +584,70 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m.finishAdd(val)
+
+		case viewModelEndpoint:
+			endpoint := strings.TrimRight(strings.TrimSpace(val), "/")
+			if err := tools.ValidateEndpoint(endpoint); err != nil {
+				m.setStatus(statusErr, err.Error())
+				return m, nil
+			}
+			m.modelEditEndpoint = endpoint
+			m.view = viewModelSlug
+			m.clearStatus()
+			m.startInput("model slug, e.g. glm-4.7", false)
+			if m.editingModel.ID != "" {
+				m.input.SetValue(m.editingModel.Slug)
+			}
+			return m, textinput.Blink
+
+		case viewModelSlug:
+			slug := strings.TrimSpace(val)
+			if slug == "" {
+				m.setStatus(statusErr, "model slug is required")
+				return m, nil
+			}
+			m.editingModel.Slug = slug
+			m.view = viewModelWindow
+			m.clearStatus()
+			m.startInput("context window in tokens (empty = unknown)", false)
+			if m.editingModel.ID != "" && m.editingModel.ContextWindow > 0 {
+				m.input.SetValue(fmt.Sprint(m.editingModel.ContextWindow))
+			}
+			return m, textinput.Blink
+
+		case viewModelWindow:
+			window := 0
+			if strings.TrimSpace(val) != "" {
+				var err error
+				if window, err = parseContextWindow(val); err != nil {
+					m.setStatus(statusErr, err.Error())
+					return m, nil
+				}
+			}
+			p, err := m.cat.PutProvider(m.modelEditEndpoint)
+			if err != nil {
+				m.setStatus(statusErr, err.Error())
+				return m, nil
+			}
+			saved, err := m.cat.PutModelWithWindow(p.ID, m.editingModel.Slug, window)
+			if err != nil {
+				m.setStatus(statusErr, err.Error())
+				return m, nil
+			}
+			if m.editingModel.ID != "" && m.editingModel.ID != saved.ID {
+				if err := m.cat.RemoveModel(m.editingModel.ID); err != nil {
+					m.setStatus(statusErr, err.Error())
+					m.view = viewModels
+					m.loadModels()
+					return m, nil
+				}
+			}
+			m.editingModel = catalog.Model{}
+			m.modelEditEndpoint = ""
+			m.view = viewModels
+			m.loadModels()
+			m.setStatus(statusOK, "Saved "+saved.Slug)
+			return m, nil
 
 		case viewDupName:
 			val = strings.TrimSpace(val)
@@ -559,6 +716,9 @@ func (m model) handleConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // re-renders it. A curated one-model list is stored explicitly so future switches
 // reproduce the exact picker selection.
 func (m model) finishAdd(name string) (tea.Model, tea.Cmd) {
+	if m.wiz.windows == nil {
+		m.wiz.windows = map[string]int{}
+	}
 	slugs := m.pickerModels()
 	// The binding's initial model is the first checked id. The tool's own model
 	// menu switches it later; the picker does not keep a separate default.
@@ -587,7 +747,11 @@ func (m model) finishAdd(name string) (tea.Model, tea.Cmd) {
 		}
 		existing = &b
 	}
-	b, err := catalog.StoreBinding(m.cat, m.tool, existing, name, m.wiz.endpoint, m.wiz.key, m.wiz.model, slugs, curated || !m.wiz.edit)
+	manualWindows := map[string]int{}
+	for slug := range m.wiz.manualWindows {
+		manualWindows[slug] = m.wiz.windows[slug]
+	}
+	b, err := catalog.StoreBinding(m.cat, m.tool, existing, name, m.wiz.endpoint, m.wiz.key, m.wiz.model, slugs, curated || !m.wiz.edit, manualWindows)
 	if err != nil {
 		m.setStatus(statusErr, err.Error())
 		return m, nil
@@ -612,7 +776,7 @@ func (m model) finishAdd(name string) (tea.Model, tea.Cmd) {
 }
 
 // cloneBinding copies a binding under a new name, sharing its credential and models.
-func (m model) cloneBinding(src, dst string) error {
+func (m model) cloneBinding(src, _ string) error {
 	return m.copyBindingToTool(src, m.tool.Name)
 }
 
@@ -626,6 +790,69 @@ func splitModelIDs(val string) []string {
 		}
 	}
 	return ids
+}
+
+// parseContextWindow parses a token count or unit string (e.g. "1m", "200k", "1048576").
+func parseContextWindow(val string) (int, error) {
+	s := strings.ToLower(strings.TrimSpace(val))
+	if s == "" {
+		return 0, nil
+	}
+	multiplier := 1
+	if strings.HasSuffix(s, "m") {
+		multiplier = 1_000_000
+		s = strings.TrimSuffix(s, "m")
+	} else if strings.HasSuffix(s, "k") {
+		multiplier = 1_000
+		s = strings.TrimSuffix(s, "k")
+	}
+	s = strings.TrimSpace(s)
+	var f float64
+	if _, err := fmt.Sscanf(s, "%f", &f); err != nil || f <= 0 {
+		return 0, fmt.Errorf("context window must be a positive whole number (e.g. 1m, 200k, 1048576)")
+	}
+	window := int(f * float64(multiplier))
+	if window <= 0 {
+		return 0, fmt.Errorf("context window must be a positive whole number")
+	}
+	return window, nil
+}
+
+type parsedModelSpec struct {
+	Slug   string
+	Window int
+	Manual bool
+}
+
+func parseTypedModelSpecs(val string) ([]parsedModelSpec, error) {
+	var specs []parsedModelSpec
+	for _, raw := range strings.Split(val, ",") {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		var slug string
+		var window int
+		var manual bool
+		if idx := strings.IndexAny(raw, ":@"); idx >= 0 {
+			slug = strings.TrimSpace(raw[:idx])
+			wStr := strings.TrimSpace(raw[idx+1:])
+			if slug == "" {
+				return nil, fmt.Errorf("missing model id before %q", string(raw[idx]))
+			}
+			w, err := parseContextWindow(wStr)
+			if err != nil {
+				return nil, fmt.Errorf("model %q: %w", slug, err)
+			}
+			window = w
+			manual = true
+		} else {
+			slug = raw
+			window = models.DefaultContextWindow(slug)
+		}
+		specs = append(specs, parsedModelSpec{Slug: slug, Window: window, Manual: manual})
+	}
+	return specs, nil
 }
 
 // containsID reports whether id is already in ids.

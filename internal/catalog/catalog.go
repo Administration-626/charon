@@ -28,6 +28,7 @@ import (
 	"unicode"
 
 	"charon/internal/artifact"
+	"charon/internal/models"
 )
 
 // Provider is one API site. It carries no wire dialect: a single endpoint can speak
@@ -47,10 +48,22 @@ type Credential struct {
 
 // Model is one model slug offered by a provider.
 type Model struct {
-	ID         string `json:"id"`
-	ProviderID string `json:"providerId"`
-	Slug       string `json:"slug"`
+	ID                  string       `json:"id"`
+	ProviderID          string       `json:"providerId"`
+	Slug                string       `json:"slug"`
+	ContextWindow       int          `json:"contextWindow,omitempty"`
+	ContextWindowSource WindowSource `json:"contextWindowSource,omitempty"`
 }
+
+// WindowSource records who supplied a context window. A manual value wins over a
+// later API refresh; an API value may replace another API value or an unknown one.
+type WindowSource string
+
+// Context-window sources. Manual values survive later catalog updates.
+const (
+	WindowManual  WindowSource = "manual"
+	WindowBuiltin WindowSource = "builtin"
+)
 
 // Binding is one saved choice for one tool: which credential, which model is the
 // default, and which models the tool's own picker should offer. Name is the label
@@ -215,6 +228,104 @@ func (c *Catalog) PutCredential(providerID, key string) (Credential, error) {
 // PutModel inserts a slug for a provider, or returns the existing row when that
 // provider already has that slug.
 func (c *Catalog) PutModel(providerID, slug string) (Model, error) {
+	return c.putModel(providerID, slug, nil, "")
+}
+
+// PutModelWithWindow inserts a model and stores a manually edited context window. A
+// zero window is meaningful: it clears an earlier value.
+func (c *Catalog) PutModelWithWindow(providerID, slug string, contextWindow int) (Model, error) {
+	source := WindowManual
+	if contextWindow == 0 {
+		source = ""
+	}
+	return c.putModel(providerID, slug, &contextWindow, source)
+}
+
+// SetModelWindow manually edits one model row by id. A zero window clears the value.
+func (c *Catalog) SetModelWindow(id string, contextWindow int) (Model, error) {
+	if err := c.lock(); err != nil {
+		return Model{}, err
+	}
+	defer c.unlock()
+	ms, err := c.models()
+	if err != nil {
+		return Model{}, err
+	}
+	for i, m := range ms {
+		if m.ID == id {
+			ms[i].ContextWindow = contextWindow
+			ms[i].ContextWindowSource = WindowManual
+			if contextWindow == 0 {
+				ms[i].ContextWindowSource = ""
+			}
+			return ms[i], writeTable(c.table("models.json"), ms)
+		}
+	}
+	return Model{}, fmt.Errorf("model %q: %w", id, ErrNotFound)
+}
+
+// Models returns every local model, ordered by provider id and slug. Nothing here
+// contacts a provider API.
+func (c *Catalog) Models() ([]Model, error) {
+	ms, err := c.models()
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(ms, func(i, j int) bool {
+		if ms[i].ProviderID != ms[j].ProviderID {
+			return ms[i].ProviderID < ms[j].ProviderID
+		}
+		return ms[i].Slug < ms[j].Slug
+	})
+	return ms, nil
+}
+
+// ModelsForProvider returns the local models of one provider, ordered by slug.
+func (c *Catalog) ModelsForProvider(providerID string) ([]Model, error) {
+	ms, err := c.models()
+	if err != nil {
+		return nil, err
+	}
+	var out []Model
+	for _, m := range ms {
+		if m.ProviderID == providerID {
+			out = append(out, m)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Slug < out[j].Slug })
+	return out, nil
+}
+
+// RemoveModel deletes an unreferenced local model. Bindings keep their references,
+// so a model still used by one is not removable.
+func (c *Catalog) RemoveModel(id string) error {
+	if err := c.lock(); err != nil {
+		return err
+	}
+	defer c.unlock()
+	bs, err := c.bindings()
+	if err != nil {
+		return err
+	}
+	for _, b := range bs {
+		if b.ModelID == id || contains(b.Models, id) {
+			return fmt.Errorf("model is used by binding %q", b.Name)
+		}
+	}
+	ms, err := c.models()
+	if err != nil {
+		return err
+	}
+	for i, m := range ms {
+		if m.ID == id {
+			ms = append(ms[:i:i], ms[i+1:]...)
+			return writeTable(c.table("models.json"), ms)
+		}
+	}
+	return fmt.Errorf("model %q: %w", id, ErrNotFound)
+}
+
+func (c *Catalog) putModel(providerID, slug string, contextWindow *int, source WindowSource) (Model, error) {
 	if err := c.lock(); err != nil {
 		return Model{}, err
 	}
@@ -230,12 +341,31 @@ func (c *Catalog) PutModel(providerID, slug string) (Model, error) {
 	if err != nil {
 		return Model{}, err
 	}
-	for _, m := range ms {
+	for i, m := range ms {
 		if m.ProviderID == providerID && m.Slug == slug {
+			if contextWindow != nil {
+				ms[i].ContextWindow = *contextWindow
+				ms[i].ContextWindowSource = source
+				return ms[i], writeTable(c.table("models.json"), ms)
+			}
+			if m.ContextWindow == 0 && m.ContextWindowSource == "" {
+				if bw := models.DefaultContextWindow(slug); bw > 0 {
+					ms[i].ContextWindow = bw
+					ms[i].ContextWindowSource = WindowBuiltin
+					return ms[i], writeTable(c.table("models.json"), ms)
+				}
+			}
 			return m, nil
 		}
 	}
 	m := Model{ID: c.nextID(modelIDs(ms), "m"), ProviderID: providerID, Slug: slug}
+	if contextWindow != nil {
+		m.ContextWindow = *contextWindow
+		m.ContextWindowSource = source
+	} else if bw := models.DefaultContextWindow(slug); bw > 0 {
+		m.ContextWindow = bw
+		m.ContextWindowSource = WindowBuiltin
+	}
 	return m, writeTable(c.table("models.json"), append(ms, m))
 }
 

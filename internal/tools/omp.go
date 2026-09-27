@@ -55,22 +55,31 @@ func ompFile(dir, base string) string {
 
 // ompBuildModels turns model ids into omp model entries with the same shape
 // charon's pi extension registers, so both tools size a custom model alike.
-func ompBuildModels(ids []string) []ompModel {
-	models := make([]ompModel, 0, len(ids))
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
-		if id == "" {
+func ompBuildModels(specs []ModelSpec) []ompModel {
+	models := make([]ompModel, 0, len(specs))
+	for _, spec := range specs {
+		if spec.Slug == "" {
 			continue
 		}
 		models = append(models, ompModel{
-			ID:            id,
-			Name:          id,
+			ID:            spec.Slug,
+			Name:          spec.Slug,
 			Input:         []string{"text", "image"},
-			ContextWindow: 128000,
+			ContextWindow: spec.ContextWindow,
 			MaxTokens:     8192,
 		})
 	}
 	return models
+}
+
+func ompSpecsFromProvider(provider ompProvider) []ModelSpec {
+	specs := make([]ModelSpec, 0, len(provider.Models))
+	for _, m := range provider.Models {
+		if m.ID != "" {
+			specs = append(specs, ModelSpec{Slug: m.ID, ContextWindow: m.ContextWindow})
+		}
+	}
+	return specs
 }
 
 // ompReadProvider decodes providers.<name> from a models.yml document.
@@ -161,17 +170,15 @@ func newOmp() *Tool {
 			// A call without its own list keeps what is registered (rename, key
 			// rotation); Catalog.Project always passes the binding's full list, so a
 			// switch replaces the picker instead of retaining another endpoint's models.
-			ids := a.AllModels
-			if len(ids) == 0 {
+			specs := a.Models
+			if specs == nil {
 				if prev, ok := ompReadProvider(doc, managedProvider); ok {
-					for _, m := range prev.Models {
-						ids = append(ids, m.ID)
-					}
+					specs = ompSpecsFromProvider(prev)
 				}
 			}
 			modelSlug := strings.TrimSpace(a.Model)
-			if len(ids) == 0 && modelSlug != "" {
-				ids = []string{modelSlug}
+			if specs == nil && modelSlug != "" {
+				specs = []ModelSpec{{Slug: modelSlug}}
 			}
 
 			var node yaml.Node
@@ -179,7 +186,7 @@ func newOmp() *Tool {
 				BaseURL: a.Endpoint,
 				APIKey:  a.Key,
 				API:     ompAPI,
-				Models:  ompBuildModels(ids),
+				Models:  ompBuildModels(specs),
 			}); err != nil {
 				return fmt.Errorf("render omp provider: %w", err)
 			}

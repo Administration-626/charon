@@ -11,7 +11,7 @@ import (
 // adds or updates the binding itself. modelsExplicit is true when the caller passed a
 // model list; otherwise an existing binding keeps its list, and a new one stores only
 // the default slug.
-func StoreBinding(cat *Catalog, t *tools.Tool, existing *Binding, name, endpoint, key, model string, modelList []string, modelsExplicit bool) (Binding, error) {
+func StoreBinding(cat *Catalog, t *tools.Tool, existing *Binding, name, endpoint, key, model string, modelList []string, modelsExplicit bool, manualWindows map[string]int) (Binding, error) {
 	if t == nil {
 		return Binding{}, fmt.Errorf("tool is required")
 	}
@@ -89,6 +89,11 @@ func StoreBinding(cat *Catalog, t *tools.Tool, existing *Binding, name, endpoint
 	for _, slug := range slugs {
 		if _, err := cat.PutModel(p.ID, slug); err != nil {
 			return Binding{}, err
+		}
+		if window, ok := manualWindows[slug]; ok {
+			if _, err := cat.PutModelWithWindow(p.ID, slug, window); err != nil {
+				return Binding{}, err
+			}
 		}
 	}
 
