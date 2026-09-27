@@ -21,13 +21,12 @@ const (
 	actionCancel = "\x00cancel"
 )
 
-// Focus positions on the single-page add/edit form: four text inputs followed by the
+// Focus positions on the single-page add/edit form: three text inputs followed by the
 // action rows. Named so the wrap-around arithmetic and the renderer can't drift apart.
 const (
 	focusName int = iota
 	focusURL
 	focusToken
-	focusModel
 	focusFetch  // [ Fetch & Pick Online Models ]
 	focusManual // [ Type Model IDs Manually ]
 	focusSave
@@ -65,26 +64,6 @@ func (w wizard) modelIDs() []string {
 		}
 	}
 	return ids
-}
-
-// modelField is what the edit form's Model Slug field shows: the default model only.
-// A curated picker list can run to dozens of ids, so it is summarized separately
-// (see pickerNote) rather than dumped into a text field.
-func (w wizard) modelField() string { return w.model }
-
-// setModelField parses that field back. A single id just changes the default model and
-// leaves any curated list intact; a comma-separated value curates the list outright,
-// which is how you register models for a gateway that has no /v1/models to fetch.
-func (w *wizard) setModelField(val string) {
-	ids := splitModelIDs(val)
-	switch len(ids) {
-	case 0:
-		w.model = ""
-	case 1:
-		w.model = ids[0]
-	default:
-		w.model, w.models = ids[0], ids
-	}
 }
 
 // pickerNote summarizes the curated model list for the edit form, naming the tool's
@@ -144,11 +123,6 @@ func (m *model) loadEditForm() {
 	m.formInputs[focusName] = newFormInput("e.g. openrouter-fast", m.wiz.name, false)
 	m.formInputs[focusURL] = newFormInput(exampleEndpoint, m.wiz.endpoint, false)
 	m.formInputs[focusToken] = newFormInput("sk-or-v1-xxxxxxxx", m.wiz.key, false)
-	modelPlaceholder := "e.g. gpt-4o (leave blank to use the first selected model)"
-	if m.tool != nil && m.tool.Name == "claude" {
-		modelPlaceholder = "e.g. claude-3-7-sonnet (leave blank to use the first selected model)"
-	}
-	m.formInputs[focusModel] = newFormInput(modelPlaceholder, m.wiz.modelField(), false)
 	m.formInputs[focusName].Focus()
 }
 
@@ -223,7 +197,6 @@ func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.wiz.name = strings.TrimSpace(m.formInputs[focusName].Value())
 		m.wiz.endpoint = strings.TrimRight(strings.TrimSpace(m.formInputs[focusURL].Value()), "/")
 		m.wiz.key = strings.TrimSpace(m.formInputs[focusToken].Value())
-		m.wiz.setModelField(m.formInputs[focusModel].Value())
 		return m, cmd
 	}
 	return m, nil
@@ -265,9 +238,13 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.wiz.model == "" && len(m.wiz.models) == 0 {
+		m.setStatus(statusErr, "Model is required (choose below)")
+		return m, nil
+	}
+
 	m.wiz.endpoint = endpoint
 	m.wiz.key = key
-	m.wiz.setModelField(m.formInputs[focusModel].Value())
 	return m.finishAdd(name)
 }
 
@@ -778,18 +755,6 @@ func (m model) finishAdd(name string) (tea.Model, tea.Cmd) {
 // cloneBinding copies a binding under a new name, sharing its credential and models.
 func (m model) cloneBinding(src, _ string) error {
 	return m.copyBindingToTool(src, m.tool.Name)
-}
-
-// splitModelIDs parses a typed model field ("a, b ,c") into ids, dropping blanks so a
-// trailing comma or empty input yields no ids at all.
-func splitModelIDs(val string) []string {
-	var ids []string
-	for _, id := range strings.Split(val, ",") {
-		if id = strings.TrimSpace(id); id != "" {
-			ids = append(ids, id)
-		}
-	}
-	return ids
 }
 
 // parseContextWindow parses a token count or unit string (e.g. "1m", "200k", "1048576").

@@ -130,7 +130,7 @@ func (m model) View() string {
 		}
 		header := "\n" + titleStyle.Render(title) + "\n\n"
 
-		labels := []string{"Name         ", "API Base URL ", "API Key/Token", "Model Slug   "}
+		labels := []string{"Name         ", "API Base URL ", "API Key/Token"}
 		var formLines []string
 
 		for i := 0; i < formInputCount; i++ {
@@ -153,17 +153,31 @@ func (m model) View() string {
 				inputStr := hintStyle.Render(inputVal)
 				formLines = append(formLines, bar+labelStr+inputStr)
 			}
-			if i == focusModel {
-				// Tree-indented model actions under Model Slug: fetch the endpoint's list,
-				// or type ids by hand for an endpoint that serves no /v1/models.
-				formLines = append(formLines,
-					modelActionRow("├── [ Fetch & Pick Online Models ]", m.formFocus == focusFetch),
-					modelActionRow("└── [ Type Model IDs Manually ]", m.formFocus == focusManual))
-				if note := m.pickerNote(); note != "" {
-					formLines = append(formLines, hintStyle.Render("                       "+note))
-				}
+		}
+
+		var modelDisplay string
+		if len(m.wiz.models) > 1 {
+			if note := m.pickerNote(); note != "" {
+				modelDisplay = promptStyle.Render(note)
+			} else {
+				modelDisplay = promptStyle.Render(fmt.Sprintf("%d models configured", len(m.wiz.models)))
+			}
+		} else {
+			modelVal := m.wiz.model
+			if modelVal == "" && len(m.wiz.models) == 1 {
+				modelVal = m.wiz.models[0]
+			}
+			if modelVal == "" {
+				modelDisplay = hintStyle.Render("(none configured — choose below)")
+			} else {
+				modelDisplay = promptStyle.Render(modelVal)
 			}
 		}
+		formLines = append(formLines,
+			"  "+hintStyle.Render("Models       : ")+modelDisplay,
+			modelActionRow("├── [ Fetch & Pick Online Models ]", m.formFocus == focusFetch),
+			modelActionRow("└── [ Type Model IDs Manually ]", m.formFocus == focusManual),
+		)
 
 		saveBtn := hintStyle.Render("  [ Save ]")
 		if m.formFocus == focusSave {

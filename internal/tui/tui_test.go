@@ -634,29 +634,21 @@ func TestSpaceTogglesHighlightedModelWithoutMovingCursor(t *testing.T) {
 	}
 }
 
-func TestSetModelFieldParsesCommaSeparatedIDs(t *testing.T) {
-	var w wizard
-
-	w.setModelField("gpt-4o")
-	if w.model != "gpt-4o" || w.models != nil {
-		t.Errorf("single id: model=%q models=%v, want gpt-4o with no curated list", w.model, w.models)
+func TestSubmitFormRequiresModel(t *testing.T) {
+	m := model{tool: &tools.Tool{Name: "claude", Title: "Claude"}, wiz: wizard{}}
+	m.loadEditForm()
+	m.formInputs[focusName].SetValue("my-binding")
+	m.formInputs[focusURL].SetValue("https://api.anthropic.com")
+	m.formInputs[focusToken].SetValue("sk-test")
+	next, _ := m.submitForm()
+	got := next.(model)
+	if !strings.Contains(got.status, "Model is required") {
+		t.Fatalf("submit without model status = %q, want Model is required", got.status)
 	}
 
-	w.setModelField(" kimi-k2 , glm-4.6 ,, ")
-	if w.model != "kimi-k2" || strings.Join(w.models, ",") != "kimi-k2,glm-4.6" {
-		t.Errorf("list: model=%q models=%v, want kimi-k2 default over [kimi-k2 glm-4.6]", w.model, w.models)
-	}
-
-	// Narrowing to one id changes the default without discarding the curated list —
-	// that's what the picker's checkboxes are for.
-	w.setModelField("glm-4.6")
-	if w.model != "glm-4.6" || strings.Join(w.models, ",") != "kimi-k2,glm-4.6" {
-		t.Errorf("re-default: model=%q models=%v, want glm-4.6 over the same list", w.model, w.models)
-	}
-
-	w.setModelField("  ")
-	if w.model != "" {
-		t.Errorf("blank: model=%q, want empty", w.model)
+	m.wiz.model = "claude-3-5-sonnet"
+	if m.wiz.model != "claude-3-5-sonnet" {
+		t.Fatalf("model = %q, want claude-3-5-sonnet", m.wiz.model)
 	}
 }
 
