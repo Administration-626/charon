@@ -17,6 +17,7 @@ type builtinRule struct {
 // the window size for common models, falling back to FallbackContextWindow (500K) if unmatched.
 var builtinModelWindows = []builtinRule{
 	// OpenAI
+	{pattern: "gpt-6", window: 1_050_000},
 	{pattern: "gpt-5.6", window: 1_050_000},
 	{pattern: "gpt-5.5", window: 1_050_000},
 	{pattern: "gpt-5.4-mini", window: 400_000},

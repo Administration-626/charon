@@ -8,6 +8,8 @@ func TestDefaultContextWindow(t *testing.T) {
 		want int
 	}{
 		// OpenAI
+		{"gpt-6-luna", 1_050_000},
+		{"openai/gpt-6-astra", 1_050_000},
 		{"gpt-5.6-sol", 1_050_000},
 		{"openai/gpt-5.6-luna", 1_050_000},
 		{"global.openai.gpt-5.6-terra", 1_050_000},
