@@ -914,6 +914,10 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 			m.setStatus(statusErr, "no binding named "+it.value)
 			return m, nil
 		}
+		if active, found, err := m.cat.Active(m.tool.Name); err == nil && found && active.ID == b.ID {
+			m.setStatus(statusInfo, it.value+" is already active")
+			return m, nil
+		}
 		if _, err := m.cat.Activate(b.ID); err != nil {
 			m.setStatus(statusErr, err.Error())
 		} else {

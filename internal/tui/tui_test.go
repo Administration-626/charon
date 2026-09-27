@@ -1584,3 +1584,70 @@ func TestUncheckingModelsAndDefaultShiftLogic(t *testing.T) {
 		t.Errorf("remote-model-2 should still be checked after Esc")
 	}
 }
+
+func TestEnterOnActiveBindingShowsAlreadyActive(t *testing.T) {
+	st := openTestCatalog(t, false)
+	p, err := st.PutProvider("https://api.anthropic.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr, err := st.PutCredential(p.ID, "sk-test-123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutModel(p.ID, "claude-sonnet-4-5"); err != nil {
+		t.Fatal(err)
+	}
+	b1, err := st.AddBinding("claude", "primary", cr.ID, "claude-sonnet-4-5", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.AddBinding("claude", "secondary", cr.ID, "claude-sonnet-4-5", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Activate(b1.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newModel(st, "test")
+	m.width, m.height = 100, 30
+	m.resize()
+	m.tool = tools.Find("claude")
+	m.view = viewProfiles
+	m.loadProfiles("primary")
+
+	// 1. Enter on currently active binding displays "already active" info notice
+	res, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := res.(model)
+	if updated.view != viewProfiles {
+		t.Errorf("view = %v, want viewProfiles", updated.view)
+	}
+	if updated.statusLvl != statusInfo {
+		t.Errorf("statusLvl = %v, want statusInfo", updated.statusLvl)
+	}
+	if updated.status != "primary is already active" {
+		t.Errorf("status = %q, want %q", updated.status, "primary is already active")
+	}
+
+	// 2. Enter on inactive binding switches successfully
+	updated.loadProfiles("secondary")
+	res2, _ := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	switched := res2.(model)
+	if switched.statusLvl != statusOK {
+		t.Errorf("statusLvl = %v, want statusOK", switched.statusLvl)
+	}
+	if !strings.HasPrefix(switched.status, "Switched to secondary") {
+		t.Errorf("status = %q, want prefix 'Switched to secondary'", switched.status)
+	}
+
+	// 3. Enter again on now-active secondary displays "already active" notice
+	res3, _ := switched.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	alreadyActive := res3.(model)
+	if alreadyActive.statusLvl != statusInfo {
+		t.Errorf("statusLvl = %v, want statusInfo", alreadyActive.statusLvl)
+	}
+	if alreadyActive.status != "secondary is already active" {
+		t.Errorf("status = %q, want %q", alreadyActive.status, "secondary is already active")
+	}
+}
