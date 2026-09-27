@@ -26,16 +26,24 @@ func TestCodexDescribeUnknownAuthModePassesThrough(t *testing.T) {
 	}
 }
 
-func TestClaudeContextWindow(t *testing.T) {
+func TestCodexContextWindow(t *testing.T) {
 	cases := map[string]int{
 		"claude-opus-4-7": 1_000_000,
 		"CLAUDE-SONNET":   1_000_000,
+		"deepseek-chat":   1_000_000,
+		"gemini-2.5-pro":  1_000_000,
+		"qwen-2.5-coder":  1_000_000,
+		"custom-slug":     1_000_000,
 		"gpt-5.5":         0,
+		"o1-mini":         0,
+		"o3-mini":         0,
+		"chatgpt-4o":      0,
+		"openai/gpt-4o":   0,
 		"":                0,
 	}
 	for model, want := range cases {
-		if got := claudeContextWindow(model); got != want {
-			t.Errorf("claudeContextWindow(%q) = %d, want %d", model, got, want)
+		if got := codexContextWindow(model); got != want {
+			t.Errorf("codexContextWindow(%q) = %d, want %d", model, got, want)
 		}
 	}
 }

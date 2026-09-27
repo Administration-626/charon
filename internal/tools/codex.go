@@ -14,13 +14,23 @@ func home() string {
 	return h
 }
 
-// claudeContextWindow returns the window to pin for a Claude model (1M), else 0.
-// OpenAI slugs Codex already sizes itself, so those stay unset.
-func claudeContextWindow(model string) int {
-	if strings.Contains(strings.ToLower(model), "claude") {
-		return 1_000_000
+func isOpenAISlug(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	m = strings.TrimPrefix(m, "openai/")
+	return strings.HasPrefix(m, "gpt-") ||
+		strings.HasPrefix(m, "o1") ||
+		strings.HasPrefix(m, "o3") ||
+		strings.HasPrefix(m, "chatgpt-")
+}
+
+// codexContextWindow returns the window to pin for an unrecognized model (1M), else 0.
+// OpenAI slugs Codex already sizes itself from its own catalog, so those stay unset.
+func codexContextWindow(model string) int {
+	model = strings.TrimSpace(model)
+	if model == "" || isOpenAISlug(model) {
+		return 0
 	}
-	return 0
+	return 1_000_000
 }
 
 // newCodex describes the OpenAI Codex CLI (~/.codex).
@@ -47,10 +57,10 @@ func newCodex() *Tool {
 			if modelSlug != "" {
 				cfg["model"] = modelSlug
 			}
-			// Codex sizes unknown (non-OpenAI) slugs from its own catalog, which undersizes
-			// Claude models; pin their window, clearing any stale prior value.
+			// Codex sizes unknown (non-OpenAI) slugs from its own catalog at 272K (~258K effective),
+			// which undersizes modern models; pin their window to 1M, clearing any stale prior value.
 			delete(cfg, "model_context_window")
-			if w := claudeContextWindow(modelSlug); w != 0 {
+			if w := codexContextWindow(modelSlug); w != 0 {
 				cfg["model_context_window"] = w
 			}
 			cfg["model_provider"] = "charon"

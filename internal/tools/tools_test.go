@@ -127,9 +127,9 @@ func TestEmptyConfigDirectoriesAreNotDetected(t *testing.T) {
 	}
 }
 
-func TestCodexPinsClaudeContextWindow(t *testing.T) {
+func TestCodexPinsCustomContextWindow(t *testing.T) {
 	home := sandboxHome(t)
-	// A prior Claude binding pinned the window; switching to an OpenAI model
+	// A prior custom binding pinned the window; switching to an OpenAI model
 	// (which Codex already sizes from its catalog) must clear it.
 	writeFile(t, filepath.Join(home, ".codex", "config.toml"), "model_context_window = 1000000\n")
 
@@ -146,13 +146,15 @@ func TestCodexPinsClaudeContextWindow(t *testing.T) {
 		return *cfg.Window, true
 	}
 
-	// A Claude model routed through the custom provider gets its window pinned,
-	// since Codex's own catalog undersizes it.
-	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-k123456789", Model: "claude-opus-4-7"}); err != nil {
-		t.Fatal(err)
-	}
-	if w, ok := window(); !ok || w != 1000000 {
-		t.Errorf("claude model should pin model_context_window=1000000, got %d (set=%v)", w, ok)
+	// Unknown models (Claude, DeepSeek, Gemini, etc.) routed through the custom provider
+	// get their window pinned to 1M, since Codex's own catalog undersizes unknown slugs at 258k.
+	for _, m := range []string{"claude-opus-4-7", "deepseek-chat", "gemini-2.5-pro", "qwen-2.5-coder"} {
+		if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-k123456789", Model: m}); err != nil {
+			t.Fatal(err)
+		}
+		if w, ok := window(); !ok || w != 1000000 {
+			t.Errorf("%s model should pin model_context_window=1000000, got %d (set=%v)", m, w, ok)
+		}
 	}
 
 	// Switching to a model Codex knows must drop the stale pin.
@@ -160,7 +162,7 @@ func TestCodexPinsClaudeContextWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	if w, ok := window(); ok {
-		t.Errorf("non-claude model must clear model_context_window, got %d", w)
+		t.Errorf("openai model must clear model_context_window, got %d", w)
 	}
 }
 
