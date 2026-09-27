@@ -40,7 +40,8 @@ re-renders that binding into the tool, overwriting only the keys charon owns.
 - 1M context window by default. For custom and non-OpenAI models (such as
   DeepSeek, Gemini, Qwen, or Claude), Charon automatically pins a 1,000,000 token
   context window for Codex, Claude Code, and Pi to prevent CLIs from clamping sessions
-  to internal fallbacks (like Codex's 258k or Claude Code's 200k limit).
+  to internal fallbacks (like Codex's 258k or Claude Code's 200k limit). Codex also
+  receives a model-catalog entry so its compaction logic recognizes the custom model.
 - Single-page form. Add or edit a binding on one screen (Name, URL, Token,
   Model) with direct typing and [ Save ] / [ Cancel ] buttons.
 - Instant clone & cross-tool copy. Press c to duplicate a binding, or x to
@@ -195,9 +196,10 @@ The list travels with the binding — switch bindings and the menu switches too.
 Codex is the exception: its config has no place to register extra models, so a
 Codex binding carries exactly one (charon edit codex <b> --model ...).
 When routing non-OpenAI models to Codex, Charon automatically writes a 1M context
-window (model_context_window = 1000000) into config.toml to avoid the CLI's 258k
-fallback limit. Claude Code and Pi also receive a 1M context window on custom
-endpoints.
+window (model_context_window = 1000000) into config.toml and adds the model to
+~/.codex/custom_models.json through model_catalog_json. This prevents Codex from
+using its 258k fallback during automatic compaction. Claude Code and Pi also receive
+a 1M context window on custom endpoints.
 A binding with one model replaces the previous binding's list with that one model.
 Changing the model in the tool does not update the saved binding, and Charon
 keeps the live model while that binding stays active. Rendering another binding

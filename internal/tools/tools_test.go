@@ -164,6 +164,34 @@ func TestCodexPinsCustomContextWindow(t *testing.T) {
 			t.Errorf("%s model should pin model_context_window=1000000, got %d (set=%v)", m, w, ok)
 		}
 	}
+	if data, err := os.ReadFile(filepath.Join(home, ".codex", "config.toml")); err != nil || !strings.Contains(string(data), "model_catalog_json") {
+		t.Errorf("unknown model should enable model_catalog_json: err=%v", err)
+	}
+	var catalog struct {
+		Models []struct {
+			Slug             string `json:"slug"`
+			ContextWindow    int    `json:"context_window"`
+			MaxContextWindow int    `json:"max_context_window"`
+		} `json:"models"`
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".codex", "custom_models.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &catalog); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range catalog.Models {
+		if m.Slug == "qwen-2.5-coder" && (m.ContextWindow != 1_000_000 || m.MaxContextWindow != 1_000_000) {
+			t.Fatalf("injected model window = %d/%d, want 1000000/1000000", m.ContextWindow, m.MaxContextWindow)
+		}
+	}
+	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-rotated"}); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(filepath.Join(home, ".codex", "config.toml")); err != nil || !strings.Contains(string(data), "model = 'qwen-2.5-coder'") || !strings.Contains(string(data), "model_catalog_json") {
+		t.Errorf("key-only apply should preserve model catalog: err=%v", err)
+	}
 
 	// Switching to a model Codex knows must drop the stale pin.
 	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-k123456789", Model: "gpt-5.5"}); err != nil {
@@ -171,6 +199,9 @@ func TestCodexPinsCustomContextWindow(t *testing.T) {
 	}
 	if w, ok := window(); ok {
 		t.Errorf("openai model must clear model_context_window, got %d", w)
+	}
+	if data, err := os.ReadFile(filepath.Join(home, ".codex", "config.toml")); err != nil || strings.Contains(string(data), "model_catalog_json") {
+		t.Errorf("known model should clear model_catalog_json: err=%v", err)
 	}
 
 	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-k123456789", Model: "kimi-k2",

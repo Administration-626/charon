@@ -2,11 +2,15 @@ package tools
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	toml "github.com/pelletier/go-toml/v2"
+
+	"charon/internal/artifact"
 )
 
 func home() string {
@@ -36,11 +40,103 @@ func codexContextWindow(model string, configured int) int {
 	return 1_000_000
 }
 
+func codexCatalog(path, model string, window int) error {
+	catalog, err := loadJSONMap(path)
+	if err != nil {
+		return err
+	}
+	if _, ok := catalog["models"]; !ok {
+		data, runErr := exec.Command("codex", "debug", "models").Output()
+		if runErr == nil {
+			if err := json.Unmarshal(data, &catalog); err != nil {
+				return fmt.Errorf("parse codex model catalog: %w", err)
+			}
+		}
+		if _, ok := catalog["models"]; !ok {
+			catalog["models"] = []any{}
+		}
+	}
+	models, ok := catalog["models"].([]any)
+	if !ok {
+		return fmt.Errorf("codex model catalog models is not an array")
+	}
+
+	var entry map[string]any
+	for _, raw := range models {
+		m, ok := raw.(map[string]any)
+		if ok && m["slug"] == model {
+			entry = m
+			break
+		}
+	}
+	if entry == nil {
+		for _, raw := range models {
+			if template, ok := raw.(map[string]any); ok {
+				entry = make(map[string]any, len(template)+2)
+				for key, value := range template {
+					entry[key] = value
+				}
+				break
+			}
+		}
+		if entry == nil {
+			entry = map[string]any{
+				"additional_speed_tiers":            []any{},
+				"apply_patch_tool_type":             "freeform",
+				"base_instructions":                 "",
+				"comp_hash":                         "charon",
+				"default_reasoning_level":           "medium",
+				"default_reasoning_summary":         "none",
+				"default_verbosity":                 "medium",
+				"description":                       "Model registered by Charon",
+				"display_name":                      model,
+				"effective_context_window_percent":  95,
+				"experimental_supported_tools":      []any{},
+				"include_apps_usage_instructions":   false,
+				"include_plugin_usage_instructions": false,
+				"include_skills_usage_instructions": false,
+				"input_modalities":                  []any{"text"},
+				"model_messages":                    map[string]any{},
+				"priority":                          1,
+				"service_tiers":                     []any{},
+				"shell_type":                        "unified_exec",
+				"support_verbosity":                 true,
+				"supported_in_api":                  true,
+				"supported_reasoning_levels":        []any{},
+				"supports_experimental_context":     false,
+				"supports_image_detail_original":    true,
+				"supports_reasoning_effort_updates": true,
+				"supports_search_tool":              true,
+				"tool_mode":                         "code_mode_only",
+				"truncation_policy":                 map[string]any{"limit": 10000, "mode": "tokens"},
+				"use_responses_lite":                true,
+				"visibility":                        "list",
+				"web_search_tool_type":              "text_and_image",
+			}
+		}
+		entry["slug"] = model
+		entry["display_name"] = model
+		models = append(models, entry)
+		catalog["models"] = models
+	}
+	entry["context_window"] = window
+	entry["max_context_window"] = window
+	data, err := json.MarshalIndent(catalog, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return artifact.AtomicWrite(path, append(data, '\n'), 0o600)
+}
+
 // newCodex describes the OpenAI Codex CLI (~/.codex).
 func newCodex() *Tool {
 	dir := filepath.Join(home(), ".codex")
 	configPath := filepath.Join(dir, "config.toml")
 	authPath := filepath.Join(dir, "auth.json")
+	catalogPath := filepath.Join(dir, "custom_models.json")
 
 	return &Tool{
 		Name:     "codex",
@@ -57,6 +153,11 @@ func newCodex() *Tool {
 				return err
 			}
 			modelSlug := strings.TrimSpace(a.Model)
+			if modelSlug == "" {
+				if current, ok := cfg["model"].(string); ok {
+					modelSlug = strings.TrimSpace(current)
+				}
+			}
 			if modelSlug != "" {
 				cfg["model"] = modelSlug
 			}
@@ -72,6 +173,12 @@ func newCodex() *Tool {
 			}
 			if w := codexContextWindow(modelSlug, configuredWindow); w != 0 {
 				cfg["model_context_window"] = w
+				if err := codexCatalog(catalogPath, modelSlug, w); err != nil {
+					return err
+				}
+				cfg["model_catalog_json"] = catalogPath
+			} else {
+				delete(cfg, "model_catalog_json")
 			}
 			cfg["model_provider"] = "charon"
 			providers := subMap(cfg, "model_providers")
