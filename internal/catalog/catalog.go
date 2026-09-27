@@ -116,6 +116,9 @@ func Open() (*Catalog, error) {
 	if err := c.migrateLegacyProfiles(); err != nil {
 		return nil, err
 	}
+	if err := c.backfillContextWindows(); err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 
