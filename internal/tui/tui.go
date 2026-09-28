@@ -311,7 +311,7 @@ func (m *model) loadTools() {
 	m.setDelegate(themedDelegate()) // two-line rows show each tool's status
 }
 
-func (m *model) loadModels() {
+func (m *model) loadModels(selectID string, fallbackIndex ...int) {
 	var items []list.Item
 	models, _ := m.cat.Models()
 	providerRows, _ := m.cat.Providers()
@@ -319,7 +319,11 @@ func (m *model) loadModels() {
 	for _, p := range providerRows {
 		providers[p.ID] = p.BaseURL
 	}
-	for _, stored := range models {
+	selectedIndex := -1
+	for i, stored := range models {
+		if selectID != "" && (stored.ID == selectID || stored.Slug == selectID) {
+			selectedIndex = i
+		}
 		window := "context unknown"
 		if stored.ContextWindow > 0 {
 			window = fmt.Sprintf("context %d", stored.ContextWindow)
@@ -339,7 +343,21 @@ func (m *model) loadModels() {
 	}
 	items = append(items, item{title: "＋ Add model…", desc: "endpoint, slug, context window", value: addSentinel})
 	m.list.SetItems(items)
-	m.list.Select(0)
+
+	if selectedIndex < 0 {
+		if len(fallbackIndex) > 0 {
+			selectedIndex = fallbackIndex[0]
+		} else {
+			selectedIndex = 0
+		}
+	}
+	if selectedIndex >= len(items) {
+		selectedIndex = len(items) - 1
+	}
+	if selectedIndex < 0 {
+		selectedIndex = 0
+	}
+	m.list.Select(selectedIndex)
 	m.list.Title = "Model Library — local"
 	m.setFooterKeys(keyOpen, keyEdit, keyDelete, keyBack)
 	m.setDelegate(themedDelegate())
@@ -579,7 +597,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if err := m.editModelWindowByID(it.value); err != nil {
 						m.setStatus(statusErr, err.Error())
 						m.view = viewModels
-						m.loadModels()
+						m.loadModels(it.value)
 						return m, nil
 					}
 					return m, textinput.Blink
@@ -608,12 +626,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.view == viewModels {
 				if it, ok := m.list.SelectedItem().(item); ok && !isSentinel(it.value) {
+					curIdx := m.list.Index()
 					if err := m.cat.RemoveModel(it.value); err != nil {
 						m.setStatus(statusErr, err.Error())
+						m.loadModels(it.value)
 					} else {
 						m.setStatus(statusOK, "Deleted "+it.title)
+						m.loadModels("", curIdx)
 					}
-					m.loadModels()
 				}
 				return m, nil
 			}
@@ -859,7 +879,7 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 		if it.value == libSentinel {
 			m.view = viewModels
 			m.clearStatus()
-			m.loadModels()
+			m.loadModels("")
 			m.resize()
 			return m, nil
 		}
@@ -873,6 +893,7 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 		m.clearStatus()
 		m.loadProfiles("") // land on the active binding
 		m.resize()         // banner hidden → grow the list
+		return m, nil
 
 	case viewCopyTool:
 		if err := m.copyBindingToTool(m.copySource, it.value); err != nil {
@@ -897,7 +918,7 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 		if err := m.editModelWindowByID(it.value); err != nil {
 			m.setStatus(statusErr, err.Error())
 			m.view = viewModels
-			m.loadModels()
+			m.loadModels(it.value)
 			return m, nil
 		}
 		return m, textinput.Blink

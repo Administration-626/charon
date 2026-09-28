@@ -1643,3 +1643,140 @@ func TestEnterOnActiveBindingShowsAlreadyActive(t *testing.T) {
 		t.Errorf("status = %q, want %q", alreadyActive.status, "secondary is already active")
 	}
 }
+
+func TestShowModelInfosDoesNotEagerlyPersist(t *testing.T) {
+	st := openTestCatalog(t, false)
+	endpoint := "https://gateway.example.com/v1"
+
+	m := newModel(st, "test")
+	m.tool = tools.Find("claude")
+	m.view = viewPickModel
+	m.wiz = wizard{
+		endpoint: endpoint,
+		key:      "sk-test",
+	}
+
+	remoteList := []models.Info{{ID: "remote-a"}, {ID: "remote-b"}}
+	m.showModelInfos(remoteList)
+
+	// In memory, models are populated
+	if len(m.allModels) != 2 || m.allModels[0] != "remote-a" || m.allModels[1] != "remote-b" {
+		t.Fatalf("allModels = %v, want [remote-a remote-b]", m.allModels)
+	}
+
+	// In database / catalog on disk, nothing should have been written yet
+	ps, err := st.Providers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ps) != 0 {
+		t.Errorf("providers should not be written eagerly: %+v", ps)
+	}
+	ms, err := st.Models()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) != 0 {
+		t.Errorf("models should not be written eagerly: %+v", ms)
+	}
+
+	// Select remote-a and finish picker to advance to review
+	m.toggleModel("remote-a")
+	res, _ := m.finishPicker()
+	m = res.(model)
+	if m.view != viewReviewModels {
+		t.Fatalf("view = %v, want viewReviewModels", m.view)
+	}
+
+	// Still nothing on disk
+	ms, _ = st.Models()
+	if len(ms) != 0 {
+		t.Errorf("models should remain empty during review: %+v", ms)
+	}
+
+	// Now finalize add
+	resAdd, _ := m.finishAdd("my-binding")
+	m = resAdd.(model)
+	if m.statusLvl == statusErr {
+		t.Fatalf("finishAdd failed: %s", m.status)
+	}
+
+	// Now disk has only the chosen model (remote-a), NOT remote-b!
+	ms, _ = st.Models()
+	if len(ms) != 1 || ms[0].Slug != "remote-a" {
+		t.Errorf("only chosen model should be saved to catalog, got: %+v", ms)
+	}
+}
+
+func TestModelLibraryCursorRetention(t *testing.T) {
+	st := openTestCatalog(t, false)
+	p, err := st.PutProvider("https://test.example/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m1, err := st.PutModelWithWindow(p.ID, "mod-1", 100000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m2, err := st.PutModelWithWindow(p.ID, "mod-2", 200000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m3, err := st.PutModelWithWindow(p.ID, "mod-3", 300000)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := newModel(st, "test")
+	m.view = viewModels
+	m.loadModels("")
+
+	// Initially at index 0 (mod-1)
+	if m.list.Index() != 0 {
+		t.Errorf("initial index = %d, want 0", m.list.Index())
+	}
+
+	// Select index 1 (mod-2)
+	m.list.Select(1)
+	if it, ok := m.list.SelectedItem().(item); !ok || it.value != m2.ID {
+		t.Fatalf("selected = %+v, want %s", it, m2.ID)
+	}
+
+	// Delete mod-2 with "d" key
+	res, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	afterDel := res.(model)
+	if afterDel.statusLvl == statusErr {
+		t.Fatalf("delete failed: %s", afterDel.status)
+	}
+
+	// Cursor should remain at index 1 (which is now mod-3, NOT reset to 0!)
+	if afterDel.list.Index() != 1 {
+		t.Errorf("cursor after delete = %d, want 1", afterDel.list.Index())
+	}
+	if it, ok := afterDel.list.SelectedItem().(item); !ok || it.value != m3.ID {
+		t.Errorf("item at index 1 after delete = %+v, want %s (mod-3)", it, m3.ID)
+	}
+
+	// Edit context window of mod-3
+	resEdit, _ := afterDel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	inEdit := resEdit.(model)
+	if inEdit.view != viewModelWindow {
+		t.Fatalf("view = %v, want viewModelWindow", inEdit.view)
+	}
+	inEdit.input.SetValue("350000")
+	resSaved, _ := inEdit.updateInput(tea.KeyMsg{Type: tea.KeyEnter})
+	afterSaved := resSaved.(model)
+	if afterSaved.view != viewModels {
+		t.Fatalf("view = %v, want viewModels", afterSaved.view)
+	}
+
+	// Cursor should land on mod-3 (index 1), NOT reset to 0!
+	if afterSaved.list.Index() != 1 {
+		t.Errorf("cursor after editing window = %d, want 1", afterSaved.list.Index())
+	}
+	if it, ok := afterSaved.list.SelectedItem().(item); !ok || it.value != m3.ID {
+		t.Errorf("item after editing window = %+v, want %s (mod-3)", it, m3.ID)
+	}
+
+	_ = m1
+}

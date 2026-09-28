@@ -150,65 +150,66 @@ func (m *model) showModels(ids []string) {
 }
 
 func (m *model) showModelInfos(infos []models.Info) {
-	m.storeFetchedModels(infos)
-	m.showLocalModels()
-}
-
-func (m *model) storeFetchedModels(infos []models.Info) {
-	if m.cat == nil {
-		return
-	}
-	endpoint := m.tool.ResolveEndpoint(m.wiz.endpoint)
-	p, found, err := m.cat.ProviderByURL(endpoint)
-	if err != nil {
-		m.setStatus(statusErr, err.Error())
-		return
-	}
-	if !found {
-		p, err = m.cat.PutProvider(endpoint)
-		if err != nil {
-			m.setStatus(statusErr, err.Error())
-			return
-		}
-	}
-	for _, info := range infos {
-		if _, err := m.cat.PutModel(p.ID, info.ID); err != nil {
-			m.setStatus(statusErr, err.Error())
-			return
-		}
-	}
-}
-
-func (m *model) showLocalModels() {
 	m.allModels = nil
-	m.wiz.windows = nil
+	if m.wiz.windows == nil {
+		m.wiz.windows = map[string]int{}
+	}
+	if m.wiz.manualWindows == nil {
+		m.wiz.manualWindows = map[string]bool{}
+	}
 	seen := make(map[string]bool)
-	if m.cat != nil {
+
+	// 1. Fetched remote models
+	for _, info := range infos {
+		slug := info.ID
+		if !seen[slug] {
+			m.allModels = append(m.allModels, slug)
+			seen[slug] = true
+		}
+		if _, ok := m.wiz.windows[slug]; !ok {
+			if bw := models.DefaultContextWindow(slug); bw > 0 {
+				m.wiz.windows[slug] = bw
+			}
+		}
+	}
+
+	// 2. If provider was already registered in catalog, overlay its stored models and windows
+	if m.cat != nil && m.tool != nil {
 		if p, found, err := m.cat.ProviderByURL(m.tool.ResolveEndpoint(m.wiz.endpoint)); err == nil && found {
 			if ms, err := m.cat.ModelsForProvider(p.ID); err == nil {
 				for _, stored := range ms {
-					m.allModels = append(m.allModels, stored.Slug)
-					seen[stored.Slug] = true
-					if stored.ContextWindow > 0 {
-						if m.wiz.windows == nil {
-							m.wiz.windows = map[string]int{}
-						}
+					if !seen[stored.Slug] {
+						m.allModels = append(m.allModels, stored.Slug)
+						seen[stored.Slug] = true
+					}
+					if !m.wiz.manualWindows[stored.Slug] && stored.ContextWindow > 0 {
 						m.wiz.windows[stored.Slug] = stored.ContextWindow
+						if stored.ContextWindowSource == catalog.WindowManual {
+							m.wiz.manualWindows[stored.Slug] = true
+						}
 					}
 				}
 			}
 		}
 	}
+
+	// 3. Keep any unlisted/curated models already in wizard
 	var unlisted []string
 	for _, id := range m.wiz.models {
 		if !seen[id] {
 			unlisted = append(unlisted, id)
 			seen[id] = true
+			if _, ok := m.wiz.windows[id]; !ok {
+				if bw := models.DefaultContextWindow(id); bw > 0 {
+					m.wiz.windows[id] = bw
+				}
+			}
 		}
 	}
 	if len(unlisted) > 0 {
 		m.allModels = append(unlisted, m.allModels...)
 	}
+
 	m.modelFilter = ""
 	m.renderModels()
 }
@@ -403,19 +404,28 @@ func (m *model) renderModels() {
 
 func (m *model) modelWindowSources() map[string]catalog.WindowSource {
 	sources := map[string]catalog.WindowSource{}
-	if m.cat == nil {
-		return sources
+	if m.cat != nil && m.tool != nil {
+		if p, found, err := m.cat.ProviderByURL(m.tool.ResolveEndpoint(m.wiz.endpoint)); err == nil && found {
+			if ms, err := m.cat.ModelsForProvider(p.ID); err == nil {
+				for _, stored := range ms {
+					sources[stored.Slug] = stored.ContextWindowSource
+				}
+			}
+		}
 	}
-	p, found, err := m.cat.ProviderByURL(m.tool.ResolveEndpoint(m.wiz.endpoint))
-	if err != nil || !found {
-		return sources
+	for slug := range m.wiz.windows {
+		if m.wiz.manualWindows != nil && m.wiz.manualWindows[slug] {
+			sources[slug] = catalog.WindowManual
+		} else if _, ok := sources[slug]; !ok {
+			sources[slug] = catalog.WindowBuiltin
+		}
 	}
-	ms, err := m.cat.ModelsForProvider(p.ID)
-	if err != nil {
-		return sources
-	}
-	for _, stored := range ms {
-		sources[stored.Slug] = stored.ContextWindowSource
+	for _, slug := range m.allModels {
+		if m.wiz.manualWindows != nil && m.wiz.manualWindows[slug] {
+			sources[slug] = catalog.WindowManual
+		} else if _, ok := sources[slug]; !ok {
+			sources[slug] = catalog.WindowBuiltin
+		}
 	}
 	return sources
 }
@@ -550,7 +560,9 @@ func (m model) editModelWindow() (tea.Model, tea.Cmd) {
 	m.view = viewEditField
 	m.startInput("context window in tokens (empty = unknown)", false)
 	m.input.SetValue("")
-	if m.cat != nil {
+	if w, ok := m.wiz.windows[it.value]; ok && w > 0 {
+		m.input.SetValue(fmt.Sprint(w))
+	} else if m.cat != nil && m.tool != nil {
 		if p, found, err := m.cat.ProviderByURL(m.tool.ResolveEndpoint(m.wiz.endpoint)); err == nil && found {
 			if ms, err := m.cat.ModelsForProvider(p.ID); err == nil {
 				for _, stored := range ms {

@@ -321,13 +321,16 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.view == viewModelEndpoint || m.view == viewModelSlug {
 			m.view = viewModels
 			m.clearStatus()
-			m.loadModels()
+			m.loadModels("")
 			return m, nil
 		}
 		if m.view == viewModelWindow {
+			targetID := m.editingModel.ID
+			m.editingModel = catalog.Model{}
+			m.modelEditEndpoint = ""
 			m.view = viewModels
 			m.clearStatus()
-			m.loadModels()
+			m.loadModels(targetID)
 			return m, nil
 		}
 		if m.view == viewEditForm && m.editField != "" {
@@ -416,18 +419,14 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				slug := m.editTarget
 				m.editTarget = ""
-				if m.cat != nil {
-					if p, found, err := m.cat.ProviderByURL(m.tool.ResolveEndpoint(m.wiz.endpoint)); err == nil && found {
-						if _, err := m.cat.PutModelWithWindow(p.ID, slug, window); err != nil {
-							m.setStatus(statusErr, err.Error())
-							return m, nil
-						}
-					}
-				}
 				if m.wiz.windows == nil {
 					m.wiz.windows = map[string]int{}
 				}
 				m.wiz.windows[slug] = window
+				if m.wiz.manualWindows == nil {
+					m.wiz.manualWindows = map[string]bool{}
+				}
+				m.wiz.manualWindows[slug] = true
 				if m.fromReview {
 					m.fromReview = false
 					m.view = viewReviewModels
@@ -441,7 +440,7 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				m.view = viewPickModel
 				m.clearStatus()
-				m.showLocalModels()
+				m.renderModels()
 				m.list.Select(indexOfValue(m.list.Items(), slug))
 				if window == 0 {
 					m.setStatus(statusOK, "cleared context window for "+slug)
@@ -521,28 +520,18 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.setStatus(statusErr, "enter at least one model id")
 				return m, nil
 			}
-			p, err := m.cat.PutProvider(m.tool.ResolveEndpoint(m.wiz.endpoint))
-			if err != nil {
-				m.setStatus(statusErr, err.Error())
-				return m, nil
-			}
 			slugs := make([]string, 0, len(parsed))
 			if m.wiz.windows == nil {
 				m.wiz.windows = map[string]int{}
+			}
+			if m.wiz.manualWindows == nil {
+				m.wiz.manualWindows = map[string]bool{}
 			}
 			for _, pm := range parsed {
 				slugs = append(slugs, pm.Slug)
 				m.wiz.windows[pm.Slug] = pm.Window
 				if pm.Manual {
-					if _, err := m.cat.PutModelWithWindow(p.ID, pm.Slug, pm.Window); err != nil {
-						m.setStatus(statusErr, err.Error())
-						return m, nil
-					}
-				} else {
-					if _, err := m.cat.PutModel(p.ID, pm.Slug); err != nil {
-						m.setStatus(statusErr, err.Error())
-						return m, nil
-					}
+					m.wiz.manualWindows[pm.Slug] = true
 				}
 			}
 			m.wiz.models = append([]string(nil), slugs...)
@@ -615,14 +604,14 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if err := m.cat.RemoveModel(m.editingModel.ID); err != nil {
 					m.setStatus(statusErr, err.Error())
 					m.view = viewModels
-					m.loadModels()
+					m.loadModels(saved.ID)
 					return m, nil
 				}
 			}
 			m.editingModel = catalog.Model{}
 			m.modelEditEndpoint = ""
 			m.view = viewModels
-			m.loadModels()
+			m.loadModels(saved.ID)
 			m.setStatus(statusOK, "Saved "+saved.Slug)
 			return m, nil
 
