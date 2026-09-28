@@ -1,7 +1,12 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +14,51 @@ import (
 
 	"charon/internal/catalog"
 )
+
+func TestUpdateHelpers(t *testing.T) {
+	tmp := t.TempDir()
+	archive := filepath.Join(tmp, "charon_linux_amd64.tar.gz")
+	payload := []byte("charon-test-binary")
+	f, err := os.Create(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(f)
+	tarWriter := tar.NewWriter(gz)
+	if err := tarWriter.WriteHeader(&tar.Header{Name: "charon", Mode: 0o755, Size: int64(len(payload))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tarWriter.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	archiveData, err := os.ReadFile(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(archiveData)
+	checksums := filepath.Join(tmp, "checksums.txt")
+	if err := os.WriteFile(checksums, []byte(fmt.Sprintf("%x  %s\n", sum, filepath.Base(archive))), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := checksumFor(checksums, filepath.Base(archive))
+	if err != nil || got != fmt.Sprintf("%x", sum) {
+		t.Fatalf("checksumFor = %q, %v", got, err)
+	}
+	gotPayload, err := extractReleaseBinary(archive)
+	if err != nil || !bytes.Equal(gotPayload, payload) {
+		t.Fatalf("extractReleaseBinary = %q, %v", gotPayload, err)
+	}
+}
 
 // sandbox points HOME and the catalog's XDG_CONFIG_HOME at temp dirs so run()
 // never touches real user config (see AGENTS.md).

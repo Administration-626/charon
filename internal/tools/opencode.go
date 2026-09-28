@@ -2,6 +2,8 @@ package tools
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -39,6 +41,10 @@ func newOpenCode() *Tool {
 			// non-empty models map for the models to show in /models.
 			cfg, err := loadJSONMap(configPath)
 			if err != nil {
+				var syntax *json.SyntaxError
+				if errors.As(err, &syntax) {
+					return fmt.Errorf("%s has JSONC comments or a syntax error at byte %d that the standard JSON parser rejects; remove the comments (or rename the file to opencode.json) and retry: %w", configPath, syntax.Offset, err)
+				}
 				return err
 			}
 			if cfg["$schema"] == nil {

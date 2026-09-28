@@ -1,18 +1,24 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
+	"charon/internal/artifact"
 	"charon/internal/catalog"
 	"charon/internal/models"
 	"charon/internal/secret"
@@ -707,64 +713,123 @@ func cmdUninstall() error {
 	return nil
 }
 
-// cmdUpdate runs the online install.sh script to upgrade the binary.
+const releaseBaseURL = "https://github.com/Administration-626/charon/releases/latest/download"
+
+// cmdUpdate downloads and verifies the release binary without executing a remote script.
 func cmdUpdate() error {
-	fmt.Println("Checking for updates and upgrading charon ...")
-
-	// Download the install script to a temp file instead of piping curl to sh directly,
-	// so we can verify the download and show the user what will be executed.
-	scriptURL := "https://github.com/Administration-626/charon/releases/latest/download/install.sh"
-	tmpFile, err := os.CreateTemp("", "charon-install-*.sh")
-	if err != nil {
-		return fmt.Errorf("creating temp file: %w", err)
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		return fmt.Errorf("self-update is supported only on linux and darwin")
 	}
-	tmpPath := tmpFile.Name()
-	defer func() { _ = os.Remove(tmpPath) }()
-
-	resp, err := http.Get(scriptURL) //nolint:noctx
+	archiveName := fmt.Sprintf("charon_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	tmpDir, err := os.MkdirTemp("", "charon-update-")
 	if err != nil {
-		return fmt.Errorf("downloading install script: %w", err)
+		return fmt.Errorf("creating update directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	archivePath := filepath.Join(tmpDir, archiveName)
+	if err := downloadRelease(releaseBaseURL+"/"+archiveName, archivePath); err != nil {
+		return fmt.Errorf("downloading %s: %w", archiveName, err)
+	}
+	checksumsPath := filepath.Join(tmpDir, "checksums.txt")
+	if err := downloadRelease(releaseBaseURL+"/checksums.txt", checksumsPath); err != nil {
+		return fmt.Errorf("downloading checksums.txt: %w", err)
+	}
+	expected, err := checksumFor(checksumsPath, archiveName)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(archivePath)
+	if err != nil {
+		return fmt.Errorf("reading downloaded archive: %w", err)
+	}
+	actual := fmt.Sprintf("%x", sha256.Sum256(data))
+	if actual != expected {
+		return fmt.Errorf("checksum mismatch for %s (expected %s, got %s)", archiveName, expected, actual)
+	}
+	binary, err := extractReleaseBinary(archivePath)
+	if err != nil {
+		return err
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("locating current binary: %w", err)
+	}
+	exe, err = filepath.EvalSymlinks(exe)
+	if err != nil {
+		return fmt.Errorf("resolving current binary: %w", err)
+	}
+	if err := artifact.AtomicWrite(exe, binary, 0o755); err != nil {
+		return fmt.Errorf("installing updated binary: %w", err)
+	}
+	fmt.Printf("Updated %s from verified release %s\n", exe, archiveName)
+	return nil
+}
+
+func downloadRelease(url, path string) error {
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(url) //nolint:gosec // URL is fixed to the project's release host.
+	if err != nil {
+		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download failed with status %s", resp.Status)
 	}
-
-	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
-		_ = tmpFile.Close()
-		return fmt.Errorf("saving install script: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("closing temp file: %w", err)
-	}
-
-	// Basic sanity check: the script must start with a shebang.
-	header, err := os.ReadFile(tmpPath)
+	f, err := os.Create(path)
 	if err != nil {
-		return fmt.Errorf("reading downloaded script: %w", err)
+		return err
 	}
-	if len(header) > 20 {
-		header = header[:20]
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		_ = f.Close()
+		return err
 	}
-	if !strings.HasPrefix(string(header), "#!/") {
-		return fmt.Errorf("downloaded file does not look like a shell script (header: %q)", string(header))
-	}
+	return f.Close()
+}
 
-	fmt.Printf("Downloaded install script to %s\n", tmpPath)
-	fmt.Println("The script will:")
-	fmt.Println("  - Detect your OS and architecture")
-	fmt.Println("  - Download the latest charon binary")
-	fmt.Println("  - Verify its checksum")
-	fmt.Println("  - Install it to ~/.local/bin/charon (or $PREFIX/bin)")
-	fmt.Println()
-	fmt.Println("Executing install script ...")
-
-	cmd := exec.Command("sh", tmpPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("update failed: %w", err)
+func checksumFor(path, archiveName string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("reading checksums.txt: %w", err)
 	}
-	return nil
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && strings.TrimPrefix(fields[1], "*") == archiveName {
+			if len(fields[0]) != sha256.Size*2 {
+				return "", fmt.Errorf("invalid checksum for %s", archiveName)
+			}
+			return strings.ToLower(fields[0]), nil
+		}
+	}
+	return "", fmt.Errorf("checksums.txt has no entry for %s", archiveName)
+}
+
+func extractReleaseBinary(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("opening release archive: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return nil, fmt.Errorf("reading release archive: %w", err)
+	}
+	defer func() { _ = gz.Close() }()
+	tr := tar.NewReader(gz)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading release archive: %w", err)
+		}
+		if header.Typeflag == tar.TypeReg && strings.TrimPrefix(header.Name, "./") == "charon" {
+			if header.Size <= 0 || header.Size > 100<<20 {
+				return nil, fmt.Errorf("invalid charon entry size %d", header.Size)
+			}
+			return io.ReadAll(io.LimitReader(tr, header.Size))
+		}
+	}
+	return nil, fmt.Errorf("release archive does not contain charon binary")
 }

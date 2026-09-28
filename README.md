@@ -289,6 +289,10 @@ files. Shell config files (~/.bashrc, ~/.zshrc), by contrast, default to
 Keep ~/.config/charon private. Writes are atomic (temp file → rename).
 Nothing is sent off the machine.
 
+Catalog mutations take an advisory flock so two `charon` processes cannot
+interleave a read-modify-write. This works on Linux and macOS only; on other
+platforms locking is a no-op and running concurrent instances is not supported.
+
 ## Project layout
 
 ```

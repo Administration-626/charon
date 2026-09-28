@@ -248,6 +248,9 @@ x 表示可以遍历该目录。各工具配置也采用相同的权限方式，
 将 API key 存在那里会扩大泄露风险。请限制对 ~/.config/charon 的访问。文件通过临时文件和
 rename 原子替换。Charon 不会将数据发送到本机以外。
 
+Catalog 的每次修改都持有 advisory flock，两个 charon 进程不会交错执行读改写。
+该锁只在 Linux 和 macOS 上生效；其他平台上锁是 no-op，不支持同时运行多个实例。
+
 ## 项目结构
 
 ```

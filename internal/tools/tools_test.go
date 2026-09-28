@@ -3,6 +3,7 @@ package tools
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -660,6 +661,27 @@ func TestOpenCodeDescribeAndApply(t *testing.T) {
 	}
 	if info.Effort != "high" {
 		t.Errorf("Describe nested effort = %q, want %q", info.Effort, "high")
+	}
+}
+
+func TestOpenCodeRejectsCommentedJsonc(t *testing.T) {
+	home := sandboxHome(t)
+	jsonc := filepath.Join(home, ".config", "opencode", "opencode.jsonc")
+	// Legal JSONC with a comment; the standard JSON parser must reject it with
+	// a hint instead of a bare syntax error.
+	writeFile(t, jsonc, "{\n  // comment\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\n")
+
+	c := Find("opencode")
+	err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-abc", Model: "gpt-x"})
+	if err == nil {
+		t.Fatal("ApplyAuth must fail on commented JSONC")
+	}
+	var syntax *json.SyntaxError
+	if !errors.As(err, &syntax) {
+		t.Fatalf("error should wrap json.SyntaxError, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "JSONC comments") {
+		t.Errorf("error should name the JSONC cause, got: %v", err)
 	}
 }
 
