@@ -62,6 +62,8 @@ func run(args []string) error {
 		return cmdEdit(cat, args[1:])
 	case "set-context":
 		return cmdSetContext(cat, args[1:])
+	case "set-effort":
+		return cmdSetEffort(cat, args[1:])
 	case "rename", "mv":
 		return cmdRename(cat, args[1:])
 	case "cp":
@@ -89,6 +91,7 @@ Usage:
   charon add <tool>          add+activate a binding (--name --key plus a model id)
   charon edit <tool> <b>     change a binding's endpoint/key/model/models/name
   charon set-context <tool> <b> <model> <tokens|unknown>
+  charon set-effort <tool> <b> <model> <low|medium|high|xhigh|max|ultra>
   charon rename <tool> <o> <n>  rename a saved binding
   charon cp <tool> <src> <dst>  duplicate a saved binding
   charon cp <tool> <src> <tool> <dst>  copy a binding to another tool

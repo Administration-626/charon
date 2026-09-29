@@ -119,7 +119,7 @@ func (m model) View() string {
 		return m.withFooter(m.wizardHeader() +
 			promptStyle.Render(m.spinner.View()+m.loadingMsg) +
 			"\n\n" + hintStyle.Render("fetching models from "+m.wiz.endpoint))
-	case viewModelEndpoint, viewModelSlug, viewModelWindow:
+	case viewModelEndpoint, viewModelSlug, viewModelWindow, viewModelEffort:
 		body := "\n" + titleStyle.Render("Model Library — local") + "\n\n" +
 			promptStyle.Render(m.prompt()) + "\n\n  " + m.input.View()
 		if m.view == viewModelEndpoint && m.editingModel.ID != "" {
@@ -251,6 +251,11 @@ func (m model) prompt() string {
 			return "Edit context window for " + m.editingModel.Slug + " (empty = unknown):"
 		}
 		return "Model Library — context window (empty = unknown):"
+	case viewModelEffort:
+		if m.editingModel.ID != "" {
+			return "Edit reasoning effort for " + m.editingModel.Slug + ":"
+		}
+		return "Model Library — reasoning effort:"
 	}
 	if m.view == viewEditField {
 		if m.editTarget != "" {

@@ -71,6 +71,12 @@ func (c *Catalog) project(b Binding) error {
 			window = 0
 		}
 		specs = append(specs, tools.ModelSpec{Slug: m.Slug, ContextWindow: window})
+		if id == b.ModelID {
+			spec.Effort = m.Effort
+			if spec.Effort == "" {
+				spec.Effort = "medium"
+			}
+		}
 	}
 	spec.Models = specs
 	return t.ApplyAuth(spec)

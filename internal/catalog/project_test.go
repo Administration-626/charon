@@ -85,7 +85,11 @@ func TestProjectCodexPinsGatewayGPTWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.PutModel(p.ID, "gpt-5.6-sol"); err != nil {
+	m, err := c.PutModel(p.ID, "gpt-5.6-sol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.SetModelEffort(m.ID, "xhigh"); err != nil {
 		t.Fatal(err)
 	}
 	b, err := c.AddBinding("codex", "gateway", cr.ID, "gpt-5.6-sol", []string{"gpt-5.6-sol"})
@@ -100,8 +104,8 @@ func TestProjectCodexPinsGatewayGPTWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "model_context_window = 1050000") || !strings.Contains(string(data), "model_catalog_json") {
-		t.Fatalf("gateway GPT model lost its catalog window:\n%s", data)
+	if !strings.Contains(string(data), "model_context_window = 1050000") || !strings.Contains(string(data), "model_catalog_json") || !strings.Contains(string(data), "model_reasoning_effort = 'xhigh'") {
+		t.Fatalf("gateway GPT model lost its catalog window or effort:\n%s", data)
 	}
 }
 

@@ -401,6 +401,41 @@ func TestRunSetContextUpdatesModelWindow(t *testing.T) {
 	}
 }
 
+func TestRunSetEffortWritesCodexConfig(t *testing.T) {
+	home := sandbox(t)
+	seedCodex(t, home)
+	if err := run([]string{"add", "codex", "--name", "gw", "--key", "sk-gw-123456789",
+		"--endpoint", "https://gateway.example/v1", "--model", "glm-5.3-flash"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := run([]string{"set-effort", "codex", "gw", "glm-5.3-flash", "HIGH"}); err != nil {
+		t.Fatalf("set-effort: %v", err)
+	}
+
+	c := openCatalog(t)
+	b, found, err := c.BindingByName("codex", "gw")
+	if err != nil || !found {
+		t.Fatalf("binding: found=%v err=%v", found, err)
+	}
+	m, err := c.Model(b.ModelID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Effort != "high" {
+		t.Fatalf("model effort = %q, want high", m.Effort)
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "model_reasoning_effort = 'high'") {
+		t.Fatalf("active Codex config does not carry effort:\n%s", data)
+	}
+	if err := run([]string{"set-effort", "codex", "gw", "glm-5.3-flash", "nope"}); err == nil {
+		t.Fatal("invalid effort should fail")
+	}
+}
+
 func TestRunStatusAndVersion(t *testing.T) {
 	home := sandbox(t)
 	seedCodex(t, home)

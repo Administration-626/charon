@@ -170,9 +170,13 @@ func TestCodexPinsCustomContextWindow(t *testing.T) {
 	}
 	var catalog struct {
 		Models []struct {
-			Slug             string `json:"slug"`
-			ContextWindow    int    `json:"context_window"`
-			MaxContextWindow int    `json:"max_context_window"`
+			Slug                  string `json:"slug"`
+			ContextWindow         int    `json:"context_window"`
+			MaxContextWindow      int    `json:"max_context_window"`
+			DefaultReasoningLevel string `json:"default_reasoning_level"`
+			ReasoningLevels       []struct {
+				Effort string `json:"effort"`
+			} `json:"supported_reasoning_levels"`
 		} `json:"models"`
 	}
 	data, err := os.ReadFile(filepath.Join(home, ".codex", "custom_models.json"))
@@ -183,8 +187,14 @@ func TestCodexPinsCustomContextWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, m := range catalog.Models {
-		if m.Slug == "qwen-2.5-coder" && (m.ContextWindow != 1_000_000 || m.MaxContextWindow != 1_000_000) {
+		if m.Slug != "qwen-2.5-coder" {
+			continue
+		}
+		if m.ContextWindow != 1_000_000 || m.MaxContextWindow != 1_000_000 {
 			t.Fatalf("injected model window = %d/%d, want 1000000/1000000", m.ContextWindow, m.MaxContextWindow)
+		}
+		if len(m.ReasoningLevels) == 0 || m.ReasoningLevels[0].Effort != "low" {
+			t.Fatalf("injected model reasoning levels = %#v, want a non-empty list starting with low", m.ReasoningLevels)
 		}
 	}
 	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-rotated"}); err != nil {
@@ -218,6 +228,55 @@ func TestCodexPinsCustomContextWindow(t *testing.T) {
 	}
 	if w, ok := window(); !ok || w != 256000 {
 		t.Fatalf("configured context window = %d (set=%v), want 256000", w, ok)
+	}
+}
+
+func TestCodexCatalogRepairsStaleModelEntry(t *testing.T) {
+	home := sandboxHome(t)
+	path := filepath.Join(home, ".codex", "custom_models.json")
+	writeFile(t, path, `{"models":[{"slug":"glm-5.3-flash","context_window":258048,"max_context_window":258048,"supported_reasoning_levels":[],"use_responses_lite":true,"tool_mode":"code_mode_only"}]}`)
+
+	if err := codexCatalog(path, "glm-5.3-flash", "max", 1_048_576); err != nil {
+		t.Fatal(err)
+	}
+	var catalog struct {
+		Models []struct {
+			Slug                  string `json:"slug"`
+			ContextWindow         int    `json:"context_window"`
+			MaxContextWindow      int    `json:"max_context_window"`
+			DefaultReasoningLevel string `json:"default_reasoning_level"`
+			ReasoningLevels       []struct {
+				Effort string `json:"effort"`
+			} `json:"supported_reasoning_levels"`
+			UseResponsesLite json.RawMessage `json:"use_responses_lite"`
+			ToolMode         json.RawMessage `json:"tool_mode"`
+		} `json:"models"`
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &catalog); err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.Models) != 1 {
+		t.Fatalf("model count = %d, want 1", len(catalog.Models))
+	}
+	m := catalog.Models[0]
+	if m.ContextWindow != 1_048_576 || m.MaxContextWindow != 1_048_576 {
+		t.Fatalf("repaired window = %d/%d, want 1048576/1048576", m.ContextWindow, m.MaxContextWindow)
+	}
+	if len(m.ReasoningLevels) == 0 {
+		t.Fatal("repaired model has no supported reasoning levels")
+	}
+	if m.DefaultReasoningLevel != "max" {
+		t.Fatalf("default reasoning level = %q, want max", m.DefaultReasoningLevel)
+	}
+	if len(m.UseResponsesLite) != 0 {
+		t.Errorf("use_responses_lite must be dropped (custom exec tool is rejected by gateways), got %s", m.UseResponsesLite)
+	}
+	if len(m.ToolMode) != 0 {
+		t.Errorf("tool_mode must be dropped (hides the shell tool behind the custom exec tool), got %s", m.ToolMode)
 	}
 }
 

@@ -387,6 +387,56 @@ func cmdSetContext(cat *catalog.Catalog, args []string) error {
 	return nil
 }
 
+func cmdSetEffort(cat *catalog.Catalog, args []string) error {
+	if len(args) < 4 {
+		return fmt.Errorf("usage: charon set-effort <tool> <binding> <model> <low|medium|high|xhigh|max|ultra>")
+	}
+	t, err := requireTool(args[0])
+	if err != nil {
+		return err
+	}
+	if t.Name != "codex" {
+		return fmt.Errorf("%s does not support reasoning effort", t.Title)
+	}
+	binding, found, err := cat.BindingByName(t.Name, args[1])
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("no %s binding named %q", t.Title, args[1])
+	}
+	slug := strings.TrimSpace(args[2])
+	if slug == "" {
+		return fmt.Errorf("model is required")
+	}
+	effort := strings.ToLower(strings.TrimSpace(args[3]))
+	if err := tools.ValidateCodexEffort(effort); err != nil {
+		return err
+	}
+	var model catalog.Model
+	for _, modelID := range binding.Models {
+		candidate, err := cat.Model(modelID)
+		if err != nil {
+			return err
+		}
+		if candidate.Slug == slug {
+			model = candidate
+			break
+		}
+	}
+	if model.ID == "" {
+		return fmt.Errorf("model %q is not registered in binding %q", slug, binding.Name)
+	}
+	if _, err := cat.SetModelEffort(model.ID, effort); err != nil {
+		return err
+	}
+	if _, err := cat.ProjectIfActive(binding.ID); err != nil {
+		return err
+	}
+	fmt.Printf("Set effort for %s to %s\n", slug, effort)
+	return nil
+}
+
 // probeModels asks the endpoint for its model list in the tool's historical dialect
 // first, then the other. Which dialect answered is not stored: the same site often
 // speaks both, and the next call can try again.

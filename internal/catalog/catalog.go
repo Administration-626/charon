@@ -29,6 +29,7 @@ import (
 
 	"charon/internal/artifact"
 	"charon/internal/models"
+	"charon/internal/tools"
 )
 
 // Provider is one API site. It carries no wire dialect: a single endpoint can speak
@@ -53,6 +54,7 @@ type Model struct {
 	Slug                string       `json:"slug"`
 	ContextWindow       int          `json:"contextWindow,omitempty"`
 	ContextWindowSource WindowSource `json:"contextWindowSource,omitempty"`
+	Effort              string       `json:"effort,omitempty"`
 }
 
 // WindowSource records who supplied a context window. A manual value wins over a
@@ -261,6 +263,32 @@ func (c *Catalog) SetModelWindow(id string, contextWindow int) (Model, error) {
 			if contextWindow == 0 {
 				ms[i].ContextWindowSource = ""
 			}
+			return ms[i], writeTable(c.table("models.json"), ms)
+		}
+	}
+	return Model{}, fmt.Errorf("model %q: %w", id, ErrNotFound)
+}
+
+// SetModelEffort records the reasoning-effort level Charon writes for a model.
+// An empty value clears the manual setting and falls back to medium when rendered.
+func (c *Catalog) SetModelEffort(id string, effort string) (Model, error) {
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	if effort != "" {
+		if err := tools.ValidateCodexEffort(effort); err != nil {
+			return Model{}, err
+		}
+	}
+	if err := c.lock(); err != nil {
+		return Model{}, err
+	}
+	defer c.unlock()
+	ms, err := c.models()
+	if err != nil {
+		return Model{}, err
+	}
+	for i, m := range ms {
+		if m.ID == id {
+			ms[i].Effort = effort
 			return ms[i], writeTable(c.table("models.json"), ms)
 		}
 	}

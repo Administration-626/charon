@@ -40,6 +40,7 @@ const (
 	viewModelEndpoint
 	viewModelSlug
 	viewModelWindow
+	viewModelEffort
 	viewAddEndpoint    // wizard: enter endpoint
 	viewAddKey         // wizard: enter API key
 	viewFetching       // wizard: fetching models
@@ -102,6 +103,7 @@ var (
 	keyRefresh = key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl+r", "refresh"))
 	keyManual  = key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "type ids"))
 	keyWindow  = key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "context"))
+	keyEffort  = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "effort"))
 	// keyEsc names only esc: on a text input "q" has to stay a letter.
 	keyEsc          = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back"))
 	keyClearFilter  = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter"))
@@ -362,7 +364,7 @@ func (m *model) loadModels(selectID string, fallbackIndex ...int) {
 	}
 	m.list.Select(selectedIndex)
 	m.list.Title = "Model Library — local"
-	m.setFooterKeys(keyOpen, keyEdit, keyDelete, keyBack)
+	m.setFooterKeys(keyOpen, keyEdit, keyEffort, keyDelete, keyBack)
 	m.setDelegate(themedDelegate())
 }
 
@@ -379,6 +381,20 @@ func (m *model) editModelWindowByID(id string) error {
 	if stored.ContextWindow > 0 {
 		m.input.SetValue(fmt.Sprint(stored.ContextWindow))
 	}
+	return nil
+}
+
+func (m *model) editModelEffortByID(id string) error {
+	stored, err := m.cat.Model(id)
+	if err != nil {
+		return err
+	}
+	m.editingModel = stored
+	if p, err := m.cat.Provider(stored.ProviderID); err == nil {
+		m.modelEditEndpoint = p.BaseURL
+	}
+	m.startInput("reasoning effort (low, medium, high, xhigh, max, ultra)", false)
+	m.input.SetValue(stored.Effort)
 	return nil
 }
 
@@ -589,6 +605,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+			if m.view == viewModels {
+				if it, ok := m.list.SelectedItem().(item); ok && !isSentinel(it.value) {
+					m.view = viewModelEffort
+					if err := m.editModelEffortByID(it.value); err != nil {
+						m.setStatus(statusErr, err.Error())
+						m.view = viewModels
+						m.loadModels(it.value)
+						return m, nil
+					}
+					return m, textinput.Blink
+				}
+			}
 		case "a":
 			if m.view == viewProfiles {
 				m.wiz = wizard{windows: map[string]int{}}
@@ -656,7 +684,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-
 	before := m.list.Index()
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)

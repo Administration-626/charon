@@ -42,6 +42,9 @@ re-renders that binding into the tool, overwriting only the keys charon owns.
   variant for 1M Claude models on gateways; Codex pins gateway models explicitly so
   GPT-shaped aliases do not fall back to about 258k. Codex also
   receives a model-catalog entry so its compaction logic recognizes the custom model.
+- Per-model reasoning effort. Use `charon set-effort codex <binding> <model> <level>`
+  or the Model Library’s `r` key to write low, medium, high, xhigh, max, or ultra to
+  Codex when that binding is active.
 - Single-page form. Add or edit a binding on one screen (Name, URL, Token,
   Model) with direct typing and [ Save ] / [ Cancel ] buttons.
 - Instant clone & cross-tool copy. Press c to duplicate a binding, or x to
@@ -200,7 +203,10 @@ The list travels with the binding — switch bindings and the menu switches too.
 Codex is the exception: its config has no place to register extra models, so a
 Codex binding carries exactly one (charon edit codex <b> --model ...).
 On a gateway, Charon writes each model's catalog window to Codex's
-`model_context_window` and `custom_models.json`, even for GPT-shaped aliases. For
+`model_context_window` and `custom_models.json`, even for GPT-shaped aliases. The
+custom catalog contains only the active model, so stale entries from another model
+cannot override the configured budget. Codex effort comes from the saved model row;
+the default is medium. For
 Claude Code, `claude-*` models with a window of at least 1M get a `[1m]` suffix in
 `ANTHROPIC_MODEL` and `/model`; other gateway aliases use
 `CLAUDE_CODE_MAX_CONTEXT_TOKENS`. OpenCode, Pi, omp, and Grok store windows in their

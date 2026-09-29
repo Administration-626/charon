@@ -244,6 +244,7 @@ func TestIsSentinel(t *testing.T) {
 func TestModelLibraryIsLocalEntryAndEditor(t *testing.T) {
 	st := openTestCatalog(t, false)
 	m := newModel(st, "test")
+	m.tool = tools.Find("codex")
 	m.loadTools()
 
 	if got := len(m.list.Items()); got == 0 || m.list.Items()[got-1].(item).value != libSentinel {
@@ -302,6 +303,62 @@ func TestModelLibraryIsLocalEntryAndEditor(t *testing.T) {
 	}
 	if desc := rows[0].(item).desc; !strings.Contains(desc, "200000") || !strings.Contains(desc, "manual") {
 		t.Fatalf("model library description = %q, want window and source", desc)
+	}
+}
+
+func TestModelLibraryEditsEffort(t *testing.T) {
+	st := openTestCatalog(t, true)
+	p, err := st.PutProvider("https://gateway.example/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m1, err := st.PutModel(p.ID, "glm-4.7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr, err := st.PutCredential(p.ID, "sk-gateway-123456789")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := st.AddBinding("codex", "gw", cr.ID, "glm-4.7", []string{"glm-4.7"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Activate(b.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newModel(st, "test")
+	m.loadTools()
+	m.view = viewModels
+	m.loadModels(m1.ID)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	inEdit := next.(model)
+	if inEdit.view != viewModelEffort {
+		t.Fatalf("view = %v, want viewModelEffort", inEdit.view)
+	}
+	inEdit.input.SetValue("HIGH")
+	saved, _ := inEdit.updateInput(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := saved.(model); got.view != viewModels {
+		t.Fatalf("view after saving effort = %v, want viewModels", got.view)
+	}
+	stored, err := st.Model(m1.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Effort != "high" {
+		t.Fatalf("saved effort = %q, want high", stored.Effort)
+	}
+	cfg := filepath.Join(t.TempDir(), "missing")
+	if home := os.Getenv("HOME"); home != "" {
+		cfg = filepath.Join(home, ".codex", "config.toml")
+	}
+	data, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "model_reasoning_effort = 'high'") {
+		t.Fatalf("Codex config does not carry effort:\n%s", data)
 	}
 }
 

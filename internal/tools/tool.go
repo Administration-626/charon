@@ -32,6 +32,7 @@ type AuthSpec struct {
 	Endpoint string
 	Key      string
 	Model    string
+	Effort   string
 	Models   []ModelSpec // complete registered list; nil means keep what is already there
 }
 
@@ -39,6 +40,7 @@ type AuthSpec struct {
 type ModelSpec struct {
 	Slug          string
 	ContextWindow int
+	Effort        string
 }
 
 // Tool describes one AI CLI's auth surface and how to summarize/reconfigure it.

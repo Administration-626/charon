@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	toml "github.com/pelletier/go-toml/v2"
@@ -45,25 +45,37 @@ func IsOfficialOpenAIEndpoint(endpoint string) bool {
 	return isOfficialEndpoint(endpoint, "api.openai.com")
 }
 
-func codexCatalog(path, model string, window int) error {
+func codexReasoningLevels() []any {
+	return []any{
+		map[string]any{"effort": "low", "description": "Fast responses with lighter reasoning"},
+		map[string]any{"effort": "medium", "description": "Balances speed and reasoning depth for everyday tasks"},
+		map[string]any{"effort": "high", "description": "Greater reasoning depth for complex problems"},
+		map[string]any{"effort": "xhigh", "description": "Extra high reasoning depth for complex problems"},
+		map[string]any{"effort": "max", "description": "Maximum reasoning depth for the hardest problems"},
+		map[string]any{"effort": "ultra", "description": "Maximum reasoning with automatic task delegation"},
+	}
+}
+
+func codexEfforts() []string {
+	return []string{"low", "medium", "high", "xhigh", "max", "ultra"}
+}
+
+// ValidateCodexEffort accepts only effort levels present in the generated catalog.
+func ValidateCodexEffort(effort string) error {
+	if slices.Contains(codexEfforts(), strings.ToLower(strings.TrimSpace(effort))) {
+		return nil
+	}
+	return fmt.Errorf("effort must be one of: %s", strings.Join(codexEfforts(), ", "))
+}
+
+func codexCatalog(path, model, effort string, window int) error {
 	catalog, err := loadJSONMap(path)
 	if err != nil {
 		return err
 	}
-	if _, ok := catalog["models"]; !ok {
-		data, runErr := exec.Command("codex", "debug", "models").Output()
-		if runErr == nil {
-			if err := json.Unmarshal(data, &catalog); err != nil {
-				return fmt.Errorf("parse codex model catalog: %w", err)
-			}
-		}
-		if _, ok := catalog["models"]; !ok {
-			catalog["models"] = []any{}
-		}
-	}
 	models, ok := catalog["models"].([]any)
 	if !ok {
-		return fmt.Errorf("codex model catalog models is not an array")
+		models = []any{}
 	}
 
 	var entry map[string]any
@@ -107,25 +119,34 @@ func codexCatalog(path, model string, window int) error {
 				"shell_type":                        "unified_exec",
 				"support_verbosity":                 true,
 				"supported_in_api":                  true,
-				"supported_reasoning_levels":        []any{},
+				"supported_reasoning_levels":        codexReasoningLevels(),
 				"supports_experimental_context":     false,
 				"supports_image_detail_original":    true,
 				"supports_reasoning_effort_updates": true,
 				"supports_search_tool":              true,
-				"tool_mode":                         "code_mode_only",
 				"truncation_policy":                 map[string]any{"limit": 10000, "mode": "tokens"},
-				"use_responses_lite":                true,
 				"visibility":                        "list",
 				"web_search_tool_type":              "text_and_image",
 			}
 		}
 		entry["slug"] = model
 		entry["display_name"] = model
-		models = append(models, entry)
-		catalog["models"] = models
 	}
 	entry["context_window"] = window
 	entry["max_context_window"] = window
+	entry["supported_reasoning_levels"] = codexReasoningLevels()
+	entry["supports_reasoning_effort_updates"] = true
+	// use_responses_lite and tool_mode="code_mode_only" make Codex register its V8
+	// "exec" orchestrator as a {"type":"custom"} tool instead of the regular shell
+	// tool. OpenAI-compatible gateways commonly reject that tool type (Z.AI error
+	// 1214 "tools[0].type:type is illegal") and the model loses shell access, so
+	// never carry either field over from an existing entry.
+	delete(entry, "use_responses_lite")
+	delete(entry, "tool_mode")
+	if effort != "" {
+		entry["default_reasoning_level"] = effort
+	}
+	catalog["models"] = []any{entry}
 	data, err := json.MarshalIndent(catalog, "", "  ")
 	if err != nil {
 		return err
@@ -184,12 +205,15 @@ func newCodex() *Tool {
 			}
 			if w := codexContextWindow(modelSlug, configuredWindow); w != 0 {
 				cfg["model_context_window"] = w
-				if err := codexCatalog(catalogPath, modelSlug, w); err != nil {
+				if err := codexCatalog(catalogPath, modelSlug, a.Effort, w); err != nil {
 					return err
 				}
 				cfg["model_catalog_json"] = catalogPath
 			} else {
 				delete(cfg, "model_catalog_json")
+			}
+			if a.Effort != "" {
+				cfg["model_reasoning_effort"] = a.Effort
 			}
 			cfg["model_provider"] = "charon"
 			providers := subMap(cfg, "model_providers")

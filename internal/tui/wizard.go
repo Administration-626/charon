@@ -333,6 +333,15 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.loadModels(targetID)
 			return m, nil
 		}
+		if m.view == viewModelEffort {
+			targetID := m.editingModel.ID
+			m.editingModel = catalog.Model{}
+			m.modelEditEndpoint = ""
+			m.view = viewModels
+			m.clearStatus()
+			m.loadModels(targetID)
+			return m, nil
+		}
 		if m.view == viewEditForm && m.editField != "" {
 			m.editField = ""
 			m.loadEditForm()
@@ -613,6 +622,42 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.view = viewModels
 			m.loadModels(saved.ID)
 			m.setStatus(statusOK, "Saved "+saved.Slug)
+			return m, nil
+
+		case viewModelEffort:
+			effort := strings.ToLower(strings.TrimSpace(val))
+			if err := tools.ValidateCodexEffort(effort); err != nil {
+				m.setStatus(statusErr, err.Error())
+				return m, nil
+			}
+			saved, err := m.cat.SetModelEffort(m.editingModel.ID, effort)
+			if err != nil {
+				m.setStatus(statusErr, err.Error())
+				return m, nil
+			}
+			bindings, err := m.cat.Bindings("codex")
+			if err != nil {
+				m.setStatus(statusErr, err.Error())
+				return m, nil
+			}
+			for _, binding := range bindings {
+				for _, modelID := range binding.Models {
+					if modelID != saved.ID {
+						continue
+					}
+					if _, err := m.cat.ProjectIfActive(binding.ID); err != nil {
+						m.setStatus(statusErr, err.Error())
+						m.view = viewModels
+						m.loadModels(saved.ID)
+						return m, nil
+					}
+				}
+			}
+			m.editingModel = catalog.Model{}
+			m.modelEditEndpoint = ""
+			m.view = viewModels
+			m.loadModels(saved.ID)
+			m.setStatus(statusOK, "Saved effort for "+saved.Slug)
 			return m, nil
 
 		case viewDupName:
