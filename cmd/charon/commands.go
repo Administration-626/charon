@@ -65,7 +65,7 @@ type statusRow struct {
 	Tool     string `json:"tool"`
 	Title    string `json:"title"`
 	Detected bool   `json:"detected"`
-	Active   string `json:"active,omitempty"`
+	Active   string `json:"active,omitempty"` // last binding Charon confirmed; kept for JSON compatibility
 	AuthMode string `json:"authMode,omitempty"`
 	Endpoint string `json:"endpoint,omitempty"`
 	Model    string `json:"model,omitempty"`
@@ -84,12 +84,14 @@ func cmdStatus(cat *catalog.Catalog, args []string) error {
 	var rows []statusRow
 	for _, t := range tools.All() {
 		r := statusRow{Tool: t.Name, Title: t.Title}
+		if b, found, err := cat.Active(t.Name); err != nil {
+			return err
+		} else if found {
+			r.Active = b.Name
+		}
 		if t.Detected != nil && t.Detected() {
 			info, _ := t.Describe()
 			r.Detected = true
-			if b, found, err := cat.Active(t.Name); err == nil && found {
-				r.Active = b.Name
-			}
 			r.AuthMode = info.AuthMode
 			r.Endpoint = info.Endpoint
 			r.Model = info.Model
@@ -105,15 +107,15 @@ func cmdStatus(cat *catalog.Catalog, args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "TOOL\tACTIVE\tAUTH\tENDPOINT\tMODEL\tEFFORT\tSECRET")
+	fmt.Fprintln(w, "TOOL\tLAST CONFIRMED\tLIVE AUTH\tLIVE ENDPOINT\tLIVE MODEL\tLIVE EFFORT\tLIVE SECRET")
 	for _, r := range rows {
-		if !r.Detected {
-			fmt.Fprintf(w, "%s\t—\t(not detected)\t\t\t\t\n", r.Title)
-			continue
-		}
 		active := r.Active
 		if active == "" {
 			active = "—"
+		}
+		if !r.Detected {
+			fmt.Fprintf(w, "%s\t%s\t(not detected)\t\t\t\t\n", r.Title, active)
+			continue
 		}
 		model, effort := r.Model, r.Effort
 		if model == "" {
@@ -222,7 +224,18 @@ func viewOf(cat *catalog.Catalog, b catalog.Binding) (shown, error) {
 }
 
 func cmdSwitch(cat *catalog.Catalog, args []string) error {
+	return cmdApplyBinding(cat, args, false)
+}
+
+func cmdReapply(cat *catalog.Catalog, args []string) error {
+	return cmdApplyBinding(cat, args, true)
+}
+
+func cmdApplyBinding(cat *catalog.Catalog, args []string, reapply bool) error {
 	if len(args) < 2 {
+		if reapply {
+			return fmt.Errorf("usage: charon reapply <tool> <binding>")
+		}
 		return fmt.Errorf("usage: charon switch <tool> <binding>")
 	}
 	t, err := requireTool(args[0])
@@ -236,10 +249,19 @@ func cmdSwitch(cat *catalog.Catalog, args []string) error {
 	if !found {
 		return fmt.Errorf("no %s binding named %q", t.Title, args[1])
 	}
-	if _, err := cat.Activate(b.ID); err != nil {
+	if reapply {
+		_, err = cat.Reapply(b.ID)
+	} else {
+		_, err = cat.Activate(b.ID)
+	}
+	if err != nil {
 		return err
 	}
-	fmt.Printf("Switched %s → %s\n", t.Title, args[1])
+	if reapply {
+		fmt.Printf("Reapplied %s → %s\n", t.Title, args[1])
+	} else {
+		fmt.Printf("Switched %s → %s\n", t.Title, args[1])
+	}
 	return nil
 }
 

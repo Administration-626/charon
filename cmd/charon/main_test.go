@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -162,6 +163,57 @@ func TestRunBindingLifecycle(t *testing.T) {
 	}
 	if _, found, err := c.BindingByName("codex", "default"); err != nil || found {
 		t.Errorf("a default binding was captured: found=%v err=%v", found, err)
+	}
+}
+
+func TestStatusAndReapplyDistinguishSavedBindingFromLiveModel(t *testing.T) {
+	home := sandbox(t)
+	if err := run([]string{"add", "claude", "--name", "work", "--key", "sk-test", "--endpoint", "https://api.anthropic.com", "--model", "claude-sonnet-4-5"}); err != nil {
+		t.Fatal(err)
+	}
+	settings := filepath.Join(home, ".claude", "settings.json")
+	data, err := os.ReadFile(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := strings.Replace(string(data), `"model": "claude-sonnet-4-5"`, `"model": "manual-model"`, 1)
+	if changed == string(data) {
+		t.Fatal("saved model missing from Claude settings")
+	}
+	if err := os.WriteFile(settings, []byte(changed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"switch", "claude", "work"}); err != nil {
+		t.Fatal(err)
+	}
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout := os.Stdout
+	os.Stdout = writer
+	t.Cleanup(func() { os.Stdout = stdout })
+	statusErr := run([]string{"status"})
+	_ = writer.Close()
+	os.Stdout = stdout
+	output, readErr := io.ReadAll(reader)
+	_ = reader.Close()
+	if statusErr != nil || readErr != nil {
+		t.Fatalf("status error = %v, read error = %v", statusErr, readErr)
+	}
+	if !strings.Contains(string(output), "LAST CONFIRMED") || !strings.Contains(string(output), "LIVE MODEL") || !strings.Contains(string(output), "manual-model") || !strings.Contains(string(output), "work") {
+		t.Fatalf("status does not distinguish last applied binding and live model:\n%s", output)
+	}
+	if err := run([]string{"reapply", "claude", "work"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"model": "claude-sonnet-4-5"`) {
+		t.Fatal("reapply did not restore the saved default model")
 	}
 }
 

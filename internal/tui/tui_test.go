@@ -1292,7 +1292,7 @@ func TestChromePinnedToTheBottom(t *testing.T) {
 		legend string
 	}{
 		{"tools", viewTools, nil, "enter open • q/esc quit"},
-		{"bindings", viewProfiles, func(m *model) { m.loadProfiles("") }, "enter switch • e edit"},
+		{"bindings", viewProfiles, func(m *model) { m.loadProfiles("") }, "enter switch • r reapply • e edit"},
 		{"form", viewEditForm, func(m *model) { m.loadEditForm() }, "↑/↓ move • tab next field • enter select • esc cancel"},
 		{"input step", viewAddEndpoint, nil, "enter continue • esc back"},
 		{"picker", viewPickModel, func(m *model) { m.showModels([]string{"glm-4.6", "kimi-k2"}) }, "enter finish • esc back"},
@@ -1641,6 +1641,46 @@ func TestEnterOnActiveBindingShowsAlreadyActive(t *testing.T) {
 	}
 	if alreadyActive.status != "secondary is already active" {
 		t.Errorf("status = %q, want %q", alreadyActive.status, "secondary is already active")
+	}
+
+	settings := filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
+	data, err := os.ReadFile(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := strings.Replace(string(data), `"model": "claude-sonnet-4-5"`, `"model": "manual-model"`, 1)
+	if changed == string(data) {
+		t.Fatal("saved model missing from Claude settings")
+	}
+	if err := os.WriteFile(settings, []byte(changed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if detail := alreadyActive.profileDetail("secondary"); !strings.Contains(detail, "saved:") || !strings.Contains(detail, "live:") || !strings.Contains(detail, "manual-model") {
+		t.Fatalf("binding detail does not distinguish saved and live config: %q", detail)
+	}
+	alreadyActive.loadTools()
+	seenLive := false
+	for _, raw := range alreadyActive.list.Items() {
+		if it, ok := raw.(item); ok && it.value == "claude" {
+			seenLive = strings.Contains(it.desc, "last confirmed: secondary") && strings.Contains(it.desc, "live:") && strings.Contains(it.desc, "manual-model")
+		}
+	}
+	if !seenLive {
+		t.Fatal("tool status does not separate last applied binding from live model")
+	}
+	alreadyActive.view = viewProfiles
+	alreadyActive.loadProfiles("secondary")
+	res4, _ := alreadyActive.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	reapplied := res4.(model)
+	if reapplied.statusLvl != statusOK || reapplied.status != "Reapplied secondary" {
+		t.Fatalf("reapply status = %q (%v)", reapplied.status, reapplied.statusLvl)
+	}
+	data, err = os.ReadFile(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"model": "claude-sonnet-4-5"`) {
+		t.Fatal("TUI reapply did not restore the saved default model")
 	}
 }
 

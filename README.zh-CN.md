@@ -102,7 +102,7 @@ go build -o charon ./cmd/charon   # 或只在本目录构建
 
 ```sh
 charon                       # 交互式菜单
-charon status                # 显示各工具的实时配置与当前绑定（--json）
+charon status                # 显示工具实况与上次确认的绑定（--json）
 charon ls <tool>             # 列出已保存的绑定（--json）
 charon models <tool>         # 列出某个 API 提供的模型（--key [--endpoint]）
 charon add <tool>            # 添加并激活一条绑定（--name --key，并提供至少一个模型 id）
@@ -111,15 +111,17 @@ charon rename <tool> <o> <n> # 重命名已保存的绑定
 charon cp <tool> <src> <dst> # 复制已保存的绑定
 charon cp <tool> <src> <tool> <dst> # 将已保存的绑定复制到另一个工具
 charon switch <tool> <b>     # 将已保存的绑定应用到工具配置
+charon reapply <tool> <b>    # 显式重新应用绑定及其默认模型
 charon rm <tool> <b>         # 删除一条绑定（正在使用的不能删）
 charon completion <shell>    # 输出 bash/zsh/fish 补全脚本
 charon update                # 升级 charon 到最新发行版
 charon uninstall             # 卸载已安装的 charon 二进制
 ```
 
-status 和 ls 支持 --json，便于脚本与编辑器集成。status 读工具的实时配置，
-ls 读已保存的绑定。在工具里通过 /model 更改的模型，只要这条绑定仍是当前绑定就会保留；
-应用另一条绑定时会替换模型列表。
+status 和 ls 支持 --json，便于脚本与编辑器集成。status 分别显示上次确认的绑定
+与工具实况；写入失败或手动改动后，两者可能不同。在工具里通过 /model 更改的模型
+会保留，直到应用另一条绑定。reapply 会显式重写默认模型和模型列表。
+status --json 的 `active` 字段表示上次确认的绑定；`endpoint` 和 `model` 来自工具实况。
 
 ### Shell 补全
 
@@ -192,7 +194,8 @@ Token（内容隐藏）与 Model。可直接修改任意字段；Model 字段下
 按钮可重新获取或手动调整模型。除非重新调整，绑定中保存的模型列表会保持不变；改名
 或更换 key 后，模型列表也会保留。按 Tab 选中 [ Save ] 应用修改（系统会自动处理改名），或
 [ Cancel ] 放弃。编辑一条非当前绑定只改目录，实时配置要等切换过去才变。
-按 d 删除；正在使用的绑定不能删除，须先切换到其他绑定。
+按 r 可显式重新应用选中的绑定及其默认模型。按 d 删除；正在使用的绑定不能删除，
+须先切换到其他绑定。
 
 ### 非交互式
 
@@ -234,10 +237,11 @@ charon 并在菜单中选择。
   - credentials.json：服务配置对应的 API key，权限为 0600。
   - models.json：服务配置对应的模型 slug。
   - bindings.json：工具的绑定名称、凭据、默认模型，以及要在工具菜单中提供的模型 ID。
-  - active.json：每个工具当前使用的绑定。
+  - active.json：Charon 为每个工具上次确认的绑定。
 - 绑定中的模型和 API key 必须对应同一个服务配置。Codex 绑定只能包含一个模型。
-- 切换绑定会更新 active.json，并将该绑定的设置写入工具配置。Charon 只修改由它管理的配置项。
-- 写入是原子的（临时文件 → rename）。
+- 切换绑定先写工具配置，再更新 active.json。Charon 只修改由它管理的配置项。
+- 每个文件的写入是原子的（临时文件 → rename），跨文件的整次切换不是。切换中断后，
+  可查看 status，并显式重新应用想使用的绑定。
 - 首次打开时，会把旧版中保存了 endpoint、key 和 model 的可编辑档案导入为绑定；旧档案目录
   保留不动。只有配置快照的档案、备份和 OAuth 登录不会导入。
 

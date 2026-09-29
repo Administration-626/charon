@@ -110,7 +110,7 @@ switch, add, edit, or delete bindings. Quit any time with Ctrl+C.
 
 ```sh
 charon                       # interactive arrow-key menu
-charon status                # show each tool's live config and active binding (--json)
+charon status                # show live config and last confirmed binding (--json)
 charon ls <tool>             # list saved bindings (--json)
 charon models <tool>         # list models offered by an API (--key [--endpoint])
 charon add <tool>            # add + activate a binding (--name --key and at least one model id)
@@ -119,6 +119,7 @@ charon rename <tool> <o> <n> # rename a saved binding
 charon cp <tool> <src> <dst> # duplicate a saved binding
 charon cp <tool> <src> <tool> <dst> # copy a saved binding to another tool
 charon switch <tool> <b>     # render a saved binding into the tool
+charon reapply <tool> <b>    # explicitly render it again, including the saved default model
 charon rm <tool> <b>         # delete a binding (refused while it is the active one)
 charon completion <shell>    # print a bash/zsh/fish completion script
 charon update                # upgrade charon to the latest release
@@ -126,9 +127,12 @@ charon uninstall             # remove the installed charon binary
 ```
 
 status and ls accept --json for scripting and editor integrations.
-status reads the tool's live config; ls reads the saved bindings. A model
-change made with the tool's own /model is kept while that binding stays
-active; rendering a different binding replaces the model list.
+status shows the last binding Charon confirmed alongside the tool's live config;
+the two can differ after a failed write or a manual change. A model change made
+with the tool's own /model is kept while that binding stays active. Reapply
+explicitly resets the tool to the binding's saved default model and model list.
+In status --json, the existing `active` field means the last confirmed binding;
+`endpoint` and `model` describe the live tool config.
 
 ### Shell completions
 
@@ -221,7 +225,8 @@ models. The model list saved on this binding stays as-is unless you curate a new
 so a rename or key rotation keeps the binding's own picker. Tab to [ Save ]
 to apply the changes — renaming is handled automatically — or [ Cancel ] to
 discard. Editing a binding that is not the active one updates only the catalog;
-the live config changes when you switch to it. Press d to delete; the active
+the live config changes when you switch to it. Press r to reapply a binding,
+including one already marked as last confirmed. Press d to delete; the active
 binding is refused until you switch away.
 
 ### Non-interactively
@@ -269,12 +274,14 @@ and choose a binding from the menu.
   - models.json — a model slug for one site.
   - bindings.json — one tool's saved choice: name, credential, default model,
     and the model ids its picker should offer.
-  - active.json — which binding each tool currently renders.
+  - active.json — the last binding Charon confirmed for each tool.
 - A binding's models must belong to the same site as its key. Codex carries
   exactly one model.
-- Switching updates active.json and re-renders that binding. Only the keys
+- Switching re-renders the binding, then updates active.json. Only the keys
   charon owns are overwritten.
-- Writes are atomic (temp file → rename).
+- Each file write is atomic (temp file → rename); a switch across multiple
+  files is not atomic. After an interrupted switch, inspect status and explicitly
+  reapply the binding you want.
 - On first open, saved legacy profiles with endpoint, key, and model data are imported
   as bindings. The old profile tree is kept; snapshot-only profiles, backups, and OAuth
   logins are not imported.

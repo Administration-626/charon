@@ -52,6 +52,8 @@ func run(args []string) error {
 		return cmdList(cat, args[1:])
 	case "switch", "use":
 		return cmdSwitch(cat, args[1:])
+	case "reapply":
+		return cmdReapply(cat, args[1:])
 	case "models":
 		return cmdModels(cat, args[1:])
 	case "add":
@@ -81,7 +83,7 @@ func printUsage() {
 
 Usage:
   charon                     interactive menu
-  charon status              show each tool's live config and active binding (--json)
+	  charon status              show live config and last confirmed binding (--json)
   charon ls <tool>           list saved bindings for a tool (--json)
   charon models <tool>       list models from an API (--key, --endpoint; --local)
   charon add <tool>          add+activate a binding (--name --key plus a model id)
@@ -90,7 +92,8 @@ Usage:
   charon rename <tool> <o> <n>  rename a saved binding
   charon cp <tool> <src> <dst>  duplicate a saved binding
   charon cp <tool> <src> <tool> <dst>  copy a binding to another tool
-  charon switch <tool> <b>   render a saved binding into the tool
+	  charon switch <tool> <b>   render a saved binding into the tool
+	  charon reapply <tool> <b>  render a binding even if it was last confirmed
   charon rm <tool> <b>       delete a saved binding (not the active one)
   charon completion <shell>  print a bash/zsh/fish completion script
   charon update              upgrade charon to the latest version

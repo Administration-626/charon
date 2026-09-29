@@ -79,6 +79,17 @@ func (c *Catalog) project(b Binding) error {
 // Activate renders a binding into its tool, then marks it active. The lock spans
 // both steps so another charon process cannot interleave a switch.
 func (c *Catalog) Activate(id string) (Binding, error) {
+	return c.activate(id, false)
+}
+
+// Reapply renders a binding even when it is already the last applied one.
+// Use it only for an explicit user request: rendering resets the tool's live
+// model to the binding's saved default.
+func (c *Catalog) Reapply(id string) (Binding, error) {
+	return c.activate(id, true)
+}
+
+func (c *Catalog) activate(id string, reapply bool) (Binding, error) {
 	if err := c.lock(); err != nil {
 		return Binding{}, err
 	}
@@ -96,14 +107,18 @@ func (c *Catalog) Activate(id string) (Binding, error) {
 	if err != nil {
 		return Binding{}, err
 	}
-	if active[b.Tool] == id {
+	same := active[b.Tool] == id
+	if same && !reapply {
 		return b, nil
 	}
 	if err := c.project(b); err != nil {
 		return Binding{}, err
 	}
+	if same {
+		return b, nil
+	}
 	if err := c.setActiveForTool(b.Tool, id); err != nil {
-		return Binding{}, err
+		return Binding{}, fmt.Errorf("recording active %s binding after updating tool config (tool config may have changed): %w", b.Tool, err)
 	}
 	return b, nil
 }

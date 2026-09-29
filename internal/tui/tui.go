@@ -86,6 +86,7 @@ func (i item) FilterValue() string { return i.title }
 // Contextual key bindings shown in the list's help footer (and "?"-expanded).
 var (
 	keySwitch    = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "switch"))
+	keyReapply   = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reapply"))
 	keyEdit      = key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit"))
 	keyBackup    = key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "clone"))
 	keyCopy      = key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "copy"))
@@ -287,14 +288,16 @@ func (m *model) loadTools() {
 	var items []list.Item
 	selectedIndex := 0
 	for i, t := range m.allTools {
-		desc := "not installed — see the README to set it up"
+		active := "—"
+		if b, found, err := m.cat.Active(t.Name); err == nil && found {
+			active = b.Name
+		} else if err != nil {
+			active = "unavailable"
+		}
+		desc := fmt.Sprintf("last confirmed: %s · live: not detected", active)
 		if t.Detected != nil && t.Detected() {
 			info, _ := t.Describe()
-			active := "—"
-			if b, found, err := m.cat.Active(t.Name); err == nil && found {
-				active = b.Name
-			}
-			desc = fmt.Sprintf("active: %s · %s · %s", active, info.AuthMode, info.Endpoint)
+			desc = fmt.Sprintf("last confirmed: %s · live: %s · %s · %s", active, info.AuthMode, info.Endpoint, info.Model)
 		}
 		items = append(items, item{title: t.Title, desc: desc, value: t.Name})
 		if m.tool != nil && t.Name == m.tool.Name {
@@ -453,8 +456,8 @@ func (m *model) loadProfiles(selectName string) {
 
 	m.list.SetItems(items)
 	m.list.Select(selectedIndex)
-	m.list.Title = m.tool.Title + " bindings"
-	m.setFooterKeys(keySwitch, keyEdit, keyBackup, keyCopy, keyDelete, keyBack)
+	m.list.Title = m.tool.Title + " bindings (✓ last confirmed)"
+	m.setFooterKeys(keySwitch, keyReapply, keyEdit, keyBackup, keyCopy, keyDelete, keyBack)
 	m.setDelegate(themedDelegate())
 	if len(saved) == 0 && m.status == "" && m.tool.ApplyAuth != nil {
 		m.setStatus(statusInfo, `No bindings yet — press enter on "Add new binding" or press 'a' to create one.`)
@@ -483,17 +486,6 @@ func (m *model) profileDetail(name string) string {
 		extra = len(slugs) - 1
 	}
 	effort := ""
-	if active, ok, err := m.cat.Active(m.tool.Name); err == nil && ok && active.Name == name && m.tool.Describe != nil {
-		if info, err := m.tool.Describe(); err == nil {
-			if info.Endpoint != "" {
-				url = info.Endpoint
-			}
-			if info.Model != "" {
-				slug = info.Model
-			}
-			effort = info.Effort
-		}
-	}
 	if url == "" {
 		url = "default endpoint"
 	}
@@ -503,6 +495,12 @@ func (m *model) profileDetail(name string) string {
 	detail := url + " · " + slug
 	if extra > 0 {
 		detail += fmt.Sprintf(" +%d", extra)
+	}
+	if active, ok, err := m.cat.Active(m.tool.Name); err == nil && ok && active.Name == name && m.tool.Describe != nil {
+		if info, err := m.tool.Describe(); err == nil {
+			detail = "saved: " + detail + " · live: " + info.Endpoint + " · " + info.Model
+			effort = info.Effort
+		}
 	}
 	if effort != "" {
 		detail += " · effort: " + effort
@@ -572,6 +570,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			return m.onEnter()
+		case "r":
+			if m.view == viewProfiles {
+				it, ok := m.selectedBinding()
+				if !ok {
+					return m, nil
+				}
+				b, found, err := m.cat.BindingByName(m.tool.Name, it.value)
+				if err != nil || !found {
+					m.setStatus(statusErr, "no binding named "+it.value)
+					return m, nil
+				}
+				if _, err := m.cat.Reapply(b.ID); err != nil {
+					m.setStatus(statusErr, err.Error())
+				} else {
+					m.setStatus(statusOK, "Reapplied "+it.value)
+					m.loadProfiles(it.value)
+				}
+				return m, nil
+			}
 		case "a":
 			if m.view == viewProfiles {
 				m.wiz = wizard{windows: map[string]int{}}

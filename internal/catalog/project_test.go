@@ -139,6 +139,16 @@ func TestActivateSameBindingPreservesLiveModel(t *testing.T) {
 	if !strings.Contains(string(data), `"model": "charon/glm-4.6"`) {
 		t.Fatalf("Activate(same binding) reset the live model:\n%s", data)
 	}
+	if _, err := c.Reapply(b.ID); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"model": "charon/kimi-k2"`) {
+		t.Fatal("Reapply did not restore the saved default model")
+	}
 }
 
 func TestProjectSingleModelReplacesExistingList(t *testing.T) {
@@ -274,6 +284,62 @@ func TestActivateProjectionFailureKeepsPreviousActive(t *testing.T) {
 	active, found, err := c.Active("claude")
 	if err != nil || !found || active.ID != first.ID {
 		t.Fatalf("active = %+v, found=%v, err=%v; want previous binding %s", active, found, err, first.ID)
+	}
+}
+
+func TestActivateActiveWriteFailureReportsChangedToolConfig(t *testing.T) {
+	c := openTest(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	_, firstCredential := seed(t, c, "https://first.example", "sk-first", "model-a")
+	_, secondCredential := seed(t, c, "https://second.example", "sk-second", "model-b")
+	first, err := c.AddBinding("claude", "first", firstCredential.ID, "model-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := c.AddBinding("claude", "second", secondCredential.ID, "model-b", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Activate(first.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// The tool's config remains writable while the catalog cannot replace active.json.
+	if err := os.Chmod(c.Root, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(c.Root, 0o700) })
+	if probe, err := os.CreateTemp(c.Root, "write-probe-*"); err == nil {
+		_ = probe.Close()
+		_ = os.Remove(probe.Name())
+		t.Skip("catalog directory remains writable despite mode 0500")
+	}
+
+	_, err = c.Activate(second.ID)
+	if err == nil || !strings.Contains(err.Error(), "tool config may have changed") {
+		t.Fatalf("activation error must explain partial write, got %v", err)
+	}
+	active, found, err := c.Active("claude")
+	if err != nil || !found || active.ID != first.ID {
+		t.Fatalf("active binding = %+v, found=%v, err=%v; want first", active, found, err)
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "https://second.example") {
+		t.Fatalf("tool config did not reflect second binding after active pointer write failed")
+	}
+	if _, err := c.Reapply(first.ID); err != nil {
+		t.Fatalf("reapply of confirmed binding should work without rewriting active.json: %v", err)
+	}
+	data, err = os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "https://first.example") {
+		t.Fatal("explicit reapply did not restore the confirmed binding")
 	}
 }
 
