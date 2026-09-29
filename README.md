@@ -37,10 +37,10 @@ re-renders that binding into the tool, overwriting only the keys charon owns.
   Charon registers them in the tool's own picker (Claude Code's /model, OpenCode's
   /models, Pi's /model, Oh My Pi's /model, Grok's /model), so changing
   model mid-session never means going back through Charon.
-- 1M context window by default. For custom and non-OpenAI models (such as
-  DeepSeek, Gemini, Qwen, or Claude), Charon automatically pins a 1,000,000 token
-  context window for Codex, Claude Code, and Pi to prevent CLIs from clamping sessions
-  to internal fallbacks (like Codex's 258k or Claude Code's 200k limit). Codex also
+- Per-model context windows. Charon uses manual values, then API values, then built-in
+  estimates. It writes these into supported tool settings. Claude Code gets the `[1m]`
+  variant for 1M Claude models on gateways; Codex pins gateway models explicitly so
+  GPT-shaped aliases do not fall back to about 258k. Codex also
   receives a model-catalog entry so its compaction logic recognizes the custom model.
 - Single-page form. Add or edit a binding on one screen (Name, URL, Token,
   Model) with direct typing and [ Save ] / [ Cancel ] buttons.
@@ -195,11 +195,13 @@ list), and Grok's /model (via [model.charon-<slug>] tables).
 The list travels with the binding — switch bindings and the menu switches too.
 Codex is the exception: its config has no place to register extra models, so a
 Codex binding carries exactly one (charon edit codex <b> --model ...).
-When routing non-OpenAI models to Codex, Charon automatically writes a 1M context
-window (model_context_window = 1000000) into config.toml and adds the model to
-~/.codex/custom_models.json through model_catalog_json. This prevents Codex from
-using its 258k fallback during automatic compaction. Claude Code and Pi also receive
-a 1M context window on custom endpoints.
+On a gateway, Charon writes each model's catalog window to Codex's
+`model_context_window` and `custom_models.json`, even for GPT-shaped aliases. For
+Claude Code, `claude-*` models with a window of at least 1M get a `[1m]` suffix in
+`ANTHROPIC_MODEL` and `/model`; other gateway aliases use
+`CLAUDE_CODE_MAX_CONTEXT_TOKENS`. OpenCode, Pi, omp, and Grok store windows in their
+model entries. These settings size the local budget; a long session must confirm
+that the gateway and upstream actually accept it.
 A binding with one model replaces the previous binding's list with that one model.
 Changing the model in the tool does not update the saved binding, and Charon
 keeps the live model while that binding stays active. Rendering another binding

@@ -57,6 +57,7 @@ func (c *Catalog) project(b Binding) error {
 		return err
 	}
 	spec := tools.AuthSpec{Endpoint: p.BaseURL, Key: cr.Key, Model: slug}
+	officialOpenAI := tools.IsOfficialOpenAIEndpoint(p.BaseURL)
 	specs := make([]tools.ModelSpec, 0, len(b.Models))
 	for _, id := range b.Models {
 		m, err := c.Model(id)
@@ -64,9 +65,9 @@ func (c *Catalog) project(b Binding) error {
 			return err
 		}
 		window := m.ContextWindow
-		// Codex already knows the context window of official OpenAI models. A
-		// catalog builtin is an estimate for other tools, not an override for Codex.
-		if b.Tool == "codex" && m.ContextWindowSource == WindowBuiltin {
+		// Codex's own model catalog applies only at OpenAI's endpoint. A gateway
+		// can reuse a GPT-shaped id while Codex falls back to about 258K.
+		if b.Tool == "codex" && officialOpenAI && m.ContextWindowSource == WindowBuiltin {
 			window = 0
 		}
 		specs = append(specs, tools.ModelSpec{Slug: m.Slug, ContextWindow: window})

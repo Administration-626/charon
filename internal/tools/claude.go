@@ -37,10 +37,8 @@ func newClaude() *Tool {
 			delete(env, "ANTHROPIC_BASE_URL")
 			delete(env, "ANTHROPIC_MODEL")
 			delete(env, "ANTHROPIC_CUSTOM_MODEL_OPTION")
-			// Claude Code treats a model id it does not recognize as "unknown" and clamps
-			// its context window to 200K, which makes a larger model compact constantly.
-			// Declaring the window lifts that fallback. Only set for a custom endpoint;
-			// the stock branch below clears it so an official login is not pinned.
+			// A gateway alias can use this override. Claude Code ignores it for
+			// recognized claude-* ids unless compaction is disabled.
 			delete(env, "CLAUDE_CODE_MAX_CONTEXT_TOKENS")
 
 			custom := a.Endpoint != "" && !strings.Contains(a.Endpoint, "api.anthropic.com")
@@ -48,10 +46,22 @@ func newClaude() *Tool {
 				// Gateways want Bearer auth at a custom base URL.
 				env["ANTHROPIC_BASE_URL"] = normalizeClaudeBaseURL(a.Endpoint)
 				env["ANTHROPIC_AUTH_TOKEN"] = a.Key
+				specs := a.Models
+				if specs == nil {
+					specs = claudeSpecsFromIDs(existingModels)
+				}
 				var window int
-				for _, spec := range a.Models {
-					if spec.Slug == a.Model {
+				baseModel := strings.TrimSuffix(a.Model, "[1m]")
+				modelID := a.Model
+				for _, spec := range specs {
+					if strings.TrimSuffix(spec.Slug, "[1m]") == baseModel {
 						window = spec.ContextWindow
+						if !strings.HasSuffix(modelID, "[1m]") {
+							modelID = claudeWindowModel(baseModel, window)
+						}
+						if strings.HasSuffix(spec.Slug, "[1m]") {
+							modelID = spec.Slug
+						}
 						break
 					}
 				}
@@ -62,22 +72,18 @@ func newClaude() *Tool {
 				// selector validates against it and rejects them, so route via ANTHROPIC_MODEL.
 				delete(s, "model")
 				if a.Model != "" {
-					env["ANTHROPIC_MODEL"] = a.Model
+					env["ANTHROPIC_MODEL"] = modelID
 					// Gateway model discovery only surfaces ids prefixed "claude"/"anthropic" in
 					// /model, which most gateway model ids aren't. ANTHROPIC_CUSTOM_MODEL_OPTION
 					// adds this one model to the picker regardless of its id shape.
-					env["ANTHROPIC_CUSTOM_MODEL_OPTION"] = a.Model
+					env["ANTHROPIC_CUSTOM_MODEL_OPTION"] = modelID
 				}
 				// A gateway serves models from many vendors under one endpoint, so curate the
 				// whole fetched list into /model via modelPicker — the same "register every
 				// model, not just the chosen one" move opencode.go and pi.go already make.
 				// Without it /model holds one row (ANTHROPIC_CUSTOM_MODEL_OPTION above) and
 				// switching model means going back through charon.
-				specs := a.Models
-				if specs == nil {
-					specs = claudeSpecsFromIDs(existingModels)
-				}
-				if picker := claudeModelPickerSpecs(specs, a.Model); picker != nil {
+				if picker := claudeModelPickerSpecs(specs, modelID); picker != nil {
 					s["modelPicker"] = picker
 				} else {
 					delete(s, "modelPicker")
@@ -124,6 +130,7 @@ func newClaude() *Tool {
 					if info.Model == "" {
 						info.Model = s.Env.Model
 					}
+					info.Model = strings.TrimSuffix(info.Model, "[1m]")
 					info.Effort = s.EffortLevel
 					if s.Env.AuthToken != "" {
 						info.Secret, info.AuthMode = s.Env.AuthToken, "api (bearer)"
@@ -153,7 +160,11 @@ func claudeSpecsFromIDs(ids []string) []ModelSpec {
 	specs := make([]ModelSpec, 0, len(ids))
 	for _, id := range ids {
 		if id != "" {
-			specs = append(specs, ModelSpec{Slug: id})
+			window := 0
+			if strings.HasSuffix(id, "[1m]") {
+				window = 1_000_000
+			}
+			specs = append(specs, ModelSpec{Slug: id, ContextWindow: window})
 		}
 	}
 	return specs
@@ -163,10 +174,19 @@ func claudeModelPickerSpecs(specs []ModelSpec, current string) map[string]any {
 	ids := make([]string, 0, len(specs))
 	for _, spec := range specs {
 		if spec.Slug != "" {
-			ids = append(ids, spec.Slug)
+			ids = append(ids, claudeWindowModel(spec.Slug, spec.ContextWindow))
 		}
 	}
 	return claudeModelPicker(ids, current)
+}
+
+// claudeWindowModel selects Claude Code's 1M variant only when the gateway's
+// model window supports it. Claude Code removes the suffix before the API call.
+func claudeWindowModel(id string, window int) string {
+	if window >= 1_000_000 && strings.HasPrefix(id, "claude-") && !strings.HasSuffix(id, "[1m]") {
+		return id + "[1m]"
+	}
+	return id
 }
 
 // claudeAccountEmail reads the logged-in account's email from ~/.claude.json for

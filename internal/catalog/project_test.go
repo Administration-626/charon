@@ -72,6 +72,39 @@ func TestProjectCodexLeavesBuiltinOpenAIWindowToCodex(t *testing.T) {
 	}
 }
 
+func TestProjectCodexPinsGatewayGPTWindow(t *testing.T) {
+	c := openTest(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	p, err := c.PutProvider("https://gateway.example/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr, err := c.PutCredential(p.ID, "sk-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.PutModel(p.ID, "gpt-5.6-sol"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := c.AddBinding("codex", "gateway", cr.ID, "gpt-5.6-sol", []string{"gpt-5.6-sol"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Activate(b.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "model_context_window = 1050000") || !strings.Contains(string(data), "model_catalog_json") {
+		t.Fatalf("gateway GPT model lost its catalog window:\n%s", data)
+	}
+}
+
 func TestActivateSameBindingPreservesLiveModel(t *testing.T) {
 	c := openTest(t)
 	home := t.TempDir()

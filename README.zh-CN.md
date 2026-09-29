@@ -36,9 +36,9 @@ endpoint 和凭据。
 - 在工具内切换模型。勾选你常用的那几个模型，Charon 会把它们注册进工具自身的
   选择器（Claude Code 的 /model、OpenCode 的 /models、Pi 的 /model、Oh My Pi 的
   /model、Grok 的 /model），可以在会话中更换模型，无需返回 Charon。
-- 默认 1M 上下文窗口。接入非官方或第三方模型（如 DeepSeek、Gemini、Qwen、Claude）时，
-  Charon 会自动为 Codex、Claude Code 和 Pi 注入 1,000,000 token 上下文窗口，避免工具回退到
-  内部默认限制（如 Codex 的 258k 或 Claude Code 的 200k 回退限制）。
+- 按模型设置上下文窗口。Charon 优先使用手动值，其次使用 API 返回值和内置值，
+  再将窗口写入工具支持的配置。第三方网关上的 Claude 1M 变体会在 Claude Code 中使用
+  `[1m]` 后缀；Codex 中的网关模型会写入明确的窗口，避免落到约 258k 的默认预算。
 - 单页表单。在同一屏新增或编辑绑定（Name、URL、Token、Model），可直接输入，
   并使用 [ Save ] / [ Cancel ] 按钮。
 - 快速复制与搜索。按 c 复制绑定，按 x 复制到其他工具；在模型列表中输入文字即可实时模糊搜索。
@@ -173,9 +173,11 @@ providers.charon 的模型列表）以及 Grok 的 /model（一组 [model.charon
 只有一个模型的绑定会将工具中的模型列表替换为该模型，不会保留上一条绑定的列表。Codex 是
 例外：它的配置里没有注册额外模型的位置，所以一条 Codex 绑定只带一个模型
 （charon edit codex <b> --model ...）。
-接入非 OpenAI 原生模型时，Charon 会自动在 Codex 配置中写入 1M 上下文窗口
-（model_context_window = 1000000），避免 Codex 触发未识别模型 258k 的默认截断限制。
-Claude Code 与 Pi 也会在接入第三方端点时自动获得 1M 上下文窗口。
+接入第三方端点时，Charon 会按模型库中的窗口设置 Codex 的 `model_context_window`，
+即使模型名以 `gpt-` 开头也一样。Claude Code 对窗口达到 1M 的 `claude-*` 模型，
+会在 `ANTHROPIC_MODEL` 和 `/model` 条目中加入 `[1m]` 后缀；其他网关别名仍使用
+`CLAUDE_CODE_MAX_CONTEXT_TOKENS`。OpenCode、Pi、omp 和 Grok 在各自的模型条目中
+保存窗口。窗口是本地预算，网关及上游是否接受这么长的请求仍需用长会话验证。
 在工具内更改模型不会更新 Charon 保存的绑定；只要这条绑定仍是当前绑定，Charon 会保留实况模型。
 应用另一条绑定时会替换模型列表。
 

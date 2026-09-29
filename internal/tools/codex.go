@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,6 +39,12 @@ func codexContextWindow(model string, configured int) int {
 		return 0
 	}
 	return 1_000_000
+}
+
+// IsOfficialOpenAIEndpoint reports whether endpoint is OpenAI's own API host.
+func IsOfficialOpenAIEndpoint(endpoint string) bool {
+	u, err := url.Parse(strings.TrimSpace(endpoint))
+	return err == nil && strings.EqualFold(u.Hostname(), "api.openai.com")
 }
 
 func codexCatalog(path, model string, window int) error {
@@ -170,6 +177,12 @@ func newCodex() *Tool {
 					configuredWindow = spec.ContextWindow
 					break
 				}
+			}
+			// Codex only knows the native window for OpenAI's own endpoint. A
+			// third-party gateway can expose a GPT-shaped alias that otherwise
+			// falls back to Codex's roughly 258K budget.
+			if configuredWindow == 0 && modelSlug != "" && !IsOfficialOpenAIEndpoint(a.Endpoint) {
+				configuredWindow = 1_000_000
 			}
 			if w := codexContextWindow(modelSlug, configuredWindow); w != 0 {
 				cfg["model_context_window"] = w

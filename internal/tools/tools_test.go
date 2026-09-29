@@ -194,8 +194,8 @@ func TestCodexPinsCustomContextWindow(t *testing.T) {
 		t.Errorf("key-only apply should preserve model catalog: err=%v", err)
 	}
 
-	// Switching to a model Codex knows must drop the stale pin.
-	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-k123456789", Model: "gpt-5.5"}); err != nil {
+	// The official OpenAI endpoint lets Codex use its native catalog and drops the stale pin.
+	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://api.openai.com/v1", Key: "sk-k123456789", Model: "gpt-5.5"}); err != nil {
 		t.Fatal(err)
 	}
 	if w, ok := window(); ok {
@@ -203,6 +203,13 @@ func TestCodexPinsCustomContextWindow(t *testing.T) {
 	}
 	if data, err := os.ReadFile(filepath.Join(home, ".codex", "config.toml")); err != nil || strings.Contains(string(data), "model_catalog_json") {
 		t.Errorf("known model should clear model_catalog_json: err=%v", err)
+	}
+	// The same GPT-shaped alias behind a gateway still needs an explicit window.
+	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-k123456789", Model: "gpt-5.5"}); err != nil {
+		t.Fatal(err)
+	}
+	if w, ok := window(); !ok || w != 1_000_000 {
+		t.Fatalf("gateway GPT alias should pin 1M, got %d (set=%v)", w, ok)
 	}
 
 	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-k123456789", Model: "kimi-k2",
@@ -409,6 +416,64 @@ func TestClaudeUsesModelContextWindow(t *testing.T) {
 	}
 	if s.Env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] != "256000" {
 		t.Fatalf("context tokens = %q, want 256000", s.Env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"])
+	}
+}
+
+func TestClaudeGatewayContextVariants(t *testing.T) {
+	home := sandboxHome(t)
+	path := filepath.Join(home, ".claude", "settings.json")
+	writeFile(t, path, `{}`)
+	c := Find("claude")
+	specs := []ModelSpec{
+		{Slug: "claude-opus-5", ContextWindow: 1_000_000},
+		{Slug: "claude-sonnet-4-5", ContextWindow: 200_000},
+		{Slug: "kimi-k3", ContextWindow: 1_048_576},
+	}
+	apply := func(model string, models []ModelSpec) map[string]string {
+		t.Helper()
+		if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gateway.example", Key: "sk-gw-1", Model: model, Models: models}); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var s struct {
+			Env map[string]string `json:"env"`
+		}
+		if err := json.Unmarshal(data, &s); err != nil {
+			t.Fatal(err)
+		}
+		return s.Env
+	}
+
+	env := apply("claude-opus-5", specs)
+	if env["ANTHROPIC_MODEL"] != "claude-opus-5[1m]" || env["ANTHROPIC_CUSTOM_MODEL_OPTION"] != "claude-opus-5[1m]" {
+		t.Fatalf("default model does not select 1M variant: %v", env)
+	}
+	ids, _, _ := readClaudePicker(t, home)
+	if got := strings.Join(ids, ","); got != "claude-opus-5[1m],claude-sonnet-4-5,kimi-k3" {
+		t.Fatalf("picker models = %q", got)
+	}
+	info, err := c.Describe()
+	if err != nil || info.Model != "claude-opus-5" {
+		t.Fatalf("described model = %q, err = %v", info.Model, err)
+	}
+
+	// A key rotation without a replacement list must keep the 1M picker entry.
+	env = apply("claude-opus-5", nil)
+	ids, _, _ = readClaudePicker(t, home)
+	if env["ANTHROPIC_MODEL"] != "claude-opus-5[1m]" || strings.Join(ids, ",") != "claude-opus-5[1m],claude-sonnet-4-5,kimi-k3" {
+		t.Fatalf("key rotation lost 1M entry: model = %q, picker = %v", env["ANTHROPIC_MODEL"], ids)
+	}
+
+	env = apply("kimi-k3", specs)
+	if env["ANTHROPIC_MODEL"] != "kimi-k3" || env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] != "1048576" {
+		t.Fatalf("gateway alias override = %v", env)
+	}
+	env = apply("claude-sonnet-4-5", specs)
+	if env["ANTHROPIC_MODEL"] != "claude-sonnet-4-5" {
+		t.Fatalf("200K model got 1M variant: %v", env)
 	}
 }
 
