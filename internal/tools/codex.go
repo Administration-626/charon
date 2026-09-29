@@ -3,7 +3,6 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,8 +42,7 @@ func codexContextWindow(model string, configured int) int {
 
 // IsOfficialOpenAIEndpoint reports whether endpoint is OpenAI's own API host.
 func IsOfficialOpenAIEndpoint(endpoint string) bool {
-	u, err := url.Parse(strings.TrimSpace(endpoint))
-	return err == nil && strings.EqualFold(u.Hostname(), "api.openai.com")
+	return isOfficialEndpoint(endpoint, "api.openai.com")
 }
 
 func codexCatalog(path, model string, window int) error {

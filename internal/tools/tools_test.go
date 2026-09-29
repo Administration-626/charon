@@ -391,6 +391,31 @@ func TestClaudeCustomEndpointUsesBearer(t *testing.T) {
 	}
 }
 
+func TestClaudeOfficialLookingGatewayUsesBearer(t *testing.T) {
+	home := sandboxHome(t)
+	c := Find("claude")
+	endpoint := "https://api.anthropic.com.gateway.example/v1"
+	if err := c.ApplyAuth(AuthSpec{Endpoint: endpoint, Key: "sk-gateway", Model: "claude-sonnet-4-5"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings struct {
+		Env map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatal(err)
+	}
+	if settings.Env["ANTHROPIC_BASE_URL"] != "https://api.anthropic.com.gateway.example" || settings.Env["ANTHROPIC_AUTH_TOKEN"] != "sk-gateway" {
+		t.Fatal("gateway endpoint was treated as Anthropic's API")
+	}
+	if _, ok := settings.Env["ANTHROPIC_API_KEY"]; ok {
+		t.Fatal("gateway key written as official API key")
+	}
+}
+
 func TestClaudeUsesModelContextWindow(t *testing.T) {
 	home := sandboxHome(t)
 	writeFile(t, filepath.Join(home, ".claude", "settings.json"), `{}`)

@@ -25,6 +25,12 @@ func ValidateEndpoint(ep string) error {
 	return nil
 }
 
+// isOfficialEndpoint matches the exact HTTPS host of a tool's native API.
+func isOfficialEndpoint(endpoint, host string) bool {
+	u, err := url.Parse(strings.TrimSpace(endpoint))
+	return err == nil && u.Scheme == "https" && strings.EqualFold(u.Hostname(), host) && (u.Port() == "" || u.Port() == "443")
+}
+
 // EndpointNeedsV1Hint reports whether a custom endpoint may need an explicit
 // "/v1" path for OpenAI-compatible tools. Claude Code is excluded because it
 // appends "/v1/messages" itself and normalizes that suffix separately.

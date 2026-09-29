@@ -31,6 +31,26 @@ func TestValidateEndpoint(t *testing.T) {
 	}
 }
 
+func TestOfficialEndpointMatchesExactHTTPSHost(t *testing.T) {
+	tests := []struct {
+		endpoint string
+		host     string
+		want     bool
+	}{
+		{"https://api.openai.com/v1", "api.openai.com", true},
+		{"https://API.ANTHROPIC.COM:443/v1", "api.anthropic.com", true},
+		{"https://api.anthropic.com.gateway.example/v1", "api.anthropic.com", false},
+		{"https://api.anthropic.com:8443/v1", "api.anthropic.com", false},
+		{"https://gateway.example/api.anthropic.com", "api.anthropic.com", false},
+		{"http://api.openai.com/v1", "api.openai.com", false},
+	}
+	for _, tt := range tests {
+		if got := isOfficialEndpoint(tt.endpoint, tt.host); got != tt.want {
+			t.Errorf("isOfficialEndpoint(%q, %q) = %v, want %v", tt.endpoint, tt.host, got, tt.want)
+		}
+	}
+}
+
 func TestEndpointNeedsV1Hint(t *testing.T) {
 	openai := &Tool{Name: "codex"}
 	claude := &Tool{Name: "claude"}

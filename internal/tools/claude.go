@@ -41,7 +41,7 @@ func newClaude() *Tool {
 			// recognized claude-* ids unless compaction is disabled.
 			delete(env, "CLAUDE_CODE_MAX_CONTEXT_TOKENS")
 
-			custom := a.Endpoint != "" && !strings.Contains(a.Endpoint, "api.anthropic.com")
+			custom := a.Endpoint != "" && !isOfficialEndpoint(a.Endpoint, "api.anthropic.com")
 			if custom {
 				// Gateways want Bearer auth at a custom base URL.
 				env["ANTHROPIC_BASE_URL"] = normalizeClaudeBaseURL(a.Endpoint)
