@@ -11,6 +11,7 @@ import (
 	toml "github.com/pelletier/go-toml/v2"
 
 	"charon/internal/artifact"
+	"charon/internal/models"
 )
 
 func home() string {
@@ -27,7 +28,7 @@ func isOpenAISlug(model string) bool {
 		strings.HasPrefix(m, "chatgpt-")
 }
 
-// codexContextWindow returns the window to pin for an unrecognized model (1M), else 0.
+// codexContextWindow returns the window to pin for an unrecognized model, else 0.
 // OpenAI slugs Codex already sizes itself from its own catalog, so those stay unset.
 func codexContextWindow(model string, configured int) int {
 	model = strings.TrimSpace(model)
@@ -37,7 +38,7 @@ func codexContextWindow(model string, configured int) int {
 	if model == "" || isOpenAISlug(model) {
 		return 0
 	}
-	return 1_000_000
+	return models.DefaultContextCeiling
 }
 
 // IsOfficialOpenAIEndpoint reports whether endpoint is OpenAI's own API host.
@@ -201,7 +202,7 @@ func newCodex() *Tool {
 			// third-party gateway can expose a GPT-shaped alias that otherwise
 			// falls back to Codex's roughly 258K budget.
 			if configuredWindow == 0 && modelSlug != "" && !IsOfficialOpenAIEndpoint(a.Endpoint) {
-				configuredWindow = 1_000_000
+				configuredWindow = models.DefaultContextCeiling
 			}
 			if w := codexContextWindow(modelSlug, configuredWindow); w != 0 {
 				cfg["model_context_window"] = w

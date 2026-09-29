@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"charon/internal/models"
 )
 
 // openTest points the catalog at a throwaway config dir. Tests must never touch a
@@ -157,13 +159,13 @@ func TestPutModelBuiltinContextWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 1. Zhipu AI variants automatically match builtin table
+	// 1. Zhipu AI variants automatically match builtin table (1M spec clamped to the ceiling)
 	m1, err := c.PutModel(p.ID, "z-ai/glm-5.3")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m1.ContextWindow != 1_048_576 || m1.ContextWindowSource != WindowBuiltin {
-		t.Fatalf("z-ai/glm-5.3 window = %d (source %q), want 1048576 (builtin)", m1.ContextWindow, m1.ContextWindowSource)
+	if m1.ContextWindow != models.DefaultContextCeiling || m1.ContextWindowSource != WindowBuiltin {
+		t.Fatalf("z-ai/glm-5.3 window = %d (source %q), want %d (builtin)", m1.ContextWindow, m1.ContextWindowSource, models.DefaultContextCeiling)
 	}
 
 	m2, err := c.PutModel(p.ID, "zai.glm-5")
@@ -174,13 +176,13 @@ func TestPutModelBuiltinContextWindow(t *testing.T) {
 		t.Fatalf("zai.glm-5 window = %d (source %q), want 202752 (builtin)", m2.ContextWindow, m2.ContextWindowSource)
 	}
 
-	// 2. OpenAI GPT-5.6 Sol matches 1050000
+	// 2. OpenAI GPT-5.6 Sol matches a 1.05M spec, clamped to the ceiling
 	m3, err := c.PutModel(p.ID, "openai/gpt-5.6-sol")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m3.ContextWindow != 1_050_000 || m3.ContextWindowSource != WindowBuiltin {
-		t.Fatalf("gpt-5.6-sol window = %d, want 1050000", m3.ContextWindow)
+	if m3.ContextWindow != models.DefaultContextCeiling || m3.ContextWindowSource != WindowBuiltin {
+		t.Fatalf("gpt-5.6-sol window = %d, want %d", m3.ContextWindow, models.DefaultContextCeiling)
 	}
 
 	// 3. Manual override upgrades builtin to manual source

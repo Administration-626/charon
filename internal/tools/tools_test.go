@@ -11,6 +11,8 @@ import (
 
 	toml "github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
+
+	"charon/internal/models"
 )
 
 // sandboxHome points HOME (and USER) at a temp dir so tool paths resolve there
@@ -156,13 +158,14 @@ func TestCodexPinsCustomContextWindow(t *testing.T) {
 	}
 
 	// Unknown models (Claude, DeepSeek, Gemini, etc.) routed through the custom provider
-	// get their window pinned to 1M, since Codex's own catalog undersizes unknown slugs at 258k.
+	// get their window pinned to the default ceiling, since Codex's own catalog
+	// undersizes unknown slugs at 258k.
 	for _, m := range []string{"claude-opus-4-7", "deepseek-chat", "gemini-2.5-pro", "qwen-2.5-coder"} {
 		if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-k123456789", Model: m}); err != nil {
 			t.Fatal(err)
 		}
-		if w, ok := window(); !ok || w != 1000000 {
-			t.Errorf("%s model should pin model_context_window=1000000, got %d (set=%v)", m, w, ok)
+		if w, ok := window(); !ok || w != models.DefaultContextCeiling {
+			t.Errorf("%s model should pin model_context_window=%d, got %d (set=%v)", m, models.DefaultContextCeiling, w, ok)
 		}
 	}
 	if data, err := os.ReadFile(filepath.Join(home, ".codex", "config.toml")); err != nil || !strings.Contains(string(data), "model_catalog_json") {
@@ -190,8 +193,8 @@ func TestCodexPinsCustomContextWindow(t *testing.T) {
 		if m.Slug != "qwen-2.5-coder" {
 			continue
 		}
-		if m.ContextWindow != 1_000_000 || m.MaxContextWindow != 1_000_000 {
-			t.Fatalf("injected model window = %d/%d, want 1000000/1000000", m.ContextWindow, m.MaxContextWindow)
+		if m.ContextWindow != models.DefaultContextCeiling || m.MaxContextWindow != models.DefaultContextCeiling {
+			t.Fatalf("injected model window = %d/%d, want %d/%d", m.ContextWindow, m.MaxContextWindow, models.DefaultContextCeiling, models.DefaultContextCeiling)
 		}
 		if len(m.ReasoningLevels) == 0 || m.ReasoningLevels[0].Effort != "low" {
 			t.Fatalf("injected model reasoning levels = %#v, want a non-empty list starting with low", m.ReasoningLevels)
@@ -218,8 +221,8 @@ func TestCodexPinsCustomContextWindow(t *testing.T) {
 	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-k123456789", Model: "gpt-5.5"}); err != nil {
 		t.Fatal(err)
 	}
-	if w, ok := window(); !ok || w != 1_000_000 {
-		t.Fatalf("gateway GPT alias should pin 1M, got %d (set=%v)", w, ok)
+	if w, ok := window(); !ok || w != models.DefaultContextCeiling {
+		t.Fatalf("gateway GPT alias should pin %d, got %d (set=%v)", models.DefaultContextCeiling, w, ok)
 	}
 
 	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-k123456789", Model: "kimi-k2",

@@ -12,6 +12,10 @@ import (
 // with the builtin window table; see backfillContextWindows.
 const contextWindowBackfillMarker = ".context-windows-backfilled"
 
+// contextWindowCeilingMarker records that stored builtin rows have been clamped to
+// the current models.DefaultContextCeiling; see clampBuiltinWindows.
+const contextWindowCeilingMarker = ".context-windows-ceiling-600k"
+
 // backfillContextWindows fills a builtin context window into model rows saved
 // before charon recorded windows. Rows that already carry a window (manual or
 // builtin) are left alone, so a manual override survives. The one-shot marker is
@@ -41,6 +45,45 @@ func (c *Catalog) backfillContextWindows() error {
 		if w := models.DefaultContextWindow(m.Slug); w > 0 {
 			ms[i].ContextWindow = w
 			ms[i].ContextWindowSource = WindowBuiltin
+			changed = true
+		}
+	}
+	if changed {
+		if err := writeTable(c.table("models.json"), ms); err != nil {
+			return err
+		}
+	}
+	return artifact.AtomicWrite(marker, []byte("1\n"), 0o600)
+}
+
+// clampBuiltinWindows lowers stored builtin-sourced windows above
+// models.DefaultContextCeiling to the ceiling. Manual rows never change: an
+// explicit set-context is the user's decision and outranks the default policy.
+// The one-shot marker means a later ceiling bump does not auto-raise rows the
+// user has already run under; raising is a fresh DefaultContextWindow lookup.
+func (c *Catalog) clampBuiltinWindows() error {
+	marker := c.table(contextWindowCeilingMarker)
+	if _, err := os.Stat(marker); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	if err := c.lock(); err != nil {
+		return err
+	}
+	defer c.unlock()
+	ms, err := c.models()
+	if err != nil {
+		return err
+	}
+	changed := false
+	for i, m := range ms {
+		if m.ContextWindowSource != WindowBuiltin || m.ContextWindow <= models.DefaultContextCeiling {
+			continue
+		}
+		if w := models.DefaultContextWindow(m.Slug); w > 0 {
+			ms[i].ContextWindow = w
 			changed = true
 		}
 	}

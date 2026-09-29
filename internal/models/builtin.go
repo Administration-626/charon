@@ -145,8 +145,15 @@ func NormalizeSlug(slug string) string {
 // applied when a model slug is not recognized in the builtin table.
 const FallbackContextWindow = 500_000
 
+// DefaultContextCeiling caps the window Charon registers by default. Vendor
+// specs above it (1M-class models) are physical truth but are not pinned in
+// full: long contexts dilute attention and slow prefill without a perceivable
+// gain in agent sessions. A manual set-context overrides this cap.
+const DefaultContextCeiling = 600_000
+
 // DefaultContextWindow returns the preset context window size for recognized
-// mainstream models, or FallbackContextWindow (500K) for unrecognized non-empty slugs.
+// mainstream models, or FallbackContextWindow (500K) for unrecognized non-empty
+// slugs. Values above DefaultContextCeiling are clamped to it.
 func DefaultContextWindow(slug string) int {
 	norm := NormalizeSlug(slug)
 	if norm == "" {
@@ -154,10 +161,18 @@ func DefaultContextWindow(slug string) int {
 	}
 	for _, rule := range builtinModelWindows {
 		if strings.HasPrefix(norm, rule.pattern) || strings.Contains(norm, "-"+rule.pattern) {
-			return rule.window
+			return clampDefaultWindow(rule.window)
 		}
 	}
 	return FallbackContextWindow
+}
+
+// clampDefaultWindow applies DefaultContextCeiling to a vendor-spec window.
+func clampDefaultWindow(window int) int {
+	if window > DefaultContextCeiling {
+		return DefaultContextCeiling
+	}
+	return window
 }
 
 // IsKnownBuiltin reports whether slug matches a specific pattern in the builtin table

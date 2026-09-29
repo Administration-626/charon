@@ -822,9 +822,9 @@ func TestManualEntryInlineContextSyntax(t *testing.T) {
 	if got.wiz.windows["moonshotai/kimi-k3"] != 1_000_000 {
 		t.Errorf("kimi-k3 window = %d, want 1000000", got.wiz.windows["moonshotai/kimi-k3"])
 	}
-	// z-ai/glm-5.3 -> builtin 1_048_576
-	if got.wiz.windows["z-ai/glm-5.3"] != 1_048_576 {
-		t.Errorf("z-ai/glm-5.3 window = %d, want 1048576", got.wiz.windows["z-ai/glm-5.3"])
+	// z-ai/glm-5.3 -> builtin, clamped to the default ceiling
+	if got.wiz.windows["z-ai/glm-5.3"] != models.DefaultContextCeiling {
+		t.Errorf("z-ai/glm-5.3 window = %d, want %d", got.wiz.windows["z-ai/glm-5.3"], models.DefaultContextCeiling)
 	}
 	// custom-model:200k -> manual 200_000
 	if got.wiz.windows["custom-model"] != 200_000 {
@@ -843,7 +843,7 @@ func TestManualEntryInlineContextSyntax(t *testing.T) {
 	if !strings.Contains(viewOut, "1,000,000") || !strings.Contains(viewOut, "[manual]") {
 		t.Errorf("view missing manual context: %s", viewOut)
 	}
-	if !strings.Contains(viewOut, "1,048,576") || !strings.Contains(viewOut, "[builtin]") {
+	if !strings.Contains(viewOut, "600,000") || !strings.Contains(viewOut, "[builtin]") {
 		t.Errorf("view missing builtin context: %s", viewOut)
 	}
 	if !strings.Contains(viewOut, "[fallback: 500K] ✎") {

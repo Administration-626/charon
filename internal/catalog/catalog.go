@@ -121,6 +121,9 @@ func Open() (*Catalog, error) {
 	if err := c.backfillContextWindows(); err != nil {
 		return nil, err
 	}
+	if err := c.clampBuiltinWindows(); err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 

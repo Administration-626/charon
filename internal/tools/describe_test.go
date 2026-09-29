@@ -3,6 +3,8 @@ package tools
 import (
 	"path/filepath"
 	"testing"
+
+	"charon/internal/models"
 )
 
 func TestCodexDescribeAPIKeyAuthMode(t *testing.T) {
@@ -28,12 +30,12 @@ func TestCodexDescribeUnknownAuthModePassesThrough(t *testing.T) {
 
 func TestCodexContextWindow(t *testing.T) {
 	cases := map[string]int{
-		"claude-opus-4-7": 1_000_000,
-		"CLAUDE-SONNET":   1_000_000,
-		"deepseek-chat":   1_000_000,
-		"gemini-2.5-pro":  1_000_000,
-		"qwen-2.5-coder":  1_000_000,
-		"custom-slug":     1_000_000,
+		"claude-opus-4-7": models.DefaultContextCeiling,
+		"CLAUDE-SONNET":   models.DefaultContextCeiling,
+		"deepseek-chat":   models.DefaultContextCeiling,
+		"gemini-2.5-pro":  models.DefaultContextCeiling,
+		"qwen-2.5-coder":  models.DefaultContextCeiling,
+		"custom-slug":     models.DefaultContextCeiling,
 		"gpt-5.5":         0,
 		"o1-mini":         0,
 		"o3-mini":         0,
