@@ -13,6 +13,7 @@ import (
 // real $HOME or $XDG_CONFIG_HOME: credentials land on disk unencrypted.
 func openTest(t *testing.T) *Catalog {
 	t.Helper()
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	c, err := Open()
 	if err != nil {
@@ -289,22 +290,19 @@ func TestBindingSameProviderConstraint(t *testing.T) {
 	}
 }
 
-func TestCodexBindingAllowsOnlyOneModel(t *testing.T) {
+func TestCodexBindingAllowsMultipleModels(t *testing.T) {
 	c := openTest(t)
 	_, cr := seed(t, c, "https://a.example/v1", "sk-a", "one", "two")
 
-	if _, err := c.AddBinding("codex", "proxy", cr.ID, "one", []string{"one", "two"}); err == nil {
-		t.Fatal("codex has no model list; two slugs must be rejected")
-	}
-	b, err := c.AddBinding("codex", "proxy", cr.ID, "one", nil)
+	b, err := c.AddBinding("codex", "proxy", cr.ID, "one", []string{"one", "two"})
 	if err != nil {
-		t.Fatalf("a single model is fine: %v", err)
+		t.Fatal(err)
 	}
 	slugs, err := c.ModelSlugs(b.Models)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(slugs) != 1 || slugs[0] != "one" {
+	if len(slugs) != 2 || slugs[0] != "one" || slugs[1] != "two" {
 		t.Fatalf("models = %v", slugs)
 	}
 	if b.ModelID != b.Models[0] {

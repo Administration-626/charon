@@ -123,17 +123,16 @@ func TestInteractiveFlowVisualAudit(t *testing.T) {
 		t.Fatalf("model = %q, want the first checked id", m.wiz.model)
 	}
 
-	// Step 8: Codex rejection and clean single-model view check
 	mCodex := newModel(st, "v1.3.12")
 	mCodex.width = 100
 	mCodex.height = 30
 	mCodex.resize()
-	mCodex.tool = &tools.Tool{Name: "codex", Title: "Codex", ModelMenu: ""}
+	mCodex.tool = tools.Find("codex")
 	mCodex.view = viewPickModel
 	mCodex.wiz.models = []string{"gpt-5.5"}
 	mCodex.wiz.model = "gpt-5.5"
 	mCodex.showModels([]string{"gpt-5.5", "gpt-5.4"})
-	mCodex.list.Select(indexOfValue(mCodex.list.Items(), "gpt-5.5"))
+	mCodex.list.Select(indexOfValue(mCodex.list.Items(), "gpt-5.4"))
 
 	codexView := mCodex.View()
 	if strings.Contains(codexView, "Done") {
@@ -142,19 +141,19 @@ func TestInteractiveFlowVisualAudit(t *testing.T) {
 	if strings.Contains(codexView, "• gpt") {
 		t.Fatal("Codex must never show bullet selection marks on model rows")
 	}
-	if !strings.Contains(codexView, "enter choose") || !strings.Contains(codexView, "single model only") {
-		t.Fatal("Codex must offer enter to pick one model and state the single-model limit")
+	if !strings.Contains(codexView, "space") || strings.Contains(codexView, "single model only") {
+		t.Fatal("Codex must offer multiple model selection")
 	}
 
 	next, _ = mCodex.updatePickModel(tea.KeyMsg{Type: tea.KeySpace})
 	mCodex = next.(model)
-	if !strings.Contains(mCodex.status, "can't be given a model list") {
-		t.Fatal("Codex did not reject Space")
+	if got := strings.Join(mCodex.pickerModels(), ","); got != "gpt-5.5,gpt-5.4" {
+		t.Fatalf("Space must select the second Codex model, got %q", got)
 	}
 
 	next, _ = mCodex.updatePickModel(tea.KeyMsg{Type: tea.KeyCtrlA})
 	mCodex = next.(model)
-	if !strings.Contains(mCodex.status, "can't be given a model list") {
-		t.Fatal("Codex did not reject Ctrl+A")
+	if len(mCodex.wiz.models) != 0 {
+		t.Fatal("Ctrl+A must clear the selected Codex models")
 	}
 }

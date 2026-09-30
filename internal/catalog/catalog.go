@@ -92,11 +92,6 @@ type Catalog struct {
 // ErrNotFound is returned when a row a caller asked for by id does not exist.
 var ErrNotFound = errors.New("not found")
 
-// SingleModelTools are tools whose config has no field for a model list, so a
-// binding for one may carry only its default model. Codex's model_providers table
-// has no such field; its /model menu lists built-in presets only.
-var SingleModelTools = map[string]bool{"codex": true}
-
 // Open returns the catalog rooted at $XDG_CONFIG_HOME/charon (default ~/.config/charon).
 func Open() (*Catalog, error) {
 	base := os.Getenv("XDG_CONFIG_HOME")
@@ -405,8 +400,7 @@ func (c *Catalog) putModel(providerID, slug string, contextWindow *int, source W
 
 // AddBinding stores a new binding for a tool. models are the slugs its picker
 // should offer; defaultSlug is the one selected on render and must be among them.
-// Every slug must belong to the credential's provider, and a tool in
-// SingleModelTools may name only one.
+// Every slug must belong to the credential's provider.
 func (c *Catalog) AddBinding(tool, name, credentialID, defaultSlug string, models []string) (Binding, error) {
 	if err := c.lock(); err != nil {
 		return Binding{}, err
@@ -471,9 +465,6 @@ func (c *Catalog) prepareBinding(selfID, oldName, tool, name, credentialID, defa
 	slugs := cleanSlugs(append(models, defaultSlug))
 	if len(slugs) == 0 {
 		return zero, fmt.Errorf("a binding needs at least one model")
-	}
-	if SingleModelTools[tool] && len(slugs) > 1 {
-		return zero, fmt.Errorf("%s can register only one model, got %d", tool, len(slugs))
 	}
 	if defaultSlug = strings.TrimSpace(defaultSlug); defaultSlug == "" {
 		defaultSlug = slugs[0]

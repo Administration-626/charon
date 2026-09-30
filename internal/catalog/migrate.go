@@ -82,7 +82,7 @@ func (c *Catalog) migrateLegacyProfiles() error {
 			endpoint := t.ResolveEndpoint(strings.TrimSpace(manifest.Spec.Endpoint))
 			key := strings.TrimSpace(manifest.Spec.Key)
 			model := strings.TrimSpace(manifest.Spec.Model)
-			slugs := legacyModelSlugs(t.Name, model, manifest.Spec.Models)
+			slugs := legacyModelSlugs(model, manifest.Spec.Models)
 			if key == "" || model == "" || len(slugs) == 0 ||
 				tools.ValidateKey(key) != nil || tools.ValidateEndpoint(endpoint) != nil {
 				continue
@@ -169,7 +169,7 @@ func (c *Catalog) migrateLegacyProfiles() error {
 	return artifact.AtomicWrite(marker, []byte("1\n"), 0o600)
 }
 
-func legacyModelSlugs(tool, model string, models []string) []string {
+func legacyModelSlugs(model string, models []string) []string {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		models = cleanSlugs(models)
@@ -179,9 +179,6 @@ func legacyModelSlugs(tool, model string, models []string) []string {
 	}
 	if model == "" {
 		return nil
-	}
-	if SingleModelTools[tool] {
-		return []string{model}
 	}
 	return cleanSlugs(append(append([]string{}, models...), model))
 }

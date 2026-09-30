@@ -69,31 +69,37 @@ func ValidateCodexEffort(effort string) error {
 	return fmt.Errorf("effort must be one of: %s", strings.Join(codexEfforts(), ", "))
 }
 
-func codexCatalog(path, model, effort string, window int) error {
+func codexCatalog(path string, auth AuthSpec) (int, error) {
 	catalog, err := loadJSONMap(path)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	models, ok := catalog["models"].([]any)
-	if !ok {
-		models = []any{}
-	}
-
-	var entry map[string]any
-	for _, raw := range models {
-		m, ok := raw.(map[string]any)
-		if ok && m["slug"] == model {
-			entry = m
-			break
+	existing, _ := catalog["models"].([]any)
+	specs := append([]ModelSpec(nil), auth.Models...)
+	if len(specs) == 0 {
+		for _, raw := range existing {
+			if entry, ok := raw.(map[string]any); ok {
+				if slug, ok := entry["slug"].(string); ok && slug != "" {
+					specs = append(specs, ModelSpec{Slug: slug})
+				}
+			}
 		}
 	}
-	if entry == nil {
-		for _, raw := range models {
-			if template, ok := raw.(map[string]any); ok {
-				entry = make(map[string]any, len(template)+2)
-				for key, value := range template {
-					entry[key] = value
-				}
+	if auth.Model != "" && !slices.ContainsFunc(specs, func(spec ModelSpec) bool { return spec.Slug == auth.Model }) {
+		specs = append(specs, ModelSpec{Slug: auth.Model})
+	}
+	entries := make([]any, 0, len(specs))
+	seen := make(map[string]bool, len(specs))
+	var singleWindow int
+	for _, spec := range specs {
+		if spec.Slug == "" || seen[spec.Slug] {
+			continue
+		}
+		seen[spec.Slug] = true
+		var entry map[string]any
+		for _, raw := range existing {
+			if candidate, ok := raw.(map[string]any); ok && candidate["slug"] == spec.Slug {
+				entry = candidate
 				break
 			}
 		}
@@ -107,7 +113,7 @@ func codexCatalog(path, model, effort string, window int) error {
 				"default_reasoning_summary":         "none",
 				"default_verbosity":                 "medium",
 				"description":                       "Model registered by Charon",
-				"display_name":                      model,
+				"display_name":                      spec.Slug,
 				"effective_context_window_percent":  95,
 				"experimental_supported_tools":      []any{},
 				"include_apps_usage_instructions":   false,
@@ -130,32 +136,53 @@ func codexCatalog(path, model, effort string, window int) error {
 				"web_search_tool_type":              "text_and_image",
 			}
 		}
-		entry["slug"] = model
-		entry["display_name"] = model
+		entry["slug"] = spec.Slug
+		window := spec.ContextWindow
+		if window == 0 && len(auth.Models) == 0 {
+			if previous, ok := entry["context_window"].(float64); ok {
+				window = int(previous)
+			}
+		}
+		if window <= 0 {
+			window = models.DefaultContextCeiling
+		}
+		entry["context_window"] = window
+		entry["max_context_window"] = window
+		entry["supported_reasoning_levels"] = codexReasoningLevels()
+		entry["supports_reasoning_effort_updates"] = true
+		entry["visibility"] = "list"
+		entry["supported_in_api"] = true
+		// use_responses_lite and tool_mode="code_mode_only" make Codex register its V8
+		// "exec" orchestrator as a {"type":"custom"} tool instead of the regular shell
+		// tool. OpenAI-compatible gateways commonly reject that tool type (Z.AI error
+		// 1214 "tools[0].type:type is illegal") and the model loses shell access, so
+		// never carry either field over from an existing entry.
+		delete(entry, "use_responses_lite")
+		delete(entry, "tool_mode")
+		effort := spec.Effort
+		if spec.Slug == auth.Model && auth.Effort != "" {
+			effort = auth.Effort
+		}
+		if effort != "" {
+			entry["default_reasoning_level"] = effort
+		} else if len(auth.Models) > 0 || entry["default_reasoning_level"] == nil {
+			entry["default_reasoning_level"] = "medium"
+		}
+		entries = append(entries, entry)
+		singleWindow = window
 	}
-	entry["context_window"] = window
-	entry["max_context_window"] = window
-	entry["supported_reasoning_levels"] = codexReasoningLevels()
-	entry["supports_reasoning_effort_updates"] = true
-	// use_responses_lite and tool_mode="code_mode_only" make Codex register its V8
-	// "exec" orchestrator as a {"type":"custom"} tool instead of the regular shell
-	// tool. OpenAI-compatible gateways commonly reject that tool type (Z.AI error
-	// 1214 "tools[0].type:type is illegal") and the model loses shell access, so
-	// never carry either field over from an existing entry.
-	delete(entry, "use_responses_lite")
-	delete(entry, "tool_mode")
-	if effort != "" {
-		entry["default_reasoning_level"] = effort
-	}
-	catalog["models"] = []any{entry}
+	catalog["models"] = entries
 	data, err := json.MarshalIndent(catalog, "", "  ")
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
+		return 0, err
 	}
-	return artifact.AtomicWrite(path, append(data, '\n'), 0o600)
+	if len(entries) != 1 {
+		singleWindow = 0
+	}
+	return singleWindow, artifact.AtomicWrite(path, append(data, '\n'), 0o600)
 }
 
 // newCodex describes the OpenAI Codex CLI (~/.codex).
@@ -166,11 +193,10 @@ func newCodex() *Tool {
 	catalogPath := filepath.Join(dir, "custom_models.json")
 
 	return &Tool{
-		Name:     "codex",
-		Title:    "Codex",
-		Provider: "openai",
-		// No ModelMenu: model_providers.<id> has no field for a model list, so Codex's
-		// /model only ever lists its built-in presets. A Codex binding carries one model.
+		Name:            "codex",
+		Title:           "Codex",
+		Provider:        "openai",
+		ModelMenu:       "/model",
 		DefaultEndpoint: "https://api.openai.com/v1",
 		ApplyAuth: func(a AuthSpec) error {
 			// Register a self-contained OpenAI-compatible provider (key embedded inline)
@@ -188,8 +214,6 @@ func newCodex() *Tool {
 			if modelSlug != "" {
 				cfg["model"] = modelSlug
 			}
-			// Codex sizes unknown (non-OpenAI) slugs from its own catalog at 272K (~258K effective),
-			// which undersizes modern models; pin their window to 1M, clearing any stale prior value.
 			delete(cfg, "model_context_window")
 			var configuredWindow int
 			for _, spec := range a.Models {
@@ -198,16 +222,16 @@ func newCodex() *Tool {
 					break
 				}
 			}
-			// Codex only knows the native window for OpenAI's own endpoint. A
-			// third-party gateway can expose a GPT-shaped alias that otherwise
-			// falls back to Codex's roughly 258K budget.
-			if configuredWindow == 0 && modelSlug != "" && !IsOfficialOpenAIEndpoint(a.Endpoint) {
-				configuredWindow = models.DefaultContextCeiling
-			}
-			if w := codexContextWindow(modelSlug, configuredWindow); w != 0 {
-				cfg["model_context_window"] = w
-				if err := codexCatalog(catalogPath, modelSlug, a.Effort, w); err != nil {
+			useCatalog := !IsOfficialOpenAIEndpoint(a.Endpoint) || codexContextWindow(modelSlug, configuredWindow) != 0 || len(a.Models) > 1 ||
+				(len(a.Models) == 0 && cfg["model_catalog_json"] == catalogPath)
+			if modelSlug != "" && useCatalog {
+				a.Model = modelSlug
+				window, err := codexCatalog(catalogPath, a)
+				if err != nil {
 					return err
+				}
+				if window > 0 {
+					cfg["model_context_window"] = window
 				}
 				cfg["model_catalog_json"] = catalogPath
 			} else {

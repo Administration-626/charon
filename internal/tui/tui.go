@@ -406,15 +406,8 @@ func (m *model) loadCopyTools() {
 			continue
 		}
 		desc := "not installed — copy will be saved without switching"
-		if catalog.SingleModelTools[t.Name] {
-			desc = "single model only — list will use the default model"
-		}
 		if t.Detected != nil && t.Detected() {
-			if catalog.SingleModelTools[t.Name] {
-				desc = "installed · single model only — list will use the default model"
-			} else {
-				desc = "installed"
-			}
+			desc = "installed"
 		}
 		items = append(items, item{title: t.Title, desc: desc, value: t.Name})
 	}
@@ -814,9 +807,6 @@ func (m model) copyBindingToTool(src, toolName string) error {
 	slugs, err := m.cat.ModelSlugs(b.Models)
 	if err != nil {
 		return err
-	}
-	if dstTool.Name != b.Tool && catalog.SingleModelTools[dstTool.Name] {
-		slugs = []string{slug}
 	}
 	saved, err := m.cat.Bindings(dstTool.Name)
 	if err != nil {

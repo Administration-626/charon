@@ -169,17 +169,20 @@ charon completion fish | source
 
 ### 在工具内切换模型
 
-绑定中保存的模型会出现在工具自身的菜单中，因此可以在当前会话内更换模型：Claude Code
+绑定中保存的模型会出现在工具自身的菜单中，因此可以在当前会话内更换模型：Codex
+的 /model（读取 custom_models.json）、Claude Code
 的 /model（通过 modelPicker）、OpenCode 的 /models（读取 charon provider 的模型
 映射）、Pi 的 /model（由 Charon 生成的扩展）、Oh My Pi 的 /model（读取
 providers.charon 的模型列表）以及 Grok 的 /model（一组 [model.charon-<slug>]
 表）。切换绑定时，工具中的模型列表也会更新。
-只有一个模型的绑定会将工具中的模型列表替换为该模型，不会保留上一条绑定的列表。Codex 是
-例外：它的配置里没有注册额外模型的位置，所以一条 Codex 绑定只带一个模型
-（charon edit codex <b> --model ...）。
-接入第三方端点时，Charon 会按模型库中的窗口设置 Codex 的 `model_context_window`，
-即使模型名以 `gpt-` 开头也一样。Codex 的 `custom_models.json` 只包含当前模型，
-避免其他模型的陈旧条目覆盖预算。Codex effort 来自保存的模型行，默认是 medium。
+只有一个模型的绑定会将工具中的模型列表替换为该模型，不会保留上一条绑定的列表。
+Codex 的 `custom_models.json` 包含当前绑定的完整模型列表，不混入内置模型或其他绑定的模型。
+每个条目保存独立的窗口和 effort，effort 默认是 medium；第三方端点上的 `gpt-` 别名也一样。
+多模型绑定会清除全局 `model_context_window`，避免它覆盖各模型的窗口；单模型自定义目录仍保留该字段。
+官方 OpenAI 端点的单个内置模型，在不需要显式窗口覆盖时仍使用 Codex 原生目录。
+已有 Codex 绑定不会自动增加模型：在编辑界面勾选模型，或运行
+`charon edit codex <绑定名称> --models 'model-a,model-b'`；非当前绑定还需
+`charon reapply codex <绑定名称>`。重启 Codex 后加载新的目录。
 Claude Code 对窗口达到 1M 的 `claude-*` 模型，
 会在 `ANTHROPIC_MODEL` 和 `/model` 条目中加入 `[1m]` 后缀；其他网关别名仍使用
 `CLAUDE_CODE_MAX_CONTEXT_TOKENS`。OpenCode、Pi、omp 和 Grok 在各自的模型条目中
@@ -242,7 +245,7 @@ charon 并在菜单中选择。
   - models.json：服务配置对应的模型 slug。
   - bindings.json：工具的绑定名称、凭据、默认模型，以及要在工具菜单中提供的模型 ID。
   - active.json：Charon 为每个工具上次确认的绑定。
-- 绑定中的模型和 API key 必须对应同一个服务配置。Codex 绑定只能包含一个模型。
+- 绑定中的模型和 API key 必须对应同一个服务配置。
 - 切换绑定先写工具配置，再更新 active.json。Charon 只修改由它管理的配置项。
 - 每个文件的写入是原子的（临时文件 → rename），跨文件的整次切换不是。切换中断后，
   可查看 status，并显式重新应用想使用的绑定。

@@ -686,9 +686,6 @@ func cmdDuplicate(cat *catalog.Catalog, args []string) error {
 	if err != nil {
 		return err
 	}
-	if dstTool.Name != b.Tool && catalog.SingleModelTools[dstTool.Name] {
-		slugs = []string{slug}
-	}
 	cr, err := cat.Credential(b.CredentialID)
 	if err != nil {
 		return err

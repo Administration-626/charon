@@ -948,20 +948,9 @@ func TestManualEntryFromStepFlowAdvancesToName(t *testing.T) {
 	}
 }
 
-// TestSpaceRejectedForToolWithoutModelMenu guards the honest-UI rule: Codex's config
-// has nowhere to put a model list, so checking rows must say so rather than silently
-// collecting ids that would be dropped on save.
 func TestSpaceRejectedForToolWithoutModelMenu(t *testing.T) {
 	m := pickerModel(t, []string{"gpt-5.5", "gpt-5.4"})
-	for _, tool := range m.allTools {
-		if tool.ModelMenu == "" {
-			m.tool = tool
-			break
-		}
-	}
-	if m.tool.ModelMenu != "" {
-		t.Skip("every registered tool exposes a model menu")
-	}
+	m.tool = &tools.Tool{Title: "No model menu"}
 	m.renderModels()
 	for i, it := range m.list.Items() {
 		if row, ok := it.(item); ok && !isSentinel(row.value) {
@@ -983,9 +972,12 @@ func TestSpaceRejectedForToolWithoutModelMenu(t *testing.T) {
 	}
 }
 
-func TestCodexPickerDoesNotShowDoneRowOrBullets(t *testing.T) {
+func TestCodexPickerRegistersMultipleModels(t *testing.T) {
 	m := pickerModel(t, []string{"gpt-5.5", "gpt-5.4"})
-	m.tool = &tools.Tool{Title: "Codex", ModelMenu: ""}
+	m.tool = tools.Find("codex")
+	if m.tool.ModelMenu != "/model" {
+		t.Fatalf("Codex model menu = %q", m.tool.ModelMenu)
+	}
 	m.wiz.models = []string{"gpt-5.5"}
 	m.wiz.model = "gpt-5.5"
 	m.renderModels()
@@ -1009,8 +1001,39 @@ func TestCodexPickerDoesNotShowDoneRowOrBullets(t *testing.T) {
 			t.Errorf("unchecked Codex row = %q, want [ ] prefix", row.title)
 		}
 	}
-	if strings.Contains(m.list.Title, "in picker") {
-		t.Errorf("Codex picker title %q must not show 'in picker'", m.list.Title)
+	if strings.Contains(m.list.Title, "single model only") {
+		t.Errorf("Codex picker title still restricts model selection: %q", m.list.Title)
+	}
+	m.toggleModel("gpt-5.4")
+	if got := strings.Join(m.pickerModels(), ","); got != "gpt-5.5,gpt-5.4" {
+		t.Fatalf("registered models = %q", got)
+	}
+	m.wiz.models = nil
+	if got := strings.Join(m.pickerModels(), ","); got != "gpt-5.5,gpt-5.4" {
+		t.Fatalf("unselected picker should register fetched list, got %q", got)
+	}
+}
+
+func TestCodexFinishAddKeepsMultipleModels(t *testing.T) {
+	cat := openTestCatalog(t, false)
+	ui := newModel(cat, "test")
+	ui.tool = tools.Find("codex")
+	ui.wiz = wizard{
+		endpoint: "https://gateway.example/v1",
+		key:      "sk-test",
+		model:    "glm-5.3-flash",
+		models:   []string{"glm-5.3-flash", "gpt-5.6-luna"},
+	}
+	result, _ := ui.finishAdd("multi")
+	if updated := result.(model); updated.statusLvl == statusErr {
+		t.Fatal(updated.status)
+	}
+	binding, found, err := cat.BindingByName("codex", "multi")
+	if err != nil || !found {
+		t.Fatalf("binding missing: found=%v err=%v", found, err)
+	}
+	if slugs, err := cat.ModelSlugs(binding.Models); err != nil || strings.Join(slugs, ",") != "glm-5.3-flash,gpt-5.6-luna" {
+		t.Fatalf("saved models = %v, err=%v", slugs, err)
 	}
 }
 

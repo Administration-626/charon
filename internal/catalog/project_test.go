@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,53 @@ import (
 
 	"charon/internal/models"
 )
+
+func TestProjectCodexMultipleModels(t *testing.T) {
+	for _, endpoint := range []string{"https://gateway.example/v1", "https://api.openai.com/v1"} {
+		t.Run(endpoint, func(t *testing.T) {
+			cat := openTest(t)
+			provider, credential := seed(t, cat, endpoint, "sk-test", "gpt-5.5", "glm-5.3-flash")
+			custom, err := cat.PutModelWithWindow(provider.ID, "glm-5.3-flash", 128000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := cat.SetModelEffort(custom.ID, "max"); err != nil {
+				t.Fatal(err)
+			}
+			binding, err := cat.AddBinding("codex", "multi", credential.ID, "gpt-5.5", []string{"gpt-5.5", custom.Slug})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := cat.Activate(binding.ID); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".codex", "custom_models.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var catalog struct {
+				Models []struct {
+					Slug   string `json:"slug"`
+					Window int    `json:"context_window"`
+					Effort string `json:"default_reasoning_level"`
+				} `json:"models"`
+			}
+			if err := json.Unmarshal(data, &catalog); err != nil {
+				t.Fatal(err)
+			}
+			if len(catalog.Models) != 2 || catalog.Models[0].Slug != "gpt-5.5" || catalog.Models[0].Window != models.DefaultContextWindow("gpt-5.5") || catalog.Models[0].Effort != "medium" || catalog.Models[1].Slug != custom.Slug || catalog.Models[1].Window != 128000 || catalog.Models[1].Effort != "max" {
+				t.Fatalf("projected models = %+v", catalog.Models)
+			}
+			data, err = os.ReadFile(filepath.Join(os.Getenv("HOME"), ".codex", "config.toml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(data), "model_context_window") {
+				t.Fatal("multi-model binding must use per-model context windows")
+			}
+		})
+	}
+}
 
 func TestProjectRendersBinding(t *testing.T) {
 	c := openTest(t)

@@ -67,10 +67,10 @@ func (c *Catalog) project(b Binding) error {
 		window := m.ContextWindow
 		// Codex's own model catalog applies only at OpenAI's endpoint. A gateway
 		// can reuse a GPT-shaped id while Codex falls back to about 258K.
-		if b.Tool == "codex" && officialOpenAI && m.ContextWindowSource == WindowBuiltin {
+		if b.Tool == "codex" && officialOpenAI && len(b.Models) == 1 && m.ContextWindowSource == WindowBuiltin {
 			window = 0
 		}
-		specs = append(specs, tools.ModelSpec{Slug: m.Slug, ContextWindow: window})
+		specs = append(specs, tools.ModelSpec{Slug: m.Slug, ContextWindow: window, Effort: m.Effort})
 		if id == b.ModelID {
 			spec.Effort = m.Effort
 			if spec.Effort == "" {

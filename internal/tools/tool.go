@@ -49,7 +49,7 @@ type Tool struct {
 	Title           string               // display name, e.g. "Codex"
 	Provider        string               // model-list wire format: "openai" or "anthropic"
 	DefaultEndpoint string               // prefilled when adding a binding
-	ModelMenu       string               // the tool's own model-switching command (e.g. "/model") when it can be given a list of models to offer; "" when the tool's config has no place to register one (Codex)
+	ModelMenu       string               // the tool's own model-switching command (e.g. "/model") when it can be given a list of models to offer
 	Detected        func() bool          // is the tool installed/configured?
 	Describe        func() (Info, error) // read live config into an Info
 	ApplyAuth       func(AuthSpec) error // write endpoint/key/model into live config

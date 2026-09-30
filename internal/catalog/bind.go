@@ -60,11 +60,7 @@ func StoreBinding(cat *Catalog, t *tools.Tool, existing *Binding, name, endpoint
 		}
 	}
 	if model != "" && !contains(slugs, model) {
-		if SingleModelTools[t.Name] {
-			slugs = []string{model}
-		} else {
-			slugs = append(slugs, model)
-		}
+		slugs = append(slugs, model)
 	}
 	slugs = cleanSlugs(slugs)
 	if model == "" && len(slugs) > 0 {
@@ -72,9 +68,6 @@ func StoreBinding(cat *Catalog, t *tools.Tool, existing *Binding, name, endpoint
 	}
 	if len(slugs) == 0 {
 		return Binding{}, fmt.Errorf("a binding needs at least one model")
-	}
-	if SingleModelTools[t.Name] && len(slugs) > 1 {
-		return Binding{}, fmt.Errorf("%s can register only one model, got %d", t.Name, len(slugs))
 	}
 
 	ep := t.ResolveEndpoint(endpoint)

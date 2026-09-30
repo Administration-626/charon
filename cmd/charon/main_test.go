@@ -239,8 +239,49 @@ func TestRunCopyBindingAcrossTools(t *testing.T) {
 	if credential.Key != "sk-test" {
 		t.Fatalf("copied key = %q, want sk-test", credential.Key)
 	}
-	if slugs, err := c.ModelSlugs(copied.Models); err != nil || len(slugs) != 1 || slugs[0] != "kimi-k2" {
-		t.Fatalf("copied models = %v, err=%v; want single kimi-k2 for Codex", slugs, err)
+	if slugs, err := c.ModelSlugs(copied.Models); err != nil || strings.Join(slugs, ",") != "kimi-k2,glm-4.6" {
+		t.Fatalf("copied models = %v, err=%v; want kimi-k2,glm-4.6 for Codex", slugs, err)
+	}
+}
+
+func TestRunCodexModelListLifecycle(t *testing.T) {
+	home := sandbox(t)
+	seedCodex(t, home)
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"add", "codex", "--name", "work", "--key", "sk-test", "--endpoint", "https://gateway.example/v1", "--models", "glm-5.3-flash,gpt-5.6-luna"}, "glm-5.3-flash,gpt-5.6-luna"},
+		{[]string{"edit", "codex", "work", "--key", "sk-rotated"}, "glm-5.3-flash,gpt-5.6-luna"},
+		{[]string{"edit", "codex", "work", "--model", "another-model"}, "glm-5.3-flash,gpt-5.6-luna,another-model"},
+		{[]string{"edit", "codex", "work", "--models", "gpt-5.6-luna"}, "gpt-5.6-luna"},
+	} {
+		if err := run(test.args); err != nil {
+			t.Fatal(err)
+		}
+		_, slugs := bindingSlugs(t, openCatalog(t), "codex", "work")
+		if strings.Join(slugs, ",") != test.want {
+			t.Fatalf("binding models = %v, want %s", slugs, test.want)
+		}
+		data, err := os.ReadFile(filepath.Join(home, ".codex", "custom_models.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var catalog struct {
+			Models []struct {
+				Slug string `json:"slug"`
+			} `json:"models"`
+		}
+		if err := json.Unmarshal(data, &catalog); err != nil {
+			t.Fatal(err)
+		}
+		var registered []string
+		for _, entry := range catalog.Models {
+			registered = append(registered, entry.Slug)
+		}
+		if strings.Join(registered, ",") != test.want {
+			t.Fatalf("registered models = %v, want %s", registered, test.want)
+		}
 	}
 }
 

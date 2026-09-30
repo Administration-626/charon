@@ -195,18 +195,21 @@ status bar flags missing required values on submit.
 ### Switching model inside the tool
 
 The models a binding registers land in the tool's own menu, so you can change model
-without leaving your session: Claude Code's /model (via modelPicker), OpenCode's
+without leaving your session: Codex's /model (via custom_models.json), Claude Code's /model (via modelPicker), OpenCode's
 /models (via the charon provider's model map), Pi's /model (via the
 generated extension), Oh My Pi's /model (via the providers.charon model
 list), and Grok's /model (via [model.charon-<slug>] tables).
 The list travels with the binding — switch bindings and the menu switches too.
-Codex is the exception: its config has no place to register extra models, so a
-Codex binding carries exactly one (charon edit codex <b> --model ...).
-On a gateway, Charon writes each model's catalog window to Codex's
-`model_context_window` and `custom_models.json`, even for GPT-shaped aliases. The
-custom catalog contains only the active model, so stale entries from another model
-cannot override the configured budget. Codex effort comes from the saved model row;
-the default is medium. For
+Codex's custom catalog contains the binding's complete model list, not built-in
+presets or another binding's models. Each entry has its own context window and
+reasoning effort (medium by default), including GPT-shaped aliases on gateways.
+Multi-model bindings clear the global `model_context_window` so it cannot override
+individual windows; single-model custom catalogs retain that pin. A single built-in
+OpenAI model at the official endpoint still uses Codex's native catalog unless a
+window override is needed. To expand an existing Codex binding, select models in
+the editor or run `charon edit codex <binding> --models 'model-a,model-b'`, then
+`charon reapply codex <binding>` if it is inactive. Restart Codex to load the updated
+catalog. For
 Claude Code, `claude-*` models with a window of at least 1M get a `[1m]` suffix in
 `ANTHROPIC_MODEL` and `/model`; other gateway aliases use
 `CLAUDE_CODE_MAX_CONTEXT_TOKENS`. OpenCode, Pi, omp, and Grok store windows in their

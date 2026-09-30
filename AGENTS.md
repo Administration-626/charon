@@ -90,15 +90,15 @@ unrelated user settings survive; it must not rewrite the file wholesale. It must
 refuse to modify a user-authored provider (`ensureOnlyCharonChanged`, managed
 provider name `"charon"`).
 
-### Model lists (`AuthSpec.AllModels`)
+### Model lists (`AuthSpec.Models`)
 
 A binding's model list is what charon registers in the **tool's own** model picker
-(Claude `modelPicker`, OpenCode `provider.charon.models`, pi's extension, omp
+(Codex `custom_models.json`, Claude `modelPicker`, OpenCode `provider.charon.models`, pi's extension, omp
 `providers.charon.models`, Grok `[model.charon-<slug>]`), so switching model
 mid-session doesn't need charon. It is passed to `ApplyAuth` as
-`AuthSpec.AllModels`. Two rules a new tool must honor:
+`AuthSpec.Models`. Two rules a new tool must honor:
 
-- `AllModels` empty (nil) means **"keep what's registered"**, not "register nothing";
+- `Models` empty (nil) means **"keep what's registered"**, not "register nothing";
   this lets a direct `ApplyAuth` call that changes only a key or default model retain
   the picker. `Catalog.Project` always passes the binding's complete list, including a
   one-model list, so switching bindings replaces the picker and cannot retain another
@@ -106,8 +106,11 @@ mid-session doesn't need charon. It is passed to `ApplyAuth` as
 - Whatever key holds the list must be an **owned key** of the config artifact, so the
   list travels with the binding and one endpoint's models never leak into another's.
 
-Codex has no config surface for a model list (`catalog.SingleModelTools`), so a
-Codex binding carries exactly one model.
+Codex supports multiple models through `model_catalog_json`. Each generated entry
+has its own context window and reasoning effort; multi-model bindings must not set
+the global `model_context_window`, which would override those per-model windows.
+A single built-in OpenAI model at the official endpoint still uses Codex's native
+catalog when no explicit window override is needed.
 
 Which wire dialect an endpoint speaks is **not stored**. `models.Fetch` is called
 twice when listing models — the tool's historical dialect first, then the other —

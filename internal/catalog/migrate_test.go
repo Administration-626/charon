@@ -7,6 +7,23 @@ import (
 	"testing"
 )
 
+func TestLegacyModelSlugsKeepsCompleteList(t *testing.T) {
+	for _, test := range []struct {
+		model string
+		list  []string
+		want  string
+	}{
+		{"second", []string{"first", "second"}, "first,second"},
+		{"third", []string{"first", "second"}, "first,second,third"},
+		{"", []string{"first", "second", "first"}, "first,second"},
+		{"single", nil, "single"},
+	} {
+		if got := strings.Join(legacyModelSlugs(test.model, test.list), ","); got != test.want {
+			t.Fatalf("legacy models = %q, want %q", got, test.want)
+		}
+	}
+}
+
 func TestOpenMigratesEditableLegacyProfilesOnce(t *testing.T) {
 	base := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", base)

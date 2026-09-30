@@ -743,10 +743,6 @@ func (m model) finishAdd(name string) (tea.Model, tea.Cmd) {
 		m.setStatus(statusErr, "a binding needs at least one model")
 		return m, nil
 	}
-	if catalog.SingleModelTools[m.tool.Name] && len(slugs) > 1 {
-		slugs = slugs[:1]
-		m.wiz.model = slugs[0]
-	}
 	curated := len(m.wiz.models) > 0
 
 	var existing *catalog.Binding
@@ -867,20 +863,7 @@ func containsID(ids []string, id string) bool {
 // pickerModels is the model list to register with the tool: the curated selection when
 // the user checked any rows, else the whole fetched list — preserving the long-standing
 // behavior where picking one model still registers everything the endpoint offers.
-// A tool that can hold only one model (Codex) never gets more than the chosen slug.
 func (m model) pickerModels() []string {
-	if m.tool != nil && catalog.SingleModelTools[m.tool.Name] {
-		if m.wiz.model != "" {
-			return []string{m.wiz.model}
-		}
-		if len(m.wiz.models) > 0 {
-			return m.wiz.models[:1]
-		}
-		if len(m.allModels) > 0 {
-			return m.allModels[:1]
-		}
-		return nil
-	}
 	if len(m.wiz.models) > 0 {
 		return m.wiz.models
 	}

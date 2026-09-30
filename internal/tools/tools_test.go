@@ -161,7 +161,7 @@ func TestCodexPinsCustomContextWindow(t *testing.T) {
 	// get their window pinned to the default ceiling, since Codex's own catalog
 	// undersizes unknown slugs at 258k.
 	for _, m := range []string{"claude-opus-4-7", "deepseek-chat", "gemini-2.5-pro", "qwen-2.5-coder"} {
-		if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-k123456789", Model: m}); err != nil {
+		if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-k123456789", Model: m, Models: []ModelSpec{{Slug: m}}}); err != nil {
 			t.Fatal(err)
 		}
 		if w, ok := window(); !ok || w != models.DefaultContextCeiling {
@@ -208,7 +208,7 @@ func TestCodexPinsCustomContextWindow(t *testing.T) {
 	}
 
 	// The official OpenAI endpoint lets Codex use its native catalog and drops the stale pin.
-	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://api.openai.com/v1", Key: "sk-k123456789", Model: "gpt-5.5"}); err != nil {
+	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://api.openai.com/v1", Key: "sk-k123456789", Model: "gpt-5.5", Models: []ModelSpec{{Slug: "gpt-5.5"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if w, ok := window(); ok {
@@ -218,7 +218,7 @@ func TestCodexPinsCustomContextWindow(t *testing.T) {
 		t.Errorf("known model should clear model_catalog_json: err=%v", err)
 	}
 	// The same GPT-shaped alias behind a gateway still needs an explicit window.
-	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-k123456789", Model: "gpt-5.5"}); err != nil {
+	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-k123456789", Model: "gpt-5.5", Models: []ModelSpec{{Slug: "gpt-5.5"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if w, ok := window(); !ok || w != models.DefaultContextCeiling {
@@ -239,7 +239,7 @@ func TestCodexCatalogRepairsStaleModelEntry(t *testing.T) {
 	path := filepath.Join(home, ".codex", "custom_models.json")
 	writeFile(t, path, `{"models":[{"slug":"glm-5.3-flash","context_window":258048,"max_context_window":258048,"supported_reasoning_levels":[],"use_responses_lite":true,"tool_mode":"code_mode_only"}]}`)
 
-	if err := codexCatalog(path, "glm-5.3-flash", "max", 1_048_576); err != nil {
+	if _, err := codexCatalog(path, AuthSpec{Model: "glm-5.3-flash", Effort: "max", Models: []ModelSpec{{Slug: "glm-5.3-flash", ContextWindow: 1_048_576}}}); err != nil {
 		t.Fatal(err)
 	}
 	var catalog struct {
