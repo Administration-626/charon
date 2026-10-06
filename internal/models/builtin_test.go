@@ -3,7 +3,7 @@ package models
 import "testing"
 
 func TestIsReasoningBuiltin(t *testing.T) {
-	for _, slug := range []string{"gpt-5.6-luna", "openai/gpt-5.5", "o3-mini", "deepseek-reasoner"} {
+	for _, slug := range []string{"gpt-6-luna", "openai/gpt-6-astra", "gpt-6.1-sol", "gpt-5.6-luna", "openai/gpt-5.5", "o3-mini", "deepseek-reasoner"} {
 		if !IsReasoningBuiltin(slug) {
 			t.Errorf("IsReasoningBuiltin(%q) = false, want true", slug)
 		}

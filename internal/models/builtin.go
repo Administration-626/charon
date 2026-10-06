@@ -114,6 +114,7 @@ var builtinModelWindows = []builtinRule{
 
 // builtinReasoningPatterns identifies model families that support reasoning by default.
 var builtinReasoningPatterns = []string{
+	"gpt-6",
 	"gpt-5",
 	"o1",
 	"o3",

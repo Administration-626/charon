@@ -47,6 +47,62 @@ func legacyPiExtension(t *testing.T) []byte {
 	return data
 }
 
+func TestPiBuildModelsThinkingLevels(t *testing.T) {
+	none, xhigh, maxLevel, maximum := "none", "xhigh", "max", "maximum"
+	gpt6Levels := map[string]*string{"off": &none, "minimal": nil, "xhigh": &xhigh, "max": &maxLevel}
+	requiredLevels := map[string]*string{"off": nil, "minimal": nil, "xhigh": &xhigh, "max": &maxLevel}
+	manualLevels := map[string]*string{"max": &maximum, "xhigh": nil}
+	for _, tc := range []struct {
+		name      string
+		spec      ModelSpec
+		reasoning bool
+		levels    map[string]*string
+	}{
+		{"luna", ModelSpec{Slug: "gpt-6-luna"}, true, gpt6Levels},
+		{"sol", ModelSpec{Slug: "gpt-6-sol"}, true, gpt6Levels},
+		{"astra", ModelSpec{Slug: "gpt-6-astra"}, true, requiredLevels},
+		{"sol 6.1", ModelSpec{Slug: "gpt-6.1-sol"}, true, requiredLevels},
+		{"namespaced", ModelSpec{Slug: "openai/gpt-6-luna:free"}, true, gpt6Levels},
+		{"manual map wins", ModelSpec{Slug: "gpt-6-luna", Effort: "max", ThinkingLevelMap: manualLevels}, true, manualLevels},
+		{"explicit empty map", ModelSpec{Slug: "gpt-6-luna", ThinkingLevelMap: map[string]*string{}}, true, map[string]*string{}},
+		{"custom max", ModelSpec{Slug: "custom", Effort: "max"}, true, map[string]*string{"max": &maxLevel}},
+		{"custom xhigh", ModelSpec{Slug: "custom", Effort: "xhigh"}, true, map[string]*string{"xhigh": &xhigh}},
+		{"custom mapping", ModelSpec{Slug: "custom", ThinkingLevelMap: manualLevels}, true, manualLevels},
+		{"older reasoning model", ModelSpec{Slug: "o3-mini"}, true, nil},
+		{"non reasoning model", ModelSpec{Slug: "gpt-4o"}, false, nil},
+		{"unknown model", ModelSpec{Slug: "custom"}, false, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before, err := json.Marshal(tc.spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := piBuildModels([]ModelSpec{tc.spec})
+			if len(got) != 1 || got[0].Reasoning != tc.reasoning || !reflect.DeepEqual(got[0].ThinkingLevelMap, tc.levels) {
+				t.Fatalf("models = %+v, want reasoning=%v, levels=%v", got, tc.reasoning, tc.levels)
+			}
+			after, err := json.Marshal(tc.spec)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("building Pi models mutated the input spec")
+			}
+		})
+	}
+}
+
+func TestPiSingleModelKeepsExplicitEffort(t *testing.T) {
+	home := sandboxHome(t)
+	if err := Find("pi").ApplyAuth(AuthSpec{
+		Endpoint: "https://example.test/v1", Key: "sk-test", Model: "custom", Effort: "max",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	entry := readPiProvider(t, home)["models"].([]any)[0].(map[string]any)
+	levels, _ := entry["thinkingLevelMap"].(map[string]any)
+	if entry["reasoning"] != true || levels["max"] != "max" {
+		t.Fatalf("single model lost explicit thinking capability: %#v", entry)
+	}
+}
+
 func TestPiAuthUpdatePreservesFullModelEntries(t *testing.T) {
 	home := sandboxHome(t)
 	dir := filepath.Join(home, ".pi", "agent")

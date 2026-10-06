@@ -58,6 +58,73 @@ func TestProjectCodexMultipleModels(t *testing.T) {
 	}
 }
 
+func TestReapplyPiRepairsThinkingCapabilities(t *testing.T) {
+	c := openTest(t)
+	_, cr := seed(t, c, "https://gateway.example/v1", "sk-test", "gpt-6-luna", "gpt-4o")
+	b, err := c.AddBinding("pi", "work", cr.ID, "gpt-6-luna", []string{"gpt-6-luna", "gpt-4o"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Activate(b.ID); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(os.Getenv("HOME"), ".pi", "agent")
+	// Simulate an already-active binding rendered by the old adapter.
+	if err := os.WriteFile(filepath.Join(dir, "models.json"), []byte(
+		`{"providers":{"charon":{"models":[{"id":"gpt-6-luna","reasoning":false}]}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(
+		`{"defaultThinkingLevel":"high","compaction":{"enabled":false}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Reapply(b.ID); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "models.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Providers map[string]struct {
+			Models []struct {
+				ID               string             `json:"id"`
+				Reasoning        bool               `json:"reasoning"`
+				ThinkingLevelMap map[string]*string `json:"thinkingLevelMap"`
+			} `json:"models"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	entries := config.Providers["charon"].Models
+	if len(entries) != 2 || entries[0].ID != "gpt-6-luna" || !entries[0].Reasoning {
+		t.Fatalf("Pi models not repaired: %+v", entries)
+	}
+	if level := entries[0].ThinkingLevelMap["max"]; level == nil || *level != "max" {
+		t.Fatalf("Pi max thinking level unavailable: %+v", entries[0])
+	}
+	if entries[1].ID != "gpt-4o" || entries[1].Reasoning || len(entries[1].ThinkingLevelMap) != 0 {
+		t.Fatalf("reasoning capability leaked to another model: %+v", entries[1])
+	}
+	data, err = os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings struct {
+		DefaultThinkingLevel string `json:"defaultThinkingLevel"`
+		Compaction           struct {
+			Enabled bool `json:"enabled"`
+		} `json:"compaction"`
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatal(err)
+	}
+	if settings.DefaultThinkingLevel != "high" || settings.Compaction.Enabled {
+		t.Fatalf("Pi preferences changed: %+v", settings)
+	}
+}
+
 func TestProjectRendersBinding(t *testing.T) {
 	c := openTest(t)
 	home := t.TempDir()

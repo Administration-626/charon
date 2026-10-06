@@ -62,6 +62,34 @@ func piEscapeValue(s string) string {
 	return s
 }
 
+// piThinkingLevelMap supplies Pi's opt-in extended levels, not a startup preference.
+// Explicit mappings (including null/disabled levels) take precedence over presets.
+func piThinkingLevelMap(spec ModelSpec) map[string]*string {
+	if spec.ThinkingLevelMap != nil {
+		return spec.ThinkingLevelMap
+	}
+	var levels map[string]*string
+	// Source: @earendil-works/pi-ai 1.0.4 providers/data/openai.json.
+	// Unmapped low/medium/high levels already use their names in Pi.
+	switch slug := models.NormalizeSlug(spec.Slug); slug {
+	case "gpt-6-luna", "gpt-6-sol", "gpt-6-astra", "gpt-6.1-sol":
+		off, xhigh, maxLevel := "none", "xhigh", "max"
+		levels = map[string]*string{"off": &off, "minimal": nil, "xhigh": &xhigh, "max": &maxLevel}
+		if slug == "gpt-6-astra" || slug == "gpt-6.1-sol" {
+			levels["off"] = nil
+		}
+	}
+	// A saved extended effort is also an explicit capability for gateway aliases.
+	// Without a mapping Pi hides xhigh/max even when reasoning is true.
+	if spec.Effort == "xhigh" || spec.Effort == "max" {
+		if levels == nil {
+			levels = make(map[string]*string)
+		}
+		levels[spec.Effort] = &spec.Effort
+	}
+	return levels
+}
+
 // piBuildModels turns a list of model ids into pi model entries.
 func piBuildModels(specs []ModelSpec) []piModel {
 	entries := make([]piModel, 0, len(specs))
@@ -80,7 +108,7 @@ func piBuildModels(specs []ModelSpec) []piModel {
 			Input:            []string{"text", "image"},
 			ContextWindow:    window,
 			MaxTokens:        8192,
-			ThinkingLevelMap: spec.ThinkingLevelMap,
+			ThinkingLevelMap: piThinkingLevelMap(spec),
 		})
 	}
 	return entries
@@ -206,7 +234,7 @@ func newPi() *Tool {
 			if entries == nil {
 				specs := a.Models
 				if specs == nil && modelSlug != "" {
-					specs = []ModelSpec{{Slug: modelSlug}}
+					specs = []ModelSpec{{Slug: modelSlug, Effort: a.Effort}}
 				}
 				entries = piBuildModels(specs)
 			}
