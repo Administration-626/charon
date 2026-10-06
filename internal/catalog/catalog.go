@@ -29,7 +29,6 @@ import (
 
 	"charon/internal/artifact"
 	"charon/internal/models"
-	"charon/internal/tools"
 )
 
 // Provider is one API site. It carries no wire dialect: a single endpoint can speak
@@ -49,12 +48,13 @@ type Credential struct {
 
 // Model is one model slug offered by a provider.
 type Model struct {
-	ID                  string       `json:"id"`
-	ProviderID          string       `json:"providerId"`
-	Slug                string       `json:"slug"`
-	ContextWindow       int          `json:"contextWindow,omitempty"`
-	ContextWindowSource WindowSource `json:"contextWindowSource,omitempty"`
-	Effort              string       `json:"effort,omitempty"`
+	ID                  string             `json:"id"`
+	ProviderID          string             `json:"providerId"`
+	Slug                string             `json:"slug"`
+	ContextWindow       int                `json:"contextWindow,omitempty"`
+	ContextWindowSource WindowSource       `json:"contextWindowSource,omitempty"`
+	Effort              string             `json:"effort,omitempty"`
+	ThinkingLevelMap    map[string]*string `json:"thinkingLevelMap,omitempty"`
 }
 
 // WindowSource records who supplied a context window. A manual value wins over a
@@ -267,15 +267,10 @@ func (c *Catalog) SetModelWindow(id string, contextWindow int) (Model, error) {
 	return Model{}, fmt.Errorf("model %q: %w", id, ErrNotFound)
 }
 
-// SetModelEffort records the reasoning-effort level Charon writes for a model.
-// An empty value clears the manual setting and falls back to medium when rendered.
+// SetModelEffort records the provider-specific reasoning level for a model.
+// An empty value clears the manual setting.
 func (c *Catalog) SetModelEffort(id string, effort string) (Model, error) {
 	effort = strings.ToLower(strings.TrimSpace(effort))
-	if effort != "" {
-		if err := tools.ValidateCodexEffort(effort); err != nil {
-			return Model{}, err
-		}
-	}
 	if err := c.lock(); err != nil {
 		return Model{}, err
 	}
@@ -288,6 +283,27 @@ func (c *Catalog) SetModelEffort(id string, effort string) (Model, error) {
 		if m.ID == id {
 			ms[i].Effort = effort
 			return ms[i], writeTable(c.table("models.json"), ms)
+		}
+	}
+	return Model{}, fmt.Errorf("model %q: %w", id, ErrNotFound)
+}
+
+// SetModelThinkingLevelMap records the Pi-compatible thinking-level mapping.
+// A nil map clears the mapping.
+func (c *Catalog) SetModelThinkingLevelMap(id string, levels map[string]*string) (Model, error) {
+	if err := c.lock(); err != nil {
+		return Model{}, err
+	}
+	defer c.unlock()
+	ms, err := c.models()
+	if err != nil {
+		return Model{}, err
+	}
+	for i, m := range ms {
+		if m.ID == id {
+			m.ThinkingLevelMap = levels
+			ms[i] = m
+			return m, writeTable(c.table("models.json"), ms)
 		}
 	}
 	return Model{}, fmt.Errorf("model %q: %w", id, ErrNotFound)
@@ -520,7 +536,7 @@ func (c *Catalog) BindingByName(tool, name string) (Binding, bool, error) {
 	return Binding{}, false, nil
 }
 
-// Bindings returns a tool's bindings, ordered by name.
+// Bindings returns a tool's bindings, ordered by name. An empty tool lists all tools.
 func (c *Catalog) Bindings(tool string) ([]Binding, error) {
 	bs, err := c.bindings()
 	if err != nil {
@@ -528,7 +544,7 @@ func (c *Catalog) Bindings(tool string) ([]Binding, error) {
 	}
 	var out []Binding
 	for _, b := range bs {
-		if b.Tool == tool {
+		if tool == "" || b.Tool == tool {
 			out = append(out, b)
 		}
 	}

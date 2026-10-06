@@ -38,9 +38,10 @@ type AuthSpec struct {
 
 // ModelSpec is one model registered in a tool's own model picker.
 type ModelSpec struct {
-	Slug          string
-	ContextWindow int
-	Effort        string
+	Slug             string
+	ContextWindow    int
+	Effort           string
+	ThinkingLevelMap map[string]*string
 }
 
 // Tool describes one AI CLI's auth surface and how to summarize/reconfigure it.

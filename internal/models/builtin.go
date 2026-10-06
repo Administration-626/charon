@@ -112,6 +112,16 @@ var builtinModelWindows = []builtinRule{
 	{pattern: "qwen2.5", window: 128_000},
 }
 
+// builtinReasoningPatterns identifies model families that support reasoning by default.
+var builtinReasoningPatterns = []string{
+	"gpt-5",
+	"o1",
+	"o3",
+	"o4",
+	"deepseek-r1",
+	"deepseek-reasoner",
+}
+
 // NormalizeSlug strips provider namespace prefixes, region prefixes, and tags.
 func NormalizeSlug(slug string) string {
 	s := strings.ToLower(strings.TrimSpace(slug))
@@ -173,6 +183,17 @@ func clampDefaultWindow(window int) int {
 		return DefaultContextCeiling
 	}
 	return window
+}
+
+// IsReasoningBuiltin reports whether slug belongs to a built-in reasoning model family.
+func IsReasoningBuiltin(slug string) bool {
+	norm := NormalizeSlug(slug)
+	for _, pattern := range builtinReasoningPatterns {
+		if strings.HasPrefix(norm, pattern) || strings.Contains(norm, "-"+pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 // IsKnownBuiltin reports whether slug matches a specific pattern in the builtin table

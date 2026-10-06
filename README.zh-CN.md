@@ -56,9 +56,16 @@ endpoint 和凭据。
 | Codex | ~/.codex/config.toml（model_provider → base_url） | ~/.codex/config.toml（experimental_bearer_token） |
 | Claude Code | ~/.claude/settings.json（env.ANTHROPIC_BASE_URL） | settings.json 的环境变量键 |
 | OpenCode | ~/.config/opencode/opencode.jsonc（provider.*.options.baseURL） | opencode.jsonc（provider.charon.options.apiKey） |
-| Pi | ~/.pi/agent/extensions/charon.ts（baseUrl） | ~/.pi/agent/extensions/charon.ts（apiKey） |
+| Pi | ~/.pi/agent/models.json（providers.charon.baseUrl） | ~/.pi/agent/models.json（providers.charon.apiKey） |
 | Oh My Pi（omp） | ~/.omp/agent/models.yml（providers.charon.baseUrl） | ~/.omp/agent/models.yml（providers.charon.apiKey） |
 | Grok | ~/.grok/config.toml（[model.charon-*].base_url） | ~/.grok/config.toml（[model.charon-*].api_key） |
+
+Pi 的 Charon provider 使用原生 `models.json`。下次写入配置时，Charon 会迁移旧版
+生成的 `extensions/charon.ts`，并在 `models.json` 和 `settings.json` 均写入成功后
+删除旧扩展。若扩展包含额外代码、格式无法识别或是符号链接，则在任何写入前拒绝操作，
+请检查后手动停用。迁移后请重启 Pi，以卸载已加载的旧扩展。现有 thinking、压缩偏好
+和 `auth.json` 登录凭据保持不变。每个文件单独原子替换；若两次写入之间发生 I/O
+错误，会明确提示配置可能部分生效。
 
 ## 安装
 
@@ -172,7 +179,7 @@ charon completion fish | source
 绑定中保存的模型会出现在工具自身的菜单中，因此可以在当前会话内更换模型：Codex
 的 /model（读取 custom_models.json）、Claude Code
 的 /model（通过 modelPicker）、OpenCode 的 /models（读取 charon provider 的模型
-映射）、Pi 的 /model（由 Charon 生成的扩展）、Oh My Pi 的 /model（读取
+映射）、Pi 的 /model（读取 models.json 中 providers.charon 的模型列表）、Oh My Pi 的 /model（读取
 providers.charon 的模型列表）以及 Grok 的 /model（一组 [model.charon-<slug>]
 表）。切换绑定时，工具中的模型列表也会更新。
 只有一个模型的绑定会将工具中的模型列表替换为该模型，不会保留上一条绑定的列表。
@@ -228,8 +235,8 @@ charon edit claude gateway --models glm-4.6   # 只在模型菜单中注册 glm-
 
 每个工具都会在它自己的配置格式里写入一个专属的 charon provider 条目
 （Codex 的 [model_providers.charon]、Claude 的 env.ANTHROPIC_*、OpenCode 的一个
-@ai-sdk/openai-compatible provider、Pi 的 pi.registerProvider("charon", ...)
-扩展、Oh My Pi 的 models.yml 中一个 providers.charon 块、Grok 的每个模型一张
+@ai-sdk/openai-compatible provider、Pi 的 models.json 中一个 providers.charon 块、
+Oh My Pi 的 models.yml 中一个 providers.charon 块、Grok 的每个模型一张
 [model.charon-<slug>] 表）。因此切换到其他配置后再切回时，Charon 仍可重新应用该绑定。
 
 示例：先运行 charon add codex --name work-key --key sk-... --model gpt-5，再运行

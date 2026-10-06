@@ -907,6 +907,16 @@ func TestNotDetectedInEmptyHome(t *testing.T) {
 	}
 }
 
+func TestPiBuildModelsInfersReasoningForGPT5(t *testing.T) {
+	models := piBuildModels([]ModelSpec{{Slug: "gpt-5.6-luna"}})
+	if len(models) != 1 || !models[0].Reasoning {
+		t.Fatalf("gpt-5.6-luna reasoning = %#v, want true", models)
+	}
+	if models[0].ThinkingLevelMap != nil {
+		t.Fatalf("unexpected thinking level map: %#v", models[0].ThinkingLevelMap)
+	}
+}
+
 func TestPiDescribeAndApply(t *testing.T) {
 	home := sandboxHome(t)
 	dir := filepath.Join(home, ".pi", "agent")
@@ -936,14 +946,20 @@ func TestPiDescribeAndApply(t *testing.T) {
 		t.Errorf("Describe info = %+v, want endpoint/key/api set", info)
 	}
 
-	extensionPath := filepath.Join(dir, "extensions", "charon.ts")
-	data, err := os.ReadFile(extensionPath)
+	modelsPath := filepath.Join(dir, "models.json")
+	data, err := os.ReadFile(modelsPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, ok := piParseExtension(data)
+	var modelsConfig struct {
+		Providers map[string]piProviderConfig `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &modelsConfig); err != nil {
+		t.Fatal(err)
+	}
+	cfg, ok := modelsConfig.Providers["charon"]
 	if !ok {
-		t.Fatal("could not parse charon.ts extension back out")
+		t.Fatal("charon provider missing from models.json")
 	}
 	if len(cfg.Models) != 2 {
 		t.Errorf("models = %v, want 2 entries", cfg.Models)
@@ -965,8 +981,9 @@ func TestPiDescribeAndApply(t *testing.T) {
 	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://openrouter.ai/api/v1", Key: "sk-or-999", Model: "x/y"}); err != nil {
 		t.Fatal(err)
 	}
-	data, _ = os.ReadFile(extensionPath)
-	cfg, _ = piParseExtension(data)
+	data, _ = os.ReadFile(modelsPath)
+	_ = json.Unmarshal(data, &modelsConfig)
+	cfg = modelsConfig.Providers["charon"]
 	if len(cfg.Models) != 2 {
 		t.Errorf("models after re-apply = %v, want preserved 2 entries", cfg.Models)
 	}

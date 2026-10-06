@@ -625,8 +625,8 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case viewModelEffort:
-			effort := strings.ToLower(strings.TrimSpace(val))
-			if err := tools.ValidateCodexEffort(effort); err != nil {
+			levels, effort, err := parseThinkingLevelMap(val)
+			if err != nil {
 				m.setStatus(statusErr, err.Error())
 				return m, nil
 			}
@@ -635,7 +635,12 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.setStatus(statusErr, err.Error())
 				return m, nil
 			}
-			bindings, err := m.cat.Bindings("codex")
+			if _, err := m.cat.SetModelThinkingLevelMap(saved.ID, levels); err != nil {
+				m.setStatus(statusErr, err.Error())
+				return m, nil
+			}
+			saved.ThinkingLevelMap = levels
+			bindings, err := m.cat.Bindings("")
 			if err != nil {
 				m.setStatus(statusErr, err.Error())
 				return m, nil

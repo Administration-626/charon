@@ -70,7 +70,7 @@ func (c *Catalog) project(b Binding) error {
 		if b.Tool == "codex" && officialOpenAI && len(b.Models) == 1 && m.ContextWindowSource == WindowBuiltin {
 			window = 0
 		}
-		specs = append(specs, tools.ModelSpec{Slug: m.Slug, ContextWindow: window, Effort: m.Effort})
+		specs = append(specs, tools.ModelSpec{Slug: m.Slug, ContextWindow: window, Effort: m.Effort, ThinkingLevelMap: m.ThinkingLevelMap})
 		if id == b.ModelID {
 			spec.Effort = m.Effort
 			if spec.Effort == "" {

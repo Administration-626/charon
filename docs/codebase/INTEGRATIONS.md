@@ -7,7 +7,7 @@
 | Codex | 本地 CLI 配置 | 写入 `~/.codex/config.toml` 的 charon provider | 配置内 bearer token；OAuth 文件保持不动 | 高 | `internal/tools/codex.go` |
 | Claude Code | 本地 CLI 配置和 macOS Keychain | 写入 `settings.json`；读取 OAuth 账户状态 | 官方 endpoint 使用 API key；自定义 endpoint 使用 `ANTHROPIC_AUTH_TOKEN` | 高 | `internal/tools/claude.go`、`internal/secret/keychain_darwin.go` |
 | OpenCode | 本地 JSONC/JSON 配置 | 写入 `provider.charon` | provider `apiKey` | 高 | `internal/tools/opencode.go` |
-| Pi | 本地 TypeScript 扩展和 JSON 设置 | 生成 `charon.ts` provider，设置默认模型 | provider `apiKey` | 高 | `internal/tools/pi.go` |
+| Pi | 本地 JSON 配置 | 写入 `models.json` 的 `providers.charon` 和默认模型；安全迁移旧版生成的扩展 | provider `apiKey` | 高 | `internal/tools/pi.go` |
 | Oh My Pi | 本地 YAML 配置 | 写入 `providers.charon` 和默认角色 | provider `apiKey` | 高 | `internal/tools/omp.go` |
 | Grok | 本地 TOML 配置 | 管理 `[model.charon-*]` 和默认模型 | model `api_key` | 高 | `internal/tools/grok.go` |
 | OpenAI/Anthropic 兼容 endpoint | HTTP API | 获取 `/v1/models` | Bearer、`x-api-key` 和 Anthropic 版本头；按方言重试 | 中 | `internal/models/fetch.go`、`cmd/charon/commands.go` |

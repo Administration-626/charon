@@ -384,6 +384,54 @@ func (m *model) editModelWindowByID(id string) error {
 	return nil
 }
 
+func formatThinkingLevelMap(levels map[string]*string, effort string) string {
+	if len(levels) == 0 {
+		return effort
+	}
+	var out []string
+	for _, level := range []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"} {
+		value, ok := levels[level]
+		if !ok {
+			continue
+		}
+		if value == nil {
+			out = append(out, level+"=off")
+		} else {
+			out = append(out, level+"="+*value)
+		}
+	}
+	return strings.Join(out, ",")
+}
+
+func parseThinkingLevelMap(raw string) (map[string]*string, string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, "", nil
+	}
+	if !strings.Contains(raw, "=") {
+		return nil, strings.ToLower(raw), nil
+	}
+	levels := map[string]*string{}
+	var fallback string
+	valid := map[string]bool{"off": true, "minimal": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true}
+	for _, part := range strings.Split(raw, ",") {
+		key, value, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok || !valid[key] || value == "" {
+			return nil, "", fmt.Errorf("use level=value pairs, e.g. low=low,medium=medium; unsupported levels are omitted")
+		}
+		if value == "off" {
+			levels[key] = nil
+		} else {
+			value = strings.ToLower(strings.TrimSpace(value))
+			levels[key] = &value
+			if key == "medium" {
+				fallback = value
+			}
+		}
+	}
+	return levels, fallback, nil
+}
+
 func (m *model) editModelEffortByID(id string) error {
 	stored, err := m.cat.Model(id)
 	if err != nil {
@@ -393,8 +441,8 @@ func (m *model) editModelEffortByID(id string) error {
 	if p, err := m.cat.Provider(stored.ProviderID); err == nil {
 		m.modelEditEndpoint = p.BaseURL
 	}
-	m.startInput("reasoning effort (low, medium, high, xhigh, max, ultra)", false)
-	m.input.SetValue(stored.Effort)
+	m.startInput("thinking map (level=value, level=off; empty clears)", false)
+	m.input.SetValue(formatThinkingLevelMap(stored.ThinkingLevelMap, stored.Effort))
 	return nil
 }
 

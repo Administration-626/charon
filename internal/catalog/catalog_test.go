@@ -41,6 +41,36 @@ func seed(t *testing.T, c *Catalog, baseURL, key string, slugs ...string) (Provi
 	return p, cr
 }
 
+func TestBindingsCanListAllTools(t *testing.T) {
+	c := openTest(t)
+	_, cr := seed(t, c, "https://gateway.example/v1", "sk-test", "custom")
+	for tool, name := range map[string]string{"pi": "a-pi", "codex": "b-codex"} {
+		if _, err := c.AddBinding(tool, name, cr.ID, "custom", []string{"custom"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		tool string
+		want int
+	}{{"", 2}, {"pi", 1}, {"codex", 1}, {"missing", 0}} {
+		bindings, err := c.Bindings(tc.tool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(bindings) != tc.want {
+			t.Fatalf("Bindings(%q) returned %d, want %d", tc.tool, len(bindings), tc.want)
+		}
+		for i, binding := range bindings {
+			if tc.tool != "" && binding.Tool != tc.tool {
+				t.Errorf("Bindings(%q) returned tool %q", tc.tool, binding.Tool)
+			}
+			if i > 0 && bindings[i-1].Name > binding.Name {
+				t.Error("bindings are not ordered by name")
+			}
+		}
+	}
+}
+
 func TestProviderDedupesByURL(t *testing.T) {
 	c := openTest(t)
 	a, err := c.PutProvider("https://gateway.example/v1/")

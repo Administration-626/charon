@@ -2,6 +2,19 @@ package models
 
 import "testing"
 
+func TestIsReasoningBuiltin(t *testing.T) {
+	for _, slug := range []string{"gpt-5.6-luna", "openai/gpt-5.5", "o3-mini", "deepseek-reasoner"} {
+		if !IsReasoningBuiltin(slug) {
+			t.Errorf("IsReasoningBuiltin(%q) = false, want true", slug)
+		}
+	}
+	for _, slug := range []string{"gpt-4o", "claude-sonnet-4-6", "some-custom-model"} {
+		if IsReasoningBuiltin(slug) {
+			t.Errorf("IsReasoningBuiltin(%q) = true, want false", slug)
+		}
+	}
+}
+
 func TestDefaultContextWindow(t *testing.T) {
 	cases := []struct {
 		slug string

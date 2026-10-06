@@ -63,9 +63,18 @@ re-renders that binding into the tool, overwriting only the keys charon owns.
 | Codex | ~/.codex/config.toml (model_provider → base_url) | ~/.codex/config.toml (experimental_bearer_token) |
 | Claude Code | ~/.claude/settings.json (env.ANTHROPIC_BASE_URL) | settings.json env key |
 | OpenCode | ~/.config/opencode/opencode.jsonc (provider.*.options.baseURL) | opencode.jsonc (provider.charon.options.apiKey) |
-| Pi | ~/.pi/agent/extensions/charon.ts (baseUrl) | ~/.pi/agent/extensions/charon.ts (apiKey) |
+| Pi | ~/.pi/agent/models.json (providers.charon.baseUrl) | ~/.pi/agent/models.json (providers.charon.apiKey) |
 | Oh My Pi (omp) | ~/.omp/agent/models.yml (providers.charon.baseUrl) | ~/.omp/agent/models.yml (providers.charon.apiKey) |
 | Grok | ~/.grok/config.toml ([model.charon-*].base_url) | ~/.grok/config.toml ([model.charon-*].api_key) |
+
+Pi uses its native `models.json` for the Charon provider. On the next configuration
+write, Charon migrates its old generated `extensions/charon.ts` and removes it only
+after both `models.json` and `settings.json` have been written. An extension with
+extra code, an unrecognized format, or a symlink is refused before any writes;
+disable it manually after reviewing it. Restart Pi after migration to unload the
+old extension. Existing thinking/compaction preferences and `auth.json` logins are
+left alone. Each file is replaced atomically; an I/O failure between writes is
+reported as partial application.
 
 ## Installation
 
@@ -197,7 +206,7 @@ status bar flags missing required values on submit.
 The models a binding registers land in the tool's own menu, so you can change model
 without leaving your session: Codex's /model (via custom_models.json), Claude Code's /model (via modelPicker), OpenCode's
 /models (via the charon provider's model map), Pi's /model (via the
-generated extension), Oh My Pi's /model (via the providers.charon model
+providers.charon model list in models.json), Oh My Pi's /model (via the providers.charon model
 list), and Grok's /model (via [model.charon-<slug>] tables).
 The list travels with the binding — switch bindings and the menu switches too.
 Codex's custom catalog contains the binding's complete model list, not built-in
@@ -264,8 +273,8 @@ picker list.
 
 Each tool gets a dedicated charon provider entry written into its own config
 format (Codex [model_providers.charon], Claude env.ANTHROPIC_*, OpenCode an
-@ai-sdk/openai-compatible provider, Pi a pi.registerProvider("charon", ...)
-extension, Oh My Pi a providers.charon block in models.yml, Grok a
+@ai-sdk/openai-compatible provider, Pi a providers.charon block in models.json,
+Oh My Pi a providers.charon block in models.yml, Grok a
 [model.charon-<slug>] table per model), so Charon can reapply a binding after
 you switch to another one.
 

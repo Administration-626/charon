@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,13 +10,11 @@ import (
 	"sort"
 	"strings"
 
-	"charon/internal/artifact"
+	"charon/internal/models"
 )
 
-// Pi has no static provider-config file: providers are registered by TypeScript
-// extensions (pi.registerProvider(...)) auto-loaded from ~/.pi/agent/extensions.
-// charon owns one such extension, charon.ts, wrapping a JSON blob so it can be
-// round-tripped without a TS parser; see piExtensionOpen/Close markers below.
+// Older Charon versions registered Pi providers through a generated extension.
+// Keep its exact format to recognize files we can safely migrate to models.json.
 const (
 	piExtensionOpen  = `pi.registerProvider("charon", `
 	piExtensionClose = `);
@@ -28,13 +27,14 @@ var piConfigRE = regexp.MustCompile(`(?s)pi\.registerProvider\("charon",\s*(.*?)
 
 // piModel is one entry of a pi provider's "models" array.
 type piModel struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	Reasoning     bool     `json:"reasoning"`
-	Input         []string `json:"input"`
-	Cost          piCost   `json:"cost"`
-	ContextWindow int      `json:"contextWindow"`
-	MaxTokens     int      `json:"maxTokens"`
+	ID               string             `json:"id"`
+	Name             string             `json:"name"`
+	Reasoning        bool               `json:"reasoning"`
+	Input            []string           `json:"input"`
+	Cost             piCost             `json:"cost"`
+	ContextWindow    int                `json:"contextWindow"`
+	MaxTokens        int                `json:"maxTokens"`
+	ThinkingLevelMap map[string]*string `json:"thinkingLevelMap,omitempty"`
 }
 
 type piCost struct {
@@ -44,7 +44,7 @@ type piCost struct {
 	CacheWrite float64 `json:"cacheWrite"`
 }
 
-// piProviderConfig is the object literal passed to pi.registerProvider.
+// piProviderConfig describes Charon's native and legacy provider configuration.
 type piProviderConfig struct {
 	Name    string    `json:"name"`
 	BaseURL string    `json:"baseUrl"`
@@ -64,23 +64,29 @@ func piEscapeValue(s string) string {
 
 // piBuildModels turns a list of model ids into pi model entries.
 func piBuildModels(specs []ModelSpec) []piModel {
-	models := make([]piModel, 0, len(specs))
+	entries := make([]piModel, 0, len(specs))
 	for _, spec := range specs {
 		if spec.Slug == "" {
 			continue
 		}
-		models = append(models, piModel{
-			ID:            spec.Slug,
-			Name:          spec.Slug,
-			Input:         []string{"text", "image"},
-			ContextWindow: spec.ContextWindow,
-			MaxTokens:     8192,
+		window := spec.ContextWindow
+		if window == 0 {
+			window = models.DefaultContextWindow(spec.Slug)
+		}
+		entries = append(entries, piModel{
+			ID:               spec.Slug,
+			Name:             spec.Slug,
+			Reasoning:        models.IsReasoningBuiltin(spec.Slug) || len(spec.ThinkingLevelMap) > 0 || spec.Effort != "",
+			Input:            []string{"text", "image"},
+			ContextWindow:    window,
+			MaxTokens:        8192,
+			ThinkingLevelMap: spec.ThinkingLevelMap,
 		})
 	}
-	return models
+	return entries
 }
 
-// piExtensionContent renders charon's extension .ts file for cfg.
+// piExtensionContent reproduces the legacy extension for ownership checks.
 func piExtensionContent(cfg piProviderConfig) ([]byte, error) {
 	body, err := json.MarshalIndent(cfg, "  ", "  ")
 	if err != nil {
@@ -112,15 +118,39 @@ func piParseExtension(data []byte) (piProviderConfig, bool) {
 	return cfg, true
 }
 
-// newPi describes the pi coding agent: providers are registered via a TypeScript
-// extension (~/.pi/agent/extensions/charon.ts); model/effort defaults live in
-// ~/.pi/agent/settings.json; OAuth-based provider logins (unrelated to charon's
-// key-based provider) persist in ~/.pi/agent/auth.json.
+// piLegacyConfig refuses to migrate extensions that differ from our generated
+// format. In particular, a recognizable JSON block alone does not prove ownership.
+func piLegacyConfig(path string) (*piProviderConfig, error) {
+	stat, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read legacy pi extension: %w", err)
+	}
+	if !stat.Mode().IsRegular() {
+		return nil, fmt.Errorf("refusing to migrate %s: not a regular file; disable it manually", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read legacy pi extension: %w", err)
+	}
+	cfg, ok := piParseExtension(data)
+	expected, err := piExtensionContent(cfg)
+	if !ok || err != nil || !bytes.Equal(data, expected) {
+		return nil, fmt.Errorf("refusing to migrate modified or unrecognized %s; disable it manually", path)
+	}
+	return &cfg, nil
+}
+
+// newPi registers a provider in ~/.pi/agent/models.json. Model/effort defaults
+// live in settings.json; Pi's own provider logins in auth.json remain untouched.
 func newPi() *Tool {
 	dir := filepath.Join(home(), ".pi", "agent")
 	settingsPath := filepath.Join(dir, "settings.json")
 	authPath := filepath.Join(dir, "auth.json")
 	extensionPath := filepath.Join(dir, "extensions", "charon.ts")
+	modelsPath := filepath.Join(dir, "models.json")
 
 	return &Tool{
 		Name:            "pi",
@@ -129,56 +159,90 @@ func newPi() *Tool {
 		ModelMenu:       "/model",
 		DefaultEndpoint: "https://api.openai.com/v1",
 		ApplyAuth: func(a AuthSpec) error {
-			// Preserve the previously-registered model list when this call doesn't bring
-			// its own (rename, key rotation, CLI --model) — otherwise pi's /model picker
-			// would collapse down to just the single current model.
-			var existingModels []string
-			if data, err := os.ReadFile(extensionPath); err == nil {
-				if prev, ok := piParseExtension(data); ok {
-					for _, m := range prev.Models {
-						existingModels = append(existingModels, m.ID)
-					}
-				}
-			}
-			modelSlug := strings.TrimSpace(a.Model)
-			specs := a.Models
-			if specs == nil {
-				specs = piSpecsFromIDs(existingModels)
-			}
-			if specs == nil && modelSlug != "" {
-				specs = []ModelSpec{{Slug: modelSlug}}
-			}
-
-			cfg := piProviderConfig{
-				Name:    "charon",
-				BaseURL: a.Endpoint,
-				APIKey:  piEscapeValue(a.Key),
-				API:     "openai-completions",
-				Models:  piBuildModels(specs),
-			}
-			content, err := piExtensionContent(cfg)
+			// Read and validate every input before the first write.
+			config, err := loadJSONMap(modelsPath)
 			if err != nil {
-				return fmt.Errorf("render pi extension: %w", err)
+				return fmt.Errorf("read models.json: %w", err)
 			}
-			if err := os.MkdirAll(filepath.Dir(extensionPath), 0o700); err != nil {
-				return err
-			}
-			if err := artifact.AtomicWrite(extensionPath, content, 0o600); err != nil {
-				return fmt.Errorf("write charon.ts: %w", err)
-			}
-
 			s, err := loadJSONMap(settingsPath)
 			if err != nil {
+				return fmt.Errorf("read settings.json: %w", err)
+			}
+			if config == nil || s == nil {
+				return fmt.Errorf("refusing to write pi config: models.json and settings.json must be objects")
+			}
+			if value, exists := config["providers"]; exists {
+				if _, ok := value.(map[string]any); !ok {
+					return fmt.Errorf("refusing to write models.json: providers must be an object")
+				}
+			}
+			providers := subMap(config, "providers")
+			if value, exists := providers[managedProvider]; exists {
+				if _, ok := value.(map[string]any); !ok {
+					return fmt.Errorf("refusing to write models.json: providers.charon must be an object")
+				}
+			}
+			legacy, err := piLegacyConfig(extensionPath)
+			if err != nil {
+				return err
+			}
+
+			modelSlug := strings.TrimSpace(a.Model)
+			var entries any
+			if a.Models == nil {
+				// Keep the complete entries, including fields unknown to Charon.
+				if previous, ok := providers[managedProvider].(map[string]any); ok {
+					if value, exists := previous["models"]; exists {
+						if _, ok := value.([]any); !ok {
+							return fmt.Errorf("refusing to write models.json: providers.charon.models must be an array")
+						}
+						entries = previous["models"]
+					}
+				}
+				if entries == nil && legacy != nil && legacy.Models != nil {
+					entries = legacy.Models
+				}
+			}
+			if entries == nil {
+				specs := a.Models
+				if specs == nil && modelSlug != "" {
+					specs = []ModelSpec{{Slug: modelSlug}}
+				}
+				entries = piBuildModels(specs)
+			}
+			original := snapshotProviders(providers)
+			providers[managedProvider] = map[string]any{
+				"name":    managedProvider,
+				"baseUrl": a.Endpoint,
+				"apiKey":  piEscapeValue(a.Key),
+				"api":     "openai-completions",
+				"models":  entries,
+			}
+			if err := ensureOnlyCharonChanged(original, providers); err != nil {
 				return err
 			}
 			if modelSlug != "" {
 				s["defaultModel"] = modelSlug
 			}
 			s["defaultProvider"] = "charon"
-			return writeJSONMap(settingsPath, s, 0o600)
+
+			// ponytail: writes are atomic per file, not a multi-file transaction.
+			// Preflight catches input errors; report partial application on I/O failure.
+			if err := writeJSONMap(modelsPath, config, 0o600); err != nil {
+				return fmt.Errorf("write models.json: %w", err)
+			}
+			if err := writeJSONMap(settingsPath, s, 0o600); err != nil {
+				return fmt.Errorf("write settings.json (models.json already updated): %w", err)
+			}
+			if legacy != nil {
+				if err := os.Remove(extensionPath); err != nil {
+					return fmt.Errorf("remove legacy pi extension (config updated, but old extension may still override it): %w", err)
+				}
+			}
+			return nil
 		},
 		Detected: func() bool {
-			return detected("pi", settingsPath, authPath, extensionPath)
+			return detected("pi", settingsPath, authPath, extensionPath, modelsPath)
 		},
 		Describe: func() (Info, error) {
 			var info Info
@@ -194,11 +258,26 @@ func newPi() *Tool {
 					info.Effort = s.DefaultThinkingLevel
 
 					if s.DefaultProvider == "charon" || s.DefaultProvider == "" {
-						if data, err := os.ReadFile(extensionPath); err == nil {
-							if cfg, ok := piParseExtension(data); ok {
-								info.Endpoint = cfg.BaseURL
-								if cfg.APIKey != "" {
-									info.Secret, info.AuthMode = cfg.APIKey, "api"
+						if data, err := os.ReadFile(modelsPath); err == nil {
+							var cfg struct {
+								Providers map[string]piProviderConfig `json:"providers"`
+							}
+							if json.Unmarshal(data, &cfg) == nil {
+								if p, ok := cfg.Providers["charon"]; ok {
+									info.Endpoint = p.BaseURL
+									if p.APIKey != "" {
+										info.Secret, info.AuthMode = p.APIKey, "api"
+									}
+								}
+							}
+						}
+						if info.AuthMode == "" {
+							if data, err := os.ReadFile(extensionPath); err == nil {
+								if cfg, ok := piParseExtension(data); ok {
+									info.Endpoint = cfg.BaseURL
+									if cfg.APIKey != "" {
+										info.Secret, info.AuthMode = cfg.APIKey, "api"
+									}
 								}
 							}
 						}
@@ -225,17 +304,4 @@ func newPi() *Tool {
 			return info.withDefaults("(provider default)"), nil
 		},
 	}
-}
-
-func piSpecsFromIDs(ids []string) []ModelSpec {
-	if ids == nil {
-		return nil
-	}
-	specs := make([]ModelSpec, 0, len(ids))
-	for _, id := range ids {
-		if id != "" {
-			specs = append(specs, ModelSpec{Slug: id})
-		}
-	}
-	return specs
 }

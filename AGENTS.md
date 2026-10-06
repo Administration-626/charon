@@ -93,7 +93,7 @@ provider name `"charon"`).
 ### Model lists (`AuthSpec.Models`)
 
 A binding's model list is what charon registers in the **tool's own** model picker
-(Codex `custom_models.json`, Claude `modelPicker`, OpenCode `provider.charon.models`, pi's extension, omp
+(Codex `custom_models.json`, Claude `modelPicker`, OpenCode `provider.charon.models`, Pi `models.json` → `providers.charon.models`, omp
 `providers.charon.models`, Grok `[model.charon-<slug>]`), so switching model
 mid-session doesn't need charon. It is passed to `ApplyAuth` as
 `AuthSpec.Models`. Two rules a new tool must honor:

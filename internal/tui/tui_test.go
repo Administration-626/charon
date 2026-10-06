@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -359,6 +360,85 @@ func TestModelLibraryEditsEffort(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "model_reasoning_effort = 'high'") {
 		t.Fatalf("Codex config does not carry effort:\n%s", data)
+	}
+}
+
+func TestModelLibraryRefreshesActivePiThinkingMap(t *testing.T) {
+	st := openTestCatalog(t, false)
+	p, err := st.PutProvider("https://gateway.example/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := st.PutModel(p.ID, "custom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutModel(p.ID, "other"); err != nil {
+		t.Fatal(err)
+	}
+	cr, err := st.PutCredential(p.ID, "sk-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := st.AddBinding("pi", "active", cr.ID, "custom", []string{"custom", "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Activate(active.ID); err != nil {
+		t.Fatal(err)
+	}
+	// An inactive binding referencing the same model must not replace the
+	// active binding's default model or shrink its picker during the refresh.
+	if _, err := st.AddBinding("pi", "inactive", cr.ID, "other", []string{"custom", "other"}); err != nil {
+		t.Fatal(err)
+	}
+	home := os.Getenv("HOME")
+	claudePath := filepath.Join(home, ".claude", "settings.json")
+	claudeBefore, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := newModel(st, "test")
+	m.editingModel = stored
+	m.view = viewModelEffort
+	m.input.SetValue("high=maximum,off=off")
+	next, _ := m.updateInput(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := next.(model); got.view != viewModels {
+		t.Fatalf("view after saving = %v, want viewModels", got.view)
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".pi", "agent", "models.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Providers map[string]struct {
+			Models []struct {
+				ID               string             `json:"id"`
+				Reasoning        bool               `json:"reasoning"`
+				ThinkingLevelMap map[string]*string `json:"thinkingLevelMap"`
+			} `json:"models"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	entries := config.Providers["charon"].Models
+	if len(entries) != 2 || entries[0].ID != "custom" {
+		t.Fatalf("active picker changed: %+v", entries)
+	}
+	high := entries[0].ThinkingLevelMap["high"]
+	off, hasOff := entries[0].ThinkingLevelMap["off"]
+	if !entries[0].Reasoning || high == nil || *high != "maximum" || !hasOff || off != nil {
+		t.Fatalf("Pi thinking map not refreshed: %+v", entries[0])
+	}
+	info, err := tools.Find("pi").Describe()
+	if err != nil || info.Model != "custom" {
+		t.Fatalf("active Pi default replaced: %+v, %v", info, err)
+	}
+	claudeAfter, err := os.ReadFile(claudePath)
+	if err != nil || string(claudeBefore) != string(claudeAfter) {
+		t.Fatal("unrelated tool configuration changed")
 	}
 }
 
