@@ -51,6 +51,62 @@ func TestFindUnknown(t *testing.T) {
 	}
 }
 
+func TestPiAndOmpOutputLimits(t *testing.T) {
+	for _, tool := range []string{"pi", "omp"} {
+		for _, withList := range []bool{false, true} {
+			mode := "single"
+			if withList {
+				mode = "list"
+			}
+			t.Run(tool+"/"+mode, func(t *testing.T) {
+				home := sandboxHome(t)
+				spec := AuthSpec{Endpoint: "https://gateway.example/v1", Key: "sk-test", Model: "gpt-6-luna"}
+				if withList {
+					spec.Models = []ModelSpec{
+						{Slug: "gpt-6-luna", ContextWindow: 256_000},
+						{Slug: "custom", ContextWindow: 256_000},
+					}
+				}
+				if err := Find(tool).ApplyAuth(spec); err != nil {
+					t.Fatal(err)
+				}
+				filename, decode := "models.json", json.Unmarshal
+				if tool == "omp" {
+					filename, decode = "models.yml", yaml.Unmarshal
+				}
+				data, err := os.ReadFile(filepath.Join(home, "."+tool, "agent", filename))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var config struct {
+					Providers map[string]struct {
+						Models []struct {
+							ID            string `json:"id" yaml:"id"`
+							ContextWindow int    `json:"contextWindow" yaml:"contextWindow"`
+							MaxTokens     int    `json:"maxTokens" yaml:"maxTokens"`
+						} `json:"models" yaml:"models"`
+					} `json:"providers" yaml:"providers"`
+				}
+				if err := decode(data, &config); err != nil {
+					t.Fatal(err)
+				}
+				wantCount := 1
+				if withList {
+					wantCount = 2
+				}
+				entries := config.Providers[managedProvider].Models
+				if len(entries) != wantCount || entries[0].ID != "gpt-6-luna" || entries[0].MaxTokens != 128_000 {
+					t.Fatalf("output limit not projected: %+v", entries)
+				}
+				if withList && (entries[1].ID != "custom" || entries[1].MaxTokens != models.FallbackMaxTokens ||
+					entries[0].ContextWindow != 256_000 || entries[1].ContextWindow != 256_000) {
+					t.Fatalf("output limits mixed with context windows or another model: %+v", entries)
+				}
+			})
+		}
+	}
+}
+
 func TestCodexDescribeAndApply(t *testing.T) {
 	home := sandboxHome(t)
 	writeFile(t, filepath.Join(home, ".codex", "config.toml"), "model = \"gpt-5.5\"\n")
@@ -1423,6 +1479,8 @@ func TestOmpApplyWithoutListKeepsRegisteredModels(t *testing.T) {
     models:
       - id: kimi-k2
         name: kimi-k2
+        maxTokens: 32000
+        customSetting: kept
       - id: glm-4.6
         name: glm-4.6
 `)
@@ -1437,7 +1495,9 @@ func TestOmpApplyWithoutListKeepsRegisteredModels(t *testing.T) {
 			BaseURL string `yaml:"baseUrl"`
 			APIKey  string `yaml:"apiKey"`
 			Models  []struct {
-				ID string `yaml:"id"`
+				ID            string `yaml:"id"`
+				MaxTokens     int    `yaml:"maxTokens"`
+				CustomSetting string `yaml:"customSetting"`
 			} `yaml:"models"`
 		} `yaml:"providers"`
 	}
@@ -1455,6 +1515,9 @@ func TestOmpApplyWithoutListKeepsRegisteredModels(t *testing.T) {
 	}
 	if got := strings.Join(ids, ","); got != "kimi-k2,glm-4.6" {
 		t.Errorf("registered models = %q, want the previous list kept", got)
+	}
+	if len(charon.Models) != 2 || charon.Models[0].MaxTokens != 32000 || charon.Models[0].CustomSetting != "kept" {
+		t.Errorf("existing output limit or custom metadata changed: %+v", charon.Models)
 	}
 	if charon.BaseURL != "https://two.example/v1" || charon.APIKey != "sk-two" {
 		t.Errorf("charon provider = %+v", charon)
@@ -1476,20 +1539,23 @@ func TestOmpApplyWithoutListKeepsRegisteredModels(t *testing.T) {
 }
 
 func TestOmpRefusesNonMappingProviders(t *testing.T) {
-	home := sandboxHome(t)
-	modelsPath := filepath.Join(home, ".omp", "agent", "models.yml")
-	writeFile(t, modelsPath, "providers: []\n")
-
-	c := Find("omp")
-	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://x.example/v1", Key: "sk-x", Model: "m"}); err == nil {
-		t.Fatal("expected a refusal for a non-mapping providers key")
-	}
-	data, err := os.ReadFile(modelsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "providers: []\n" {
-		t.Errorf("refused write still changed the file: %q", data)
+	for _, content := range []string{"providers: []\n", "providers: {charon: {models: {}}}\n"} {
+		t.Run(content, func(t *testing.T) {
+			home := sandboxHome(t)
+			modelsPath := filepath.Join(home, ".omp", "agent", "models.yml")
+			writeFile(t, modelsPath, content)
+			c := Find("omp")
+			if err := c.ApplyAuth(AuthSpec{Endpoint: "https://x.example/v1", Key: "sk-x", Model: "m"}); err == nil {
+				t.Fatal("expected a refusal for invalid providers/models")
+			}
+			data, err := os.ReadFile(modelsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(data) != content {
+				t.Errorf("refused write still changed the file: %q", data)
+			}
+		})
 	}
 }
 

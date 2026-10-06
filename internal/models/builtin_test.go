@@ -2,6 +2,27 @@ package models
 
 import "testing"
 
+func TestDefaultMaxTokens(t *testing.T) {
+	for _, tc := range []struct {
+		slug string
+		want int
+	}{
+		{"gpt-6-luna", 128_000},
+		{"openai/gpt-6-luna", 128_000},
+		{"global.openai.gpt-6-luna:batch", 128_000},
+		{" GPT-6-LUNA ", 128_000},
+		{"gateway-gpt-6-luna", 128_000},
+		{"gpt-6-astra", FallbackMaxTokens},
+		{"gpt-4o", FallbackMaxTokens},
+		{"custom", FallbackMaxTokens},
+		{"", 0},
+	} {
+		if got := DefaultMaxTokens(tc.slug); got != tc.want {
+			t.Errorf("DefaultMaxTokens(%q) = %d, want %d", tc.slug, got, tc.want)
+		}
+	}
+}
+
 func TestIsReasoningBuiltin(t *testing.T) {
 	for _, slug := range []string{"gpt-6-luna", "openai/gpt-6-astra", "gpt-6.1-sol", "gpt-5.6-luna", "openai/gpt-5.5", "o3-mini", "deepseek-reasoner"} {
 		if !IsReasoningBuiltin(slug) {

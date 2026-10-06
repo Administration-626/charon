@@ -71,7 +71,7 @@ func TestReapplyPiRepairsThinkingCapabilities(t *testing.T) {
 	dir := filepath.Join(os.Getenv("HOME"), ".pi", "agent")
 	// Simulate an already-active binding rendered by the old adapter.
 	if err := os.WriteFile(filepath.Join(dir, "models.json"), []byte(
-		`{"providers":{"charon":{"models":[{"id":"gpt-6-luna","reasoning":false}]}}}`), 0o600); err != nil {
+		`{"providers":{"charon":{"models":[{"id":"gpt-6-luna","reasoning":false,"maxTokens":8192}]}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(
@@ -90,6 +90,7 @@ func TestReapplyPiRepairsThinkingCapabilities(t *testing.T) {
 			Models []struct {
 				ID               string             `json:"id"`
 				Reasoning        bool               `json:"reasoning"`
+				MaxTokens        int                `json:"maxTokens"`
 				ThinkingLevelMap map[string]*string `json:"thinkingLevelMap"`
 			} `json:"models"`
 		} `json:"providers"`
@@ -103,6 +104,9 @@ func TestReapplyPiRepairsThinkingCapabilities(t *testing.T) {
 	}
 	if level := entries[0].ThinkingLevelMap["max"]; level == nil || *level != "max" {
 		t.Fatalf("Pi max thinking level unavailable: %+v", entries[0])
+	}
+	if entries[0].MaxTokens != 128_000 || entries[1].MaxTokens != models.FallbackMaxTokens {
+		t.Fatalf("Pi output limits not repaired: %+v", entries)
 	}
 	if entries[1].ID != "gpt-4o" || entries[1].Reasoning || len(entries[1].ThinkingLevelMap) != 0 {
 		t.Fatalf("reasoning capability leaked to another model: %+v", entries[1])

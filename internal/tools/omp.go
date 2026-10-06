@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"charon/internal/models"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -53,33 +55,23 @@ func ompFile(dir, base string) string {
 	return canonical
 }
 
-// ompBuildModels turns model ids into omp model entries with the same shape
-// charon's pi extension registers, so both tools size a custom model alike.
+// ompBuildModels turns model ids into omp model entries, using the same output
+// limit presets as Pi.
 func ompBuildModels(specs []ModelSpec) []ompModel {
-	models := make([]ompModel, 0, len(specs))
+	entries := make([]ompModel, 0, len(specs))
 	for _, spec := range specs {
 		if spec.Slug == "" {
 			continue
 		}
-		models = append(models, ompModel{
+		entries = append(entries, ompModel{
 			ID:            spec.Slug,
 			Name:          spec.Slug,
 			Input:         []string{"text", "image"},
 			ContextWindow: spec.ContextWindow,
-			MaxTokens:     8192,
+			MaxTokens:     models.DefaultMaxTokens(spec.Slug),
 		})
 	}
-	return models
-}
-
-func ompSpecsFromProvider(provider ompProvider) []ModelSpec {
-	specs := make([]ModelSpec, 0, len(provider.Models))
-	for _, m := range provider.Models {
-		if m.ID != "" {
-			specs = append(specs, ModelSpec{Slug: m.ID, ContextWindow: m.ContextWindow})
-		}
-	}
-	return specs
+	return entries
 }
 
 // ompReadProvider decodes providers.<name> from a models.yml document.
@@ -171,13 +163,15 @@ func newOmp() *Tool {
 			// rotation); Catalog.Project always passes the binding's full list, so a
 			// switch replaces the picker instead of retaining another endpoint's models.
 			specs := a.Models
+			var previousModels *yaml.Node
 			if specs == nil {
-				if prev, ok := ompReadProvider(doc, managedProvider); ok {
-					specs = ompSpecsFromProvider(prev)
+				previousModels = yamlMapEntry(yamlMapEntry(providers, managedProvider), "models")
+				if previousModels != nil && previousModels.Kind != yaml.SequenceNode {
+					return fmt.Errorf("refusing to write omp config: providers.charon.models must be an array")
 				}
 			}
 			modelSlug := strings.TrimSpace(a.Model)
-			if specs == nil && modelSlug != "" {
+			if specs == nil && previousModels == nil && modelSlug != "" {
 				specs = []ModelSpec{{Slug: modelSlug}}
 			}
 
@@ -189,6 +183,10 @@ func newOmp() *Tool {
 				Models:  ompBuildModels(specs),
 			}); err != nil {
 				return fmt.Errorf("render omp provider: %w", err)
+			}
+			if previousModels != nil {
+				// Preserve explicit output limits and all other model metadata.
+				yamlSetValue(&node, "models", previousModels)
 			}
 			yamlSetValue(providers, managedProvider, &node)
 

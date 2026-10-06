@@ -107,7 +107,7 @@ func piBuildModels(specs []ModelSpec) []piModel {
 			Reasoning:        models.IsReasoningBuiltin(spec.Slug) || len(spec.ThinkingLevelMap) > 0 || spec.Effort != "",
 			Input:            []string{"text", "image"},
 			ContextWindow:    window,
-			MaxTokens:        8192,
+			MaxTokens:        models.DefaultMaxTokens(spec.Slug),
 			ThinkingLevelMap: piThinkingLevelMap(spec),
 		})
 	}

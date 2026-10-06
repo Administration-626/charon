@@ -1,14 +1,15 @@
-// Package models provides model discovery, metadata resolution, and built-in context window mappings.
+// Package models provides model discovery, metadata resolution, and built-in token limits.
 package models
 
 import (
 	"strings"
 )
 
-// builtinRule maps a slug prefix/pattern to its standard context window size in tokens.
+// builtinRule maps a slug prefix/pattern to its verified token limits.
 type builtinRule struct {
-	pattern string
-	window  int
+	pattern   string
+	window    int
+	maxTokens int // maximum output tokens; zero means not yet verified
 }
 
 // builtinModelWindows holds default context windows for modern mainstream models,
@@ -17,6 +18,8 @@ type builtinRule struct {
 // the window size for common models, falling back to FallbackContextWindow (500K) if unmatched.
 var builtinModelWindows = []builtinRule{
 	// OpenAI
+	// https://developers.openai.com/api/docs/models/gpt-6-luna
+	{pattern: "gpt-6-luna", window: 1_050_000, maxTokens: 128_000},
 	{pattern: "gpt-6", window: 1_050_000},
 	{pattern: "gpt-5.6", window: 1_050_000},
 	{pattern: "gpt-5.5", window: 1_050_000},
@@ -155,6 +158,24 @@ func NormalizeSlug(slug string) string {
 // FallbackContextWindow is the default context window in tokens (500K)
 // applied when a model slug is not recognized in the builtin table.
 const FallbackContextWindow = 500_000
+
+// FallbackMaxTokens is the output limit for models without a verified preset.
+const FallbackMaxTokens = 8192
+
+// DefaultMaxTokens returns a model's maximum output tokens, independently of its
+// context window. Models without a verified output limit keep the 8192 fallback.
+func DefaultMaxTokens(slug string) int {
+	norm := NormalizeSlug(slug)
+	if norm == "" {
+		return 0
+	}
+	for _, rule := range builtinModelWindows {
+		if rule.maxTokens > 0 && (strings.HasPrefix(norm, rule.pattern) || strings.Contains(norm, "-"+rule.pattern)) {
+			return rule.maxTokens
+		}
+	}
+	return FallbackMaxTokens
+}
 
 // DefaultContextCeiling caps the window Charon registers by default. Vendor
 // specs above it (1M-class models) are physical truth but are not pinned in
