@@ -62,16 +62,18 @@ func printJSON(v any) error {
 }
 
 type statusRow struct {
-	Tool     string `json:"tool"`
-	Title    string `json:"title"`
-	Detected bool   `json:"detected"`
-	Active   string `json:"active,omitempty"` // last binding Charon confirmed; kept for JSON compatibility
-	AuthMode string `json:"authMode,omitempty"`
-	Endpoint string `json:"endpoint,omitempty"`
-	Model    string `json:"model,omitempty"`
-	Effort   string `json:"effort,omitempty"`
-	Account  string `json:"account,omitempty"`
-	Secret   string `json:"secret,omitempty"` // masked; never the raw value
+	Tool          string `json:"tool"`
+	Title         string `json:"title"`
+	Detected      bool   `json:"detected"`
+	Active        string `json:"active,omitempty"` // last binding Charon confirmed; kept for JSON compatibility
+	AuthMode      string `json:"authMode,omitempty"`
+	Endpoint      string `json:"endpoint,omitempty"`
+	Model         string `json:"model,omitempty"`
+	Effort        string `json:"effort,omitempty"`
+	Account       string `json:"account,omitempty"`
+	Secret        string `json:"secret,omitempty"` // masked; never the raw value
+	ContextWindow int    `json:"contextWindow,omitempty"`
+	MaxTokens     int    `json:"maxTokens,omitempty"`
 }
 
 func cmdStatus(cat *catalog.Catalog, args []string) error {
@@ -96,6 +98,7 @@ func cmdStatus(cat *catalog.Catalog, args []string) error {
 			r.Endpoint = info.Endpoint
 			r.Model = info.Model
 			r.Effort = info.Effort
+			r.ContextWindow, r.MaxTokens = info.ContextWindow, info.MaxTokens
 			r.Account = info.Account
 			r.Secret = secret.Mask(info.Secret)
 		}
@@ -107,14 +110,14 @@ func cmdStatus(cat *catalog.Catalog, args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "TOOL\tLAST CONFIRMED\tLIVE AUTH\tLIVE ENDPOINT\tLIVE MODEL\tLIVE EFFORT\tLIVE SECRET")
+	fmt.Fprintln(w, "TOOL\tLAST CONFIRMED\tLIVE AUTH\tLIVE ENDPOINT\tLIVE MODEL\tLIVE EFFORT\tCONTEXT\tMAX OUTPUT\tLIVE SECRET")
 	for _, r := range rows {
 		active := r.Active
 		if active == "" {
 			active = "—"
 		}
 		if !r.Detected {
-			fmt.Fprintf(w, "%s\t%s\t(not detected)\t\t\t\t\n", r.Title, active)
+			fmt.Fprintf(w, "%s\t%s\t(not detected)\t\t\t\t\t\t\n", r.Title, active)
 			continue
 		}
 		model, effort := r.Model, r.Effort
@@ -124,9 +127,21 @@ func cmdStatus(cat *catalog.Catalog, args []string) error {
 		if effort == "" {
 			effort = "—"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Title, active, r.AuthMode, r.Endpoint, model, effort, r.Secret)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Title, active, r.AuthMode, r.Endpoint, model, effort,
+			statusTokenLimit(r.ContextWindow), statusTokenLimit(r.MaxTokens), r.Secret)
 	}
-	return w.Flush()
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	fmt.Println("\nContext/max output: tokens read from on-disk config; — = not recorded/read. Running sessions may differ.")
+	return nil
+}
+
+func statusTokenLimit(n int) string {
+	if n <= 0 {
+		return "—"
+	}
+	return strconv.Itoa(n)
 }
 
 type bindingRow struct {

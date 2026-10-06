@@ -265,6 +265,8 @@ func newCodex() *Tool {
 				var cfg struct {
 					Model                string `toml:"model"`
 					ModelReasoningEffort string `toml:"model_reasoning_effort"`
+					ModelContextWindow   int    `toml:"model_context_window"`
+					ModelCatalogJSON     string `toml:"model_catalog_json"`
 					ModelProvider        string `toml:"model_provider"`
 					ModelProviders       map[string]struct {
 						BaseURL     string `toml:"base_url"`
@@ -274,6 +276,29 @@ func newCodex() *Tool {
 				if toml.Unmarshal(data, &cfg) == nil {
 					info.Model = cfg.Model
 					info.Effort = cfg.ModelReasoningEffort
+					info.ContextWindow = cfg.ModelContextWindow
+					if info.ContextWindow == 0 && cfg.ModelCatalogJSON != "" {
+						path := cfg.ModelCatalogJSON
+						if !filepath.IsAbs(path) {
+							path = filepath.Join(filepath.Dir(configPath), path)
+						}
+						if data, err := os.ReadFile(path); err == nil {
+							var catalog struct {
+								Models []struct {
+									Slug          string `json:"slug"`
+									ContextWindow int    `json:"context_window"`
+								} `json:"models"`
+							}
+							if json.Unmarshal(data, &catalog) == nil {
+								for _, model := range catalog.Models {
+									if model.Slug == info.Model {
+										info.ContextWindow = model.ContextWindow
+										break
+									}
+								}
+							}
+						}
+					}
 					if p, ok := cfg.ModelProviders[cfg.ModelProvider]; ok {
 						if p.BaseURL != "" {
 							info.Endpoint = p.BaseURL

@@ -239,6 +239,12 @@ func newOmp() *Tool {
 				}
 				if p, ok := ompReadProvider(doc, managedProvider); ok {
 					info.Endpoint = p.BaseURL
+					for _, model := range p.Models {
+						if model.ID == info.Model {
+							info.ContextWindow, info.MaxTokens = model.ContextWindow, model.MaxTokens
+							break
+						}
+					}
 					if strings.TrimSpace(p.APIKey) != "" {
 						info.Secret, info.AuthMode = p.APIKey, "api"
 					}

@@ -122,6 +122,7 @@ func newClaude() *Tool {
 						APIKey    string `json:"ANTHROPIC_API_KEY"`
 						AuthToken string `json:"ANTHROPIC_AUTH_TOKEN"`
 						Model     string `json:"ANTHROPIC_MODEL"`
+						Context   string `json:"CLAUDE_CODE_MAX_CONTEXT_TOKENS"`
 					} `json:"env"`
 				}
 				if json.Unmarshal(data, &s) == nil {
@@ -132,6 +133,7 @@ func newClaude() *Tool {
 					}
 					info.Model = strings.TrimSuffix(info.Model, "[1m]")
 					info.Effort = s.EffortLevel
+					info.ContextWindow, _ = strconv.Atoi(s.Env.Context)
 					if s.Env.AuthToken != "" {
 						info.Secret, info.AuthMode = s.Env.AuthToken, "api (bearer)"
 					} else if s.Env.APIKey != "" {

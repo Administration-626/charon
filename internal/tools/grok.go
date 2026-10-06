@@ -191,6 +191,9 @@ func newGrok() *Tool {
 			defaults, _ := cfg["models"].(map[string]any)
 			defName, _ := defaults["default"].(string)
 			if entry, ok := modelTable[defName].(map[string]any); ok {
+				if window, ok := entry["context_window"].(int64); ok {
+					info.ContextWindow = int(window)
+				}
 				if slug, _ := entry["model"].(string); strings.TrimSpace(slug) != "" {
 					info.Model = strings.TrimSpace(slug)
 				} else if grokOwnedModel(defName) {

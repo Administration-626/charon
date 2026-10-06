@@ -141,6 +141,18 @@ status 和 ls 支持 --json，便于脚本与编辑器集成。status 分别显�
 会保留，直到应用另一条绑定。reapply 会显式重写默认模型和模型列表。
 status --json 的 `active` 字段表示上次确认的绑定；`endpoint` 和 `model` 来自工具实况。
 
+### 查看生成的配置参数
+
+`charon status` 增加 `CONTEXT`（上下文窗口）和 `MAX OUTPUT`（输出上限），单位均为
+tokens；`--json` 对应 `contextWindow`、`maxTokens`。这些数值直接读取工具文件中
+默认模型的配置，不用 Charon 模型表推算替代。未读到的值显示 `—`，JSON 中省略，
+不代表零或无限制。
+
+交互菜单的绑定页也会显示 **On-disk config** 摘要：模型、上下文窗口、输出上限和
+reasoning effort。按 `Ctrl+R` 可只读刷新，不应用绑定、不重置模型。
+`unknown` 表示配置未记录或未读到；工具默认值、运行中会话的覆盖参数可能不同。
+这里查看的是磁盘配置，不是运行中会话的状态，也不验证网关实际限制。
+
 ### Shell 补全
 
 补全脚本随发行版压缩包提供。手动启用方式：

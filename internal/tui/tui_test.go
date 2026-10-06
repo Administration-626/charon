@@ -81,6 +81,69 @@ func TestStatusRender(t *testing.T) {
 	}
 }
 
+func TestConfigSummaryDoesNotInferDefaultsOrExposeSecrets(t *testing.T) {
+	info := tools.Info{Model: "gpt-6-luna", Secret: "sk-do-not-show"}
+	summary := configSummary(info)
+	for _, want := range []string{"On-disk config", "gpt-6-luna", "Context window: unknown", "Max output (maxTokens): unknown", "Reasoning effort: unknown", "running sessions may differ"} {
+		if !strings.Contains(summary, want) {
+			t.Errorf("summary missing %q: %s", want, summary)
+		}
+	}
+	if strings.Contains(summary, info.Secret) || strings.Contains(summary, "128,000") || strings.Contains(summary, "600,000") {
+		t.Fatal("summary exposed a secret or invented limits from presets")
+	}
+}
+
+func TestBindingConfigSummaryRefreshIsReadOnly(t *testing.T) {
+	st := openTestCatalog(t, false)
+	tool := tools.Find("pi")
+	if err := tool.ApplyAuth(tools.AuthSpec{
+		Endpoint: "https://example.test/v1", Key: "sk-test", Model: "gpt-6-luna",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(os.Getenv("HOME"), ".pi", "agent", "models.json")
+	// Deliberately differ from current presets, like an old installed binary.
+	const oldConfig = `{"providers":{"charon":{"apiKey":"sk-do-not-show","models":[{"id":"gpt-6-luna","contextWindow":500000,"maxTokens":8192}]}}}`
+	if err := os.WriteFile(path, []byte(oldConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(st, "test")
+	m.tool, m.view = tool, viewProfiles
+	m.width, m.height = 80, 30
+	m.loadProfiles("")
+	for _, size := range [][2]int{{48, 24}, {80, 24}, {120, 30}} {
+		m.width, m.height = size[0], size[1]
+		width := m.width
+		m.resize()
+		view := m.View()
+		for _, want := range []string{"On-disk config", "500,000", "8,192"} {
+			if !strings.Contains(view, want) {
+				t.Errorf("width %d: view missing %q", width, want)
+			}
+		}
+		if strings.Contains(view, "sk-do-not-show") {
+			t.Fatal("view exposed the raw API key")
+		}
+		if rows := len(strings.Split(view, "\n")); rows != m.height {
+			t.Fatalf("width %d: view has %d rows, want %d", width, rows, m.height)
+		}
+	}
+	const changed = `{"providers":{"charon":{"apiKey":"sk-do-not-show","models":[{"id":"gpt-6-luna","contextWindow":420000,"maxTokens":32000}]}}}`
+	if err := os.WriteFile(path, []byte(changed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	refreshed := next.(model)
+	if view := refreshed.View(); !strings.Contains(view, "420,000") || !strings.Contains(view, "32,000") || strings.Contains(view, "8,192") {
+		t.Fatalf("refresh did not read updated on-disk limits:\n%s", view)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != changed {
+		t.Fatal("refresh rewrote the model config instead of reading it")
+	}
+}
+
 func TestThemedDelegateUsesTightSpacing(t *testing.T) {
 	if got := themedDelegate().Spacing(); got != 1 {
 		t.Fatalf("themedDelegate spacing = %d, want 1", got)

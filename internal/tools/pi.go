@@ -293,6 +293,12 @@ func newPi() *Tool {
 							if json.Unmarshal(data, &cfg) == nil {
 								if p, ok := cfg.Providers["charon"]; ok {
 									info.Endpoint = p.BaseURL
+									for _, model := range p.Models {
+										if model.ID == info.Model {
+											info.ContextWindow, info.MaxTokens = model.ContextWindow, model.MaxTokens
+											break
+										}
+									}
 									if p.APIKey != "" {
 										info.Secret, info.AuthMode = p.APIKey, "api"
 									}
@@ -303,6 +309,12 @@ func newPi() *Tool {
 							if data, err := os.ReadFile(extensionPath); err == nil {
 								if cfg, ok := piParseExtension(data); ok {
 									info.Endpoint = cfg.BaseURL
+									for _, model := range cfg.Models {
+										if model.ID == info.Model {
+											info.ContextWindow, info.MaxTokens = model.ContextWindow, model.MaxTokens
+											break
+										}
+									}
 									if cfg.APIKey != "" {
 										info.Secret, info.AuthMode = cfg.APIKey, "api"
 									}

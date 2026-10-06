@@ -14,6 +14,10 @@ type Info struct {
 	Model    string // active model, if known
 	Effort   string // active reasoning-effort level, if known
 	Account  string // logged-in account identity (email), if an OAuth login is detected; else ""
+	// Limits are read from the configured default model, never inferred from
+	// Charon's presets. Zero means not recorded/read, not unlimited.
+	ContextWindow int
+	MaxTokens     int
 }
 
 // withDefaults fills empty Endpoint/AuthMode with display fallbacks.

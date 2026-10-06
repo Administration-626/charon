@@ -130,6 +130,12 @@ func newOpenCode() *Tool {
 						ReasoningEffort string `json:"reasoningEffort"`
 					} `json:"agents"`
 					Provider map[string]struct {
+						Models map[string]struct {
+							Limit struct {
+								Context int `json:"context"`
+								Output  int `json:"output"`
+							} `json:"limit"`
+						} `json:"models"`
 						Options struct {
 							BaseURL string `json:"baseURL"`
 							APIKey  string `json:"apiKey"`
@@ -137,25 +143,25 @@ func newOpenCode() *Tool {
 					} `json:"provider"`
 				}
 				if json.Unmarshal(data, &cfg) == nil {
-					info.Model = strings.TrimPrefix(cfg.Model, "charon/")
-					if info.Model == "" {
-						info.Model = strings.TrimPrefix(cfg.SmallModel, "charon/")
+					modelRef := cfg.Model
+					if modelRef == "" {
+						modelRef = cfg.SmallModel
 					}
 					info.Effort = cfg.ReasoningEffort
 
 					// Fallback to agent-specific configs
-					if info.Model == "" {
+					if modelRef == "" {
 						for _, agent := range cfg.Agents {
 							if agent.Model != "" {
-								info.Model = strings.TrimPrefix(agent.Model, "charon/")
+								modelRef = agent.Model
 								break
 							}
 						}
 					}
-					if info.Model == "" && cfg.Agent != nil {
+					if modelRef == "" && cfg.Agent != nil {
 						for _, agent := range cfg.Agent {
 							if agent.Model != "" {
-								info.Model = strings.TrimPrefix(agent.Model, "charon/")
+								modelRef = agent.Model
 								break
 							}
 						}
@@ -175,6 +181,12 @@ func newOpenCode() *Tool {
 								info.Effort = agent.ReasoningEffort
 								break
 							}
+						}
+					}
+					info.Model = strings.TrimPrefix(modelRef, "charon/")
+					if provider, modelID, ok := strings.Cut(modelRef, "/"); ok {
+						if model, ok := cfg.Provider[provider].Models[modelID]; ok {
+							info.ContextWindow, info.MaxTokens = model.Limit.Context, model.Limit.Output
 						}
 					}
 					if p, ok := cfg.Provider["charon"]; ok {

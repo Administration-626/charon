@@ -158,6 +158,19 @@ explicitly resets the tool to the binding's saved default model and model list.
 In status --json, the existing `active` field means the last confirmed binding;
 `endpoint` and `model` describe the live tool config.
 
+### Inspect generated settings
+
+`charon status` includes `CONTEXT` and `MAX OUTPUT` in tokens; `--json` exposes
+them as `contextWindow` and `maxTokens`. These are read from the configured default
+model in the tool's files, not recomputed from Charon's model presets. A missing
+value is shown as `—` (omitted in JSON), not as zero or an unlimited budget.
+
+The interactive binding page also shows an **On-disk config** summary with the
+model, context window, max output, and reasoning effort. Press `Ctrl+R` to reread
+the files without applying a binding or resetting the model. `unknown` means the
+value was not recorded/read; tool defaults and running-session overrides may
+differ. This view does not inspect a running session or verify gateway limits.
+
 ### Shell completions
 
  Completions ship in the release archives. To enable them manually:

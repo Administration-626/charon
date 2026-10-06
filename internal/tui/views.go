@@ -223,7 +223,28 @@ func (m model) View() string {
 	if m.view == viewTools {
 		out = banner(m.version) + "\n\n" + out // blank line between the banner and the list title
 	}
+	if m.view == viewProfiles && m.configSummary != "" {
+		out += "\n" + m.renderConfigSummary()
+	}
 	return m.withFooter(out, m.footerKeys...)
+}
+
+// configSummary shows only observed configuration, not catalog predictions or
+// the state of a running tool session. No credentials are included.
+func configSummary(info tools.Info) string {
+	model, effort := info.Model, info.Effort
+	if model == "" {
+		model = "unknown"
+	}
+	if effort == "" {
+		effort = "unknown"
+	}
+	return fmt.Sprintf("On-disk config (Ctrl+R refresh)\nDefault model: %s\nContext window: %s tokens\nMax output (maxTokens): %s tokens\nReasoning effort: %s\nUnknown = not recorded/read; running sessions may differ.",
+		model, formatTokens(info.ContextWindow), formatTokens(info.MaxTokens), effort)
+}
+
+func (m model) renderConfigSummary() string {
+	return hintStyle.Width(max(1, m.width)).Render(m.configSummary)
 }
 
 // wizardHeader renders the titled bar for add-flow screens.

@@ -127,19 +127,20 @@ var (
 const exampleEndpoint = "https://api.example.com/v1"
 
 type model struct {
-	cat         *catalog.Catalog
-	allTools    []*tools.Tool // registry built once; reused across renders
-	view        view
-	list        list.Model
-	input       textinput.Model
-	tool        *tools.Tool
-	wiz         wizard
-	editField   string // which field the single-field editor is editing
-	fromForm    bool   // model picker/fetch was launched from the edit form
-	delTarget   string // binding name pending delete confirmation
-	dupSource   string // binding being duplicated
-	copySource  string // binding being copied to another tool
-	showConfirm bool   // when true, render a confirmation dialog over the binding list
+	cat           *catalog.Catalog
+	allTools      []*tools.Tool // registry built once; reused across renders
+	view          view
+	list          list.Model
+	input         textinput.Model
+	tool          *tools.Tool
+	wiz           wizard
+	editField     string // which field the single-field editor is editing
+	fromForm      bool   // model picker/fetch was launched from the edit form
+	delTarget     string // binding name pending delete confirmation
+	dupSource     string // binding being duplicated
+	copySource    string // binding being copied to another tool
+	showConfirm   bool   // when true, render a confirmation dialog over the binding list
+	configSummary string // read-only on-disk values, refreshed with the binding list
 
 	footerKeys []key.Binding // keys the current screen answers to, shown in the bottom legend
 
@@ -200,11 +201,15 @@ func (m *model) resize() {
 	if m.view == viewTools {
 		header = bannerHeight + 1
 	}
+	if m.view == viewProfiles && m.configSummary != "" {
+		header += lipgloss.Height(m.renderConfigSummary()) + 1
+	}
 	h := m.height - header - footerRows
 	if h < 3 {
 		h = 3
 	}
 	m.list.SetSize(m.width, h)
+	m.list.KeyMap.Quit.SetEnabled(false)
 }
 
 func newModel(store *catalog.Catalog, version string) model {
@@ -472,6 +477,14 @@ func (m *model) loadCopyTools() {
 // This keeps an edit or clone from silently relocating the cursor onto
 // whatever happens to be active — only an explicit switch should do that.
 func (m *model) loadProfiles(selectName string) {
+	m.configSummary = ""
+	if m.tool.Describe != nil {
+		if info, err := m.tool.Describe(); err == nil {
+			m.configSummary = configSummary(info)
+		} else {
+			m.configSummary = "On-disk config could not be read."
+		}
+	}
 	var items []list.Item
 	active := ""
 	if b, found, err := m.cat.Active(m.tool.Name); err == nil && found {
@@ -516,6 +529,7 @@ func (m *model) loadProfiles(selectName string) {
 	m.list.Title = m.tool.Title + " bindings (✓ last confirmed)"
 	m.setFooterKeys(keySwitch, keyReapply, keyEdit, keyBackup, keyCopy, keyDelete, keyBack)
 	m.setDelegate(themedDelegate())
+	m.resize()
 	if len(saved) == 0 && m.status == "" && m.tool.ApplyAuth != nil {
 		m.setStatus(statusInfo, `No bindings yet — press enter on "Add new binding" or press 'a' to create one.`)
 	}
@@ -627,6 +641,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			return m.onEnter()
+		case "ctrl+r":
+			if m.view == viewProfiles {
+				selected := ""
+				if it, ok := m.list.SelectedItem().(item); ok {
+					selected = it.value
+				}
+				m.loadProfiles(selected)
+				m.setStatus(statusInfo, "Refreshed on-disk config; nothing written")
+				return m, nil
+			}
 		case "r":
 			if m.view == viewProfiles {
 				it, ok := m.selectedBinding()

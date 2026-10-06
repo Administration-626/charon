@@ -1,11 +1,95 @@
 package tools
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
 	"charon/internal/models"
 )
+
+func TestDescribeReadsConfiguredTokenLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name, tool string
+		files      map[string]string
+		context    int
+		output     int
+	}{
+		{"pi selected model", "pi", map[string]string{
+			".pi/agent/settings.json": `{"defaultProvider":"charon","defaultModel":"gpt-6-luna"}`,
+			".pi/agent/models.json":   `{"providers":{"charon":{"apiKey":"sk-test","models":[{"id":"other","contextWindow":900000,"maxTokens":90000},{"id":"gpt-6-luna","contextWindow":420000,"maxTokens":32000}]}}}`,
+		}, 420000, 32000},
+		{"pi absent limits are not inferred", "pi", map[string]string{
+			".pi/agent/settings.json": `{"defaultProvider":"charon","defaultModel":"gpt-6-luna"}`,
+			".pi/agent/models.json":   `{"providers":{"charon":{"apiKey":"sk-test","models":[{"id":"gpt-6-luna"}]}}}`,
+		}, 0, 0},
+		{"pi inactive provider", "pi", map[string]string{
+			".pi/agent/settings.json": `{"defaultProvider":"other","defaultModel":"gpt-6-luna"}`,
+			".pi/agent/models.json":   `{"providers":{"charon":{"apiKey":"sk-test","models":[{"id":"gpt-6-luna","contextWindow":420000,"maxTokens":32000}]}}}`,
+		}, 0, 0},
+		{"pi legacy extension", "pi", map[string]string{
+			".pi/agent/settings.json":        `{"defaultProvider":"charon","defaultModel":"legacy-model"}`,
+			".pi/agent/extensions/charon.ts": string(legacyPiExtension(t)),
+		}, 128000, 32000},
+		{"omp selected model", "omp", map[string]string{
+			".omp/agent/config.yml": "modelRoles: {default: charon/gpt-6-luna}\n",
+			".omp/agent/models.yml": "providers: {charon: {models: [{id: other, contextWindow: 900000}, {id: gpt-6-luna, contextWindow: 420000, maxTokens: 32000}]}}\n",
+		}, 420000, 32000},
+		{"omp inactive provider", "omp", map[string]string{
+			".omp/agent/config.yml": "modelRoles: {default: other/gpt-6-luna}\n",
+			".omp/agent/models.yml": "providers: {charon: {models: [{id: gpt-6-luna, contextWindow: 420000, maxTokens: 32000}]}}\n",
+		}, 0, 0},
+		{"codex global overrides catalog", "codex", map[string]string{
+			".codex/config.toml":        "model = 'gpt-6-luna'\nmodel_context_window = 256000\nmodel_catalog_json = 'custom_models.json'\n",
+			".codex/custom_models.json": `{"models":[{"slug":"gpt-6-luna","context_window":420000}]}`,
+		}, 256000, 0},
+		{"codex selected catalog entry", "codex", map[string]string{
+			".codex/config.toml":        "model = 'gpt-6-luna'\nmodel_catalog_json = 'custom_models.json'\n",
+			".codex/custom_models.json": `{"models":[{"slug":"other","context_window":900000},{"slug":"gpt-6-luna","context_window":420000}]}`,
+		}, 420000, 0},
+		{"codex native defaults not inferred", "codex", map[string]string{
+			".codex/config.toml": "model = 'gpt-6-luna'\n",
+		}, 0, 0},
+		{"claude env override", "claude", map[string]string{
+			".claude/settings.json": `{"env":{"ANTHROPIC_API_KEY":"sk-test","ANTHROPIC_MODEL":"custom","CLAUDE_CODE_MAX_CONTEXT_TOKENS":"420000"}}`,
+		}, 420000, 0},
+		{"claude invalid env override", "claude", map[string]string{
+			".claude/settings.json": `{"env":{"ANTHROPIC_API_KEY":"sk-test","CLAUDE_CODE_MAX_CONTEXT_TOKENS":"invalid"}}`,
+		}, 0, 0},
+		{"opencode qualified model id", "opencode", map[string]string{
+			".config/opencode/opencode.json": `{"model":"charon/openai/gpt-6-luna","provider":{"charon":{"models":{"openai/gpt-6-luna":{"limit":{"context":420000,"output":32000}}}}}}`,
+		}, 420000, 32000},
+		{"opencode agent fallback", "opencode", map[string]string{
+			".config/opencode/opencode.json": `{"agent":{"build":{"model":"charon/openai/gpt-6-luna"}},"provider":{"charon":{"models":{"openai/gpt-6-luna":{"limit":{"context":420000,"output":32000}}}}}}`,
+		}, 420000, 32000},
+		{"opencode other provider", "opencode", map[string]string{
+			".config/opencode/opencode.json": `{"model":"other/gpt-6-luna","provider":{"charon":{"models":{"gpt-6-luna":{"limit":{"context":900000}}}},"other":{"models":{"gpt-6-luna":{"limit":{"context":420000,"output":32000}}}}}}`,
+		}, 420000, 32000},
+		{"grok selected model", "grok", map[string]string{
+			".grok/config.toml": "[models]\ndefault = 'charon-luna'\n[model.other]\ncontext_window = 900000\n[model.charon-luna]\nmodel = 'gpt-6-luna'\ncontext_window = 420000\n",
+		}, 420000, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := sandboxHome(t)
+			for name, content := range tc.files {
+				writeFile(t, filepath.Join(home, name), content)
+			}
+			info, err := Find(tc.tool).Describe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.ContextWindow != tc.context || info.MaxTokens != tc.output {
+				t.Fatalf("limits = %d/%d, want %d/%d", info.ContextWindow, info.MaxTokens, tc.context, tc.output)
+			}
+			for name, content := range tc.files {
+				data, err := os.ReadFile(filepath.Join(home, name))
+				if err != nil || string(data) != content {
+					t.Fatalf("Describe changed %s: %v", name, err)
+				}
+			}
+		})
+	}
+}
 
 func TestCodexDescribeAPIKeyAuthMode(t *testing.T) {
 	home := sandboxHome(t)

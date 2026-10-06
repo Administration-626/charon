@@ -217,6 +217,77 @@ func TestStatusAndReapplyDistinguishSavedBindingFromLiveModel(t *testing.T) {
 	}
 }
 
+func TestStatusShowsOnDiskTokenLimits(t *testing.T) {
+	for _, format := range []string{"table", "json"} {
+		t.Run(format, func(t *testing.T) {
+			home := sandbox(t)
+			dir := filepath.Join(home, ".pi", "agent")
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeTestFile(t, filepath.Join(dir, "settings.json"),
+				`{"defaultProvider":"charon","defaultModel":"gpt-6-luna","defaultThinkingLevel":"max"}`)
+			const config = `{"providers":{"charon":{"apiKey":"sk-secret-not-for-display","models":[{"id":"gpt-6-luna","contextWindow":420000,"maxTokens":32000}]}}}`
+			writeTestFile(t, filepath.Join(dir, "models.json"), config)
+			outputPath := filepath.Join(t.TempDir(), "stdout")
+			output, err := os.Create(outputPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stdout := os.Stdout
+			t.Cleanup(func() { os.Stdout = stdout; _ = output.Close() })
+			os.Stdout = output
+			args := []string{"status"}
+			if format == "json" {
+				args = append(args, "--json")
+			}
+			statusErr := run(args)
+			os.Stdout = stdout
+			if err := output.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if statusErr != nil {
+				t.Fatal(statusErr)
+			}
+			data, err := os.ReadFile(outputPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(data), "sk-secret-not-for-display") {
+				t.Fatal("status exposed the raw API key")
+			}
+			if format == "json" {
+				var rows []statusRow
+				if err := json.Unmarshal(data, &rows); err != nil {
+					t.Fatal(err)
+				}
+				found := false
+				for _, row := range rows {
+					if row.Tool == "pi" {
+						found = true
+						if row.ContextWindow != 420000 || row.MaxTokens != 32000 || row.Effort != "max" {
+							t.Fatalf("status limits = %d/%d effort=%q", row.ContextWindow, row.MaxTokens, row.Effort)
+						}
+					}
+				}
+				if !found {
+					t.Fatal("missing Pi status")
+				}
+			} else {
+				for _, want := range []string{"CONTEXT", "MAX OUTPUT", "420000", "32000", "on-disk config", "not recorded/read"} {
+					if !strings.Contains(string(data), want) {
+						t.Errorf("status missing %q", want)
+					}
+				}
+			}
+			after, err := os.ReadFile(filepath.Join(dir, "models.json"))
+			if err != nil || string(after) != config {
+				t.Fatal("status rewrote the tool's model configuration")
+			}
+		})
+	}
+}
+
 func TestRunCopyBindingAcrossTools(t *testing.T) {
 	home := sandbox(t)
 	seedCodex(t, home)
