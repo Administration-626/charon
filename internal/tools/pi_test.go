@@ -49,8 +49,7 @@ func legacyPiExtension(t *testing.T) []byte {
 
 func TestPiBuildModelsThinkingLevels(t *testing.T) {
 	none, xhigh, maxLevel, maximum := "none", "xhigh", "max", "maximum"
-	gpt6Levels := map[string]*string{"off": &none, "minimal": nil, "xhigh": &xhigh, "max": &maxLevel}
-	requiredLevels := map[string]*string{"off": nil, "minimal": nil, "xhigh": &xhigh, "max": &maxLevel}
+	defaultLevels := map[string]*string{"off": &none, "xhigh": &xhigh, "max": &maxLevel}
 	manualLevels := map[string]*string{"max": &maximum, "xhigh": nil}
 	for _, tc := range []struct {
 		name      string
@@ -58,19 +57,21 @@ func TestPiBuildModelsThinkingLevels(t *testing.T) {
 		reasoning bool
 		levels    map[string]*string
 	}{
-		{"luna", ModelSpec{Slug: "gpt-6-luna"}, true, gpt6Levels},
-		{"sol", ModelSpec{Slug: "gpt-6-sol"}, true, gpt6Levels},
-		{"astra", ModelSpec{Slug: "gpt-6-astra"}, true, requiredLevels},
-		{"sol 6.1", ModelSpec{Slug: "gpt-6.1-sol"}, true, requiredLevels},
-		{"namespaced", ModelSpec{Slug: "openai/gpt-6-luna:free"}, true, gpt6Levels},
+		{"luna", ModelSpec{Slug: "gpt-6-luna"}, true, defaultLevels},
+		{"sol", ModelSpec{Slug: "gpt-6-sol"}, true, defaultLevels},
+		{"astra", ModelSpec{Slug: "gpt-6-astra"}, true, defaultLevels},
+		{"sol 6.1", ModelSpec{Slug: "gpt-6.1-sol"}, true, defaultLevels},
+		{"namespaced", ModelSpec{Slug: "openai/gpt-6-luna:free"}, true, defaultLevels},
 		{"manual map wins", ModelSpec{Slug: "gpt-6-luna", Effort: "max", ThinkingLevelMap: manualLevels}, true, manualLevels},
 		{"explicit empty map", ModelSpec{Slug: "gpt-6-luna", ThinkingLevelMap: map[string]*string{}}, true, map[string]*string{}},
-		{"custom max", ModelSpec{Slug: "custom", Effort: "max"}, true, map[string]*string{"max": &maxLevel}},
-		{"custom xhigh", ModelSpec{Slug: "custom", Effort: "xhigh"}, true, map[string]*string{"xhigh": &xhigh}},
+		{"custom max", ModelSpec{Slug: "custom", Effort: "max"}, true, defaultLevels},
+		{"custom xhigh", ModelSpec{Slug: "custom", Effort: "xhigh"}, true, defaultLevels},
 		{"custom mapping", ModelSpec{Slug: "custom", ThinkingLevelMap: manualLevels}, true, manualLevels},
-		{"older reasoning model", ModelSpec{Slug: "o3-mini"}, true, nil},
-		{"non reasoning model", ModelSpec{Slug: "gpt-4o"}, false, nil},
-		{"unknown model", ModelSpec{Slug: "custom"}, false, nil},
+		{"older reasoning model", ModelSpec{Slug: "o3-mini"}, true, defaultLevels},
+		{"known non-reasoning model", ModelSpec{Slug: "gpt-4o"}, true, defaultLevels},
+		{"unknown model", ModelSpec{Slug: "custom"}, true, defaultLevels},
+		{"kimi k3", ModelSpec{Slug: "moonshotai/kimi-k3"}, true, defaultLevels},
+		{"glm 5.3", ModelSpec{Slug: "z-ai/glm-5.3"}, true, defaultLevels},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before, err := json.Marshal(tc.spec)
@@ -100,6 +101,9 @@ func TestPiSingleModelKeepsExplicitEffort(t *testing.T) {
 	levels, _ := entry["thinkingLevelMap"].(map[string]any)
 	if entry["reasoning"] != true || levels["max"] != "max" {
 		t.Fatalf("single model lost explicit thinking capability: %#v", entry)
+	}
+	if readPiProvider(t, home)["api"] != "openai-responses" {
+		t.Fatalf("Pi provider api = %#v, want openai-responses", readPiProvider(t, home)["api"])
 	}
 }
 

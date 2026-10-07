@@ -67,14 +67,11 @@ Pi 的 Charon provider 使用原生 `models.json`。下次写入配置时，Char
 和 `auth.json` 登录凭据保持不变。每个文件单独原子替换；若两次写入之间发生 I/O
 错误，会明确提示配置可能部分生效。
 
-Pi 提示 `Unknown thinking level "max". Available levels: off` 时，说明当前模型
-被注册为不支持推理；仅设置 `reasoning: true` 仍不会开放 `xhigh` / `max`，这两个
-档位还需显式映射。Charon 为已知的 GPT-6 Luna、Sol、Astra 和 GPT-6.1 Sol
-补齐 Pi 的推理档位预设，不改动默认 thinking 偏好。升级后运行
-`charon reapply pi <绑定名称>`，再重启 Pi；仅切换到已激活绑定不会重新写入配置。
-自定义模型可在模型库按 `r` 编辑映射，例如 `max=max` 或 `max=xhigh`
-（按网关实际支持的值选择）。手工映射优先，`max=off` 表示禁用该档位，而非发送
-字符串 `off`。未识别的模型不会被自动开放 `max`。
+Charon 会为 Pi 注册的每个模型默认开启 thinking，并提供标准的
+`off`、`minimal`、`low`、`medium`、`high`、`xhigh` 和 `max` 档位。启动时使用的
+默认档位仍由 Pi 自己管理，Charon 不会修改它。模型如果有显式的
+`thinkingLevelMap`，则以该映射为准。升级后运行 `charon reapply pi <绑定名称>`，
+再重启 Pi。网关可能拒绝某个不支持的档位；此时请换用其他档位或关闭 thinking。
 
 ## 安装
 

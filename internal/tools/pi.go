@@ -62,32 +62,15 @@ func piEscapeValue(s string) string {
 	return s
 }
 
-// piThinkingLevelMap supplies Pi's opt-in extended levels, not a startup preference.
-// Explicit mappings (including null/disabled levels) take precedence over presets.
+// piThinkingLevelMap gives every Charon model Pi's standard thinking controls.
+// Charon has no authoritative per-model capability table, so extended levels are
+// passed through by name; explicit mappings (including null/disabled levels) win.
 func piThinkingLevelMap(spec ModelSpec) map[string]*string {
 	if spec.ThinkingLevelMap != nil {
 		return spec.ThinkingLevelMap
 	}
-	var levels map[string]*string
-	// Source: @earendil-works/pi-ai 1.0.4 providers/data/openai.json.
-	// Unmapped low/medium/high levels already use their names in Pi.
-	switch slug := models.NormalizeSlug(spec.Slug); slug {
-	case "gpt-6-luna", "gpt-6-sol", "gpt-6-astra", "gpt-6.1-sol":
-		off, xhigh, maxLevel := "none", "xhigh", "max"
-		levels = map[string]*string{"off": &off, "minimal": nil, "xhigh": &xhigh, "max": &maxLevel}
-		if slug == "gpt-6-astra" || slug == "gpt-6.1-sol" {
-			levels["off"] = nil
-		}
-	}
-	// A saved extended effort is also an explicit capability for gateway aliases.
-	// Without a mapping Pi hides xhigh/max even when reasoning is true.
-	if spec.Effort == "xhigh" || spec.Effort == "max" {
-		if levels == nil {
-			levels = make(map[string]*string)
-		}
-		levels[spec.Effort] = &spec.Effort
-	}
-	return levels
+	off, xhigh, maxLevel := "none", "xhigh", "max"
+	return map[string]*string{"off": &off, "xhigh": &xhigh, "max": &maxLevel}
 }
 
 // piBuildModels turns a list of model ids into pi model entries.
@@ -102,9 +85,11 @@ func piBuildModels(specs []ModelSpec) []piModel {
 			window = models.DefaultContextWindow(spec.Slug)
 		}
 		entries = append(entries, piModel{
-			ID:               spec.Slug,
-			Name:             spec.Slug,
-			Reasoning:        models.IsReasoningBuiltin(spec.Slug) || len(spec.ThinkingLevelMap) > 0 || spec.Effort != "",
+			ID:   spec.Slug,
+			Name: spec.Slug,
+			// Charon does not have authoritative per-model thinking metadata. Pi
+			// offers its standard thinking levels and lets the user turn them off.
+			Reasoning:        true,
 			Input:            []string{"text", "image"},
 			ContextWindow:    window,
 			MaxTokens:        models.DefaultMaxTokens(spec.Slug),
@@ -243,7 +228,7 @@ func newPi() *Tool {
 				"name":    managedProvider,
 				"baseUrl": a.Endpoint,
 				"apiKey":  piEscapeValue(a.Key),
-				"api":     "openai-completions",
+				"api":     "openai-responses",
 				"models":  entries,
 			}
 			if err := ensureOnlyCharonChanged(original, providers); err != nil {

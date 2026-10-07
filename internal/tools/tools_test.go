@@ -963,13 +963,15 @@ func TestNotDetectedInEmptyHome(t *testing.T) {
 	}
 }
 
-func TestPiBuildModelsInfersReasoningForGPT5(t *testing.T) {
-	models := piBuildModels([]ModelSpec{{Slug: "gpt-5.6-luna"}})
-	if len(models) != 1 || !models[0].Reasoning {
-		t.Fatalf("gpt-5.6-luna reasoning = %#v, want true", models)
-	}
-	if models[0].ThinkingLevelMap != nil {
-		t.Fatalf("unexpected thinking level map: %#v", models[0].ThinkingLevelMap)
+func TestPiBuildModelsEnablesThinkingByDefault(t *testing.T) {
+	for _, slug := range []string{"gpt-5.6-luna", "gpt-4o", "moonshotai/kimi-k3", "z-ai/glm-5.3-flash"} {
+		models := piBuildModels([]ModelSpec{{Slug: slug}})
+		if len(models) != 1 || !models[0].Reasoning {
+			t.Fatalf("%s reasoning = %#v, want true", slug, models)
+		}
+		if len(models[0].ThinkingLevelMap) != 3 {
+			t.Fatalf("%s thinking levels = %#v, want off/xhigh/max", slug, models[0].ThinkingLevelMap)
+		}
 	}
 }
 

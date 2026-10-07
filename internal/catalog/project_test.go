@@ -108,8 +108,8 @@ func TestReapplyPiRepairsThinkingCapabilities(t *testing.T) {
 	if entries[0].MaxTokens != 128_000 || entries[1].MaxTokens != models.FallbackMaxTokens {
 		t.Fatalf("Pi output limits not repaired: %+v", entries)
 	}
-	if entries[1].ID != "gpt-4o" || entries[1].Reasoning || len(entries[1].ThinkingLevelMap) != 0 {
-		t.Fatalf("reasoning capability leaked to another model: %+v", entries[1])
+	if entries[1].ID != "gpt-4o" || !entries[1].Reasoning {
+		t.Fatalf("default thinking capability missing from another model: %+v", entries[1])
 	}
 	data, err = os.ReadFile(filepath.Join(dir, "settings.json"))
 	if err != nil {

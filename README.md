@@ -76,17 +76,12 @@ old extension. Existing thinking/compaction preferences and `auth.json` logins a
 left alone. Each file is replaced atomically; an I/O failure between writes is
 reported as partial application.
 
-If Pi reports `Unknown thinking level "max". Available levels: off`, the selected
-model was registered without reasoning support. Enabling `reasoning` alone is not
-enough: Pi also requires explicit mappings for `xhigh` and `max`. Charon supplies
-Pi's thinking presets for known GPT-6 Luna, Sol, Astra, and GPT-6.1 Sol models
-without changing the startup thinking preference. After upgrading, run
-`charon reapply pi <binding>` and restart Pi; switching to an already-active
-binding does not rewrite its configuration. For custom models, press `r` in the
-model library to set a mapping such as `max=max` or `max=xhigh`, matching what the
-gateway accepts. Manual mappings take precedence; `max=off` disables that level
-rather than sending the string `off`. Unknown models do not automatically gain
-`max` support.
+Charon registers every Pi model with thinking enabled and exposes the standard
+`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` levels. The startup
+preference remains Pi's own setting; Charon does not change it. An explicit
+`thinkingLevelMap` still takes precedence when a model needs different mappings.
+After upgrading, run `charon reapply pi <binding>` and restart Pi. A provider may
+reject an unsupported level; choose another level or turn thinking off in Pi.
 
 ## Installation
 
