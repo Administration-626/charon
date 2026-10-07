@@ -12,14 +12,29 @@ func TestDefaultMaxTokens(t *testing.T) {
 		{"global.openai.gpt-6-luna:batch", 128_000},
 		{" GPT-6-LUNA ", 128_000},
 		{"gateway-gpt-6-luna", 128_000},
-		{"gpt-6-astra", FallbackMaxTokens},
-		{"gpt-4o", FallbackMaxTokens},
-		{"custom", FallbackMaxTokens},
+		{"gpt-5.4-mini", 128_000},
+		{"gpt-4o", 16_384},
+		{"glm-5.3", 131_072},
+		{"deepseek-v4-flash", 384_000},
+		{"kimi-k2.6", 131_000},
+		{"o3-mini", 100_000},
+		{"gemini-2.5-pro", 65_536},
+		// Unverified models derive window/2 from the builtin window, clamped.
+		{"gpt-6-astra", 128_000},
+		{"custom", FallbackMaxTokensCeiling},
 		{"", 0},
 	} {
 		if got := DefaultMaxTokens(tc.slug); got != tc.want {
 			t.Errorf("DefaultMaxTokens(%q) = %d, want %d", tc.slug, got, tc.want)
 		}
+	}
+}
+
+func TestDefaultMaxTokensFallbackCeiling(t *testing.T) {
+	// An unverified slug whose fallback window (500K) would derive 250K stays
+	// clamped at FallbackMaxTokensCeiling when the window exceeds 2x the cap.
+	if got := DefaultMaxTokens("unknown-huge-model"); got != FallbackMaxTokensCeiling {
+		t.Fatalf("DefaultMaxTokens(unverified slug) = %d, want %d", got, FallbackMaxTokensCeiling)
 	}
 }
 

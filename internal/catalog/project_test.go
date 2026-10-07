@@ -105,7 +105,7 @@ func TestReapplyPiRepairsThinkingCapabilities(t *testing.T) {
 	if level := entries[0].ThinkingLevelMap["max"]; level == nil || *level != "max" {
 		t.Fatalf("Pi max thinking level unavailable: %+v", entries[0])
 	}
-	if entries[0].MaxTokens != 128_000 || entries[1].MaxTokens != models.FallbackMaxTokens {
+	if entries[0].MaxTokens != 128_000 || entries[1].MaxTokens != 16_384 {
 		t.Fatalf("Pi output limits not repaired: %+v", entries)
 	}
 	if entries[1].ID != "gpt-4o" || !entries[1].Reasoning {

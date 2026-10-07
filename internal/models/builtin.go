@@ -18,101 +18,101 @@ type builtinRule struct {
 // the window size for common models, falling back to FallbackContextWindow (500K) if unmatched.
 var builtinModelWindows = []builtinRule{
 	// OpenAI
+	// Output limits verified against WorkBuddy presets; gpt-6-luna per
 	// https://developers.openai.com/api/docs/models/gpt-6-luna
 	{pattern: "gpt-6-luna", window: 1_050_000, maxTokens: 128_000},
-	{pattern: "gpt-6", window: 1_050_000},
-	{pattern: "gpt-5.6", window: 1_050_000},
-	{pattern: "gpt-5.5", window: 1_050_000},
-	{pattern: "gpt-5.4-mini", window: 400_000},
-	{pattern: "gpt-5.4-nano", window: 400_000},
-	{pattern: "gpt-5.4", window: 1_050_000},
-	{pattern: "gpt-5.3-codex", window: 400_000},
-	{pattern: "gpt-5.2", window: 1_050_000},
-	{pattern: "gpt-5.1", window: 1_050_000},
-	{pattern: "gpt-5-mini", window: 400_000},
-	{pattern: "gpt-5-nano", window: 400_000},
-	{pattern: "gpt-5", window: 1_050_000},
-	{pattern: "gpt-latest", window: 1_050_000},
-	{pattern: "gpt-mini-latest", window: 400_000},
-	{pattern: "gpt-4o", window: 128_000},
-	{pattern: "gpt-4.5", window: 128_000},
-	{pattern: "o1", window: 200_000},
-	{pattern: "o3", window: 200_000},
+	{pattern: "gpt-6", window: 1_050_000, maxTokens: 128_000},
+	{pattern: "gpt-5.6", window: 1_050_000, maxTokens: 128_000},
+	{pattern: "gpt-5.5", window: 1_050_000, maxTokens: 128_000},
+	{pattern: "gpt-5.4-mini", window: 400_000, maxTokens: 128_000},
+	{pattern: "gpt-5.4-nano", window: 400_000, maxTokens: 128_000},
+	{pattern: "gpt-5.4", window: 1_050_000, maxTokens: 128_000},
+	{pattern: "gpt-5.3-codex", window: 400_000, maxTokens: 128_000},
+	{pattern: "gpt-5.2", window: 1_050_000, maxTokens: 128_000},
+	{pattern: "gpt-5.1", window: 1_050_000, maxTokens: 128_000},
+	{pattern: "gpt-5-mini", window: 400_000, maxTokens: 128_000},
+	{pattern: "gpt-5-nano", window: 400_000, maxTokens: 128_000},
+	{pattern: "gpt-5", window: 1_050_000, maxTokens: 128_000},
+	{pattern: "gpt-latest", window: 1_050_000, maxTokens: 128_000},
+	{pattern: "gpt-mini-latest", window: 400_000, maxTokens: 128_000},
+	{pattern: "gpt-4o", window: 128_000, maxTokens: 16_384},
+	{pattern: "gpt-4.5", window: 128_000, maxTokens: 16_384},
+	{pattern: "o1", window: 200_000, maxTokens: 100_000},
+	{pattern: "o3", window: 200_000, maxTokens: 100_000},
 
 	// Anthropic Claude
-	{pattern: "claude-opus-4-7", window: 1_000_000},
-	{pattern: "claude-opus-4-6", window: 1_000_000},
-	{pattern: "claude-opus-4-8", window: 1_000_000},
-	{pattern: "claude-opus-5", window: 1_000_000},
-	{pattern: "claude-sonnet-4-6", window: 1_000_000},
-	{pattern: "claude-sonnet-5", window: 1_000_000},
-	{pattern: "claude-fable", window: 1_000_000},
-	{pattern: "claude-opus-latest", window: 1_000_000},
-	{pattern: "claude-sonnet-latest", window: 1_000_000},
-	{pattern: "claude-fable-latest", window: 1_000_000},
-	{pattern: "claude-haiku-4-5", window: 200_000},
-	{pattern: "claude-sonnet-4-5", window: 200_000},
-	{pattern: "claude-opus-4-1", window: 200_000},
-	{pattern: "claude-opus-4-5", window: 200_000},
-	{pattern: "claude-haiku-latest", window: 200_000},
-	{pattern: "claude-3-7", window: 200_000},
-	{pattern: "claude-3-5", window: 200_000},
-	{pattern: "claude-3", window: 200_000},
+	{pattern: "claude-opus-4-7", window: 1_000_000, maxTokens: 128_000},
+	{pattern: "claude-opus-4-6", window: 1_000_000, maxTokens: 128_000},
+	{pattern: "claude-opus-4-8", window: 1_000_000, maxTokens: 128_000},
+	{pattern: "claude-opus-5", window: 1_000_000, maxTokens: 128_000},
+	{pattern: "claude-sonnet-4-6", window: 1_000_000, maxTokens: 128_000},
+	{pattern: "claude-sonnet-5", window: 1_000_000, maxTokens: 128_000},
+	{pattern: "claude-fable", window: 1_000_000, maxTokens: 128_000},
+	{pattern: "claude-opus-latest", window: 1_000_000, maxTokens: 128_000},
+	{pattern: "claude-sonnet-latest", window: 1_000_000, maxTokens: 128_000},
+	{pattern: "claude-fable-latest", window: 1_000_000, maxTokens: 128_000},
+	{pattern: "claude-haiku-4-5", window: 200_000, maxTokens: 64_000},
+	{pattern: "claude-sonnet-4-5", window: 200_000, maxTokens: 64_000},
+	{pattern: "claude-opus-4-1", window: 200_000, maxTokens: 32_000},
+	{pattern: "claude-opus-4-5", window: 200_000, maxTokens: 64_000},
+	{pattern: "claude-haiku-latest", window: 200_000, maxTokens: 64_000},
+	{pattern: "claude-3-7", window: 200_000, maxTokens: 64_000},
+	{pattern: "claude-3-5", window: 200_000, maxTokens: 8_192},
+	{pattern: "claude-3", window: 200_000, maxTokens: 4_096},
 
 	// xAI Grok
-	{pattern: "grok-4.20", window: 2_000_000},
-	{pattern: "grok-4.7", window: 500_000},
-	{pattern: "grok-4.6", window: 500_000},
-	{pattern: "grok-4.5", window: 500_000},
-	{pattern: "grok-4.3", window: 1_000_000},
-	{pattern: "grok-4.1", window: 1_000_000},
-	{pattern: "grok-latest", window: 500_000},
+	{pattern: "grok-4.20", window: 2_000_000, maxTokens: 1_800_000},
+	{pattern: "grok-4.7", window: 500_000, maxTokens: 500_000},
+	{pattern: "grok-4.6", window: 500_000, maxTokens: 500_000},
+	{pattern: "grok-4.5", window: 500_000, maxTokens: 500_000},
+	{pattern: "grok-4.3", window: 1_000_000, maxTokens: 131_072},
+	{pattern: "grok-latest", window: 500_000, maxTokens: 450_000},
 
 	// Google Gemini
-	{pattern: "gemini-2.5", window: 1_048_576},
-	{pattern: "gemini-flash-latest", window: 1_048_576},
-	{pattern: "gemini-pro-latest", window: 1_048_576},
-	{pattern: "gemini-2.0", window: 1_000_000},
-	{pattern: "gemini-1.5", window: 1_000_000},
+	{pattern: "gemini-2.5", window: 1_048_576, maxTokens: 65_536},
+	{pattern: "gemini-flash-latest", window: 1_048_576, maxTokens: 65_536},
+	{pattern: "gemini-pro-latest", window: 1_048_576, maxTokens: 65_536},
+	{pattern: "gemini-2.0", window: 1_000_000, maxTokens: 8_192},
+	{pattern: "gemini-1.5", window: 1_000_000, maxTokens: 8_192},
 
 	// DeepSeek
-	{pattern: "deepseek-v4", window: 1_048_576},
-	{pattern: "deepseek-v3", window: 131_072},
-	{pattern: "deepseek-r1", window: 64_000},
-	{pattern: "deepseek-chat", window: 131_072},
-	{pattern: "deepseek-reasoner", window: 64_000},
+	{pattern: "deepseek-v4", window: 1_048_576, maxTokens: 384_000},
+	{pattern: "deepseek-v3", window: 131_072, maxTokens: 8_192},
+	{pattern: "deepseek-r1", window: 64_000, maxTokens: 8_192},
+	{pattern: "deepseek-chat", window: 131_072, maxTokens: 16_000},
+	{pattern: "deepseek-reasoner", window: 64_000, maxTokens: 8_192},
 
 	// Zhipu GLM (including z-ai, zai, zai-org, zhipu prefixes)
-	{pattern: "glm-5.3", window: 1_048_576},
-	{pattern: "glm-5.2", window: 1_048_576},
-	{pattern: "glm-5.1", window: 202_752},
-	{pattern: "glm-5", window: 202_752},
-	{pattern: "glm-4.7", window: 204_800},
-	{pattern: "glm-4.6", window: 204_800},
-	{pattern: "glm-4.5", window: 131_072},
-	{pattern: "glm-flash-latest", window: 1_048_576},
-	{pattern: "glm-latest", window: 262_144},
+	{pattern: "glm-5.3", window: 1_048_576, maxTokens: 131_072},
+	{pattern: "glm-5.2", window: 1_048_576, maxTokens: 128_000},
+	{pattern: "glm-5.1", window: 202_752, maxTokens: 64_000},
+	{pattern: "glm-5", window: 202_752, maxTokens: 131_100},
+	{pattern: "glm-4.7", window: 204_800, maxTokens: 131_072},
+	{pattern: "glm-4.6", window: 204_800, maxTokens: 131_072},
+	{pattern: "glm-4.5", window: 131_072, maxTokens: 98_304},
+	{pattern: "glm-flash-latest", window: 1_048_576, maxTokens: 131_072},
+	{pattern: "glm-latest", window: 262_144, maxTokens: 262_144},
 
 	// Moonshot Kimi
-	{pattern: "kimi-k3", window: 1_048_576},
-	{pattern: "kimi-k2.7", window: 262_144},
-	{pattern: "kimi-k2.6", window: 262_144},
-	{pattern: "kimi-k2.5", window: 262_144},
-	{pattern: "kimi-k2", window: 131_072},
-	{pattern: "kimi-latest", window: 1_048_576},
-	{pattern: "kimi", window: 1_048_576},
+	{pattern: "kimi-k3", window: 1_048_576, maxTokens: 131_072},
+	{pattern: "kimi-k2.7", window: 262_144, maxTokens: 131_072},
+	{pattern: "kimi-k2.6", window: 262_144, maxTokens: 131_000},
+	{pattern: "kimi-k2.5", window: 262_144, maxTokens: 262_144},
+	{pattern: "kimi-k2", window: 131_072, maxTokens: 131_072},
+	{pattern: "kimi-latest", window: 1_048_576, maxTokens: 131_072},
+	{pattern: "kimi", window: 1_048_576, maxTokens: 131_072},
 
 	// Qwen
-	{pattern: "qwen3.8", window: 1_000_000},
-	{pattern: "qwen3.7", window: 1_000_000},
-	{pattern: "qwen3.6", window: 1_000_000},
-	{pattern: "qwen3.5", window: 1_000_000},
-	{pattern: "qwen3-coder-flash", window: 1_000_000},
-	{pattern: "qwen3-coder-plus", window: 1_000_000},
-	{pattern: "qwen3-max", window: 262_144},
-	{pattern: "qwen3-coder", window: 262_144},
-	{pattern: "qwen2.5-coder", window: 128_000},
-	{pattern: "qwen2.5", window: 128_000},
+	{pattern: "qwen3.8", window: 1_000_000, maxTokens: 131_072},
+	{pattern: "qwen3.7", window: 1_000_000, maxTokens: 131_072},
+	{pattern: "qwen3.6", window: 1_000_000, maxTokens: 65_536},
+	{pattern: "qwen3.5", window: 1_000_000, maxTokens: 64_000},
+	{pattern: "qwen3-coder-flash", window: 1_000_000, maxTokens: 65_536},
+	{pattern: "qwen3-coder-plus", window: 1_000_000, maxTokens: 65_536},
+	{pattern: "qwen3-max", window: 262_144, maxTokens: 65_536},
+	{pattern: "qwen3-coder", window: 262_144, maxTokens: 65_536},
+	{pattern: "qwen2.5-coder", window: 128_000, maxTokens: 8_192},
+	{pattern: "qwen2.5", window: 128_000, maxTokens: 8_192},
 }
 
 // builtinReasoningPatterns identifies model families that support reasoning by default.
@@ -159,11 +159,15 @@ func NormalizeSlug(slug string) string {
 // applied when a model slug is not recognized in the builtin table.
 const FallbackContextWindow = 500_000
 
-// FallbackMaxTokens is the output limit for models without a verified preset.
-const FallbackMaxTokens = 8192
+// FallbackMaxTokensCeiling caps the derived output limit for models without a
+// verified preset. The fallback itself is window/2: half the context budget is
+// a conservative answer allowance for a modern model, and the cap keeps an
+// inflated window from producing a request the upstream rejects outright.
+const FallbackMaxTokensCeiling = 65_536
 
 // DefaultMaxTokens returns a model's maximum output tokens, independently of its
-// context window. Models without a verified output limit keep the 8192 fallback.
+// context window. Models without a verified output limit derive window/2 from
+// the builtin context window, capped at FallbackMaxTokensCeiling.
 func DefaultMaxTokens(slug string) int {
 	norm := NormalizeSlug(slug)
 	if norm == "" {
@@ -174,7 +178,14 @@ func DefaultMaxTokens(slug string) int {
 			return rule.maxTokens
 		}
 	}
-	return FallbackMaxTokens
+	window := DefaultContextWindow(slug)
+	if window <= 0 {
+		window = FallbackContextWindow
+	}
+	if window/2 > FallbackMaxTokensCeiling {
+		return FallbackMaxTokensCeiling
+	}
+	return window / 2
 }
 
 // DefaultContextCeiling caps the window Charon registers by default. Vendor

@@ -212,9 +212,10 @@ Claude Code 对窗口达到 1M 的 `claude-*` 模型，
 会在 `ANTHROPIC_MODEL` 和 `/model` 条目中加入 `[1m]` 后缀；其他网关别名仍使用
 `CLAUDE_CODE_MAX_CONTEXT_TOKENS`。OpenCode、Pi、omp 和 Grok 在各自的模型条目中
 保存窗口。窗口是本地预算，网关及上游是否接受这么长的请求仍需用长会话验证。
-Pi 和 omp 的 `maxTokens` 单独查询内置模型表中的已核实输出上限，不使用上下文窗口值：
+Pi 和 omp 的 `maxTokens` 单独查询内置模型表中的已核实输出上限（数据出处为 WorkBuddy
+预设与官方厂商规格），不使用上下文窗口值：
 `gpt-6-luna` 为 [128,000 tokens](https://developers.openai.com/api/docs/models/gpt-6-luna)，
-尚无已核实输出预设的模型仍回退到 8,192。升级后运行
+尚无已核实输出预设的模型按上下文窗口的一半推导，封顶 65,536。升级后运行
 `charon reapply <工具> <绑定名称>`，重新生成已有绑定的模型配置。
 在工具内更改模型不会更新 Charon 保存的绑定；只要这条绑定仍是当前绑定，Charon 会保留实况模型。
 应用另一条绑定时会替换模型列表。

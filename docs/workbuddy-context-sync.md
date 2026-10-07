@@ -30,17 +30,21 @@ Electron 的 `.asar` 文件为二进制头接数据块的格式，无需安装�
 
 ## 3. 正则提取与数据清洗
 
-`main/code-cache.js` 内部包含了代码缓存与内嵌 JSON 字符串，其中的双引号带有反斜杠转义：
+`main/code-cache.js` 内部包含了代码缓存与内嵌 JSON 字符串。历史上 WorkBuddy 的归档曾以双引号前带反斜杠转义的形式嵌入（`\"id\":\"...`），当前版本的归档存的是未转义的普通 JSON（`"id":"..."`）；提取脚本对两种编码各持一条正则，逐条匹配：
 
 1. **正则匹配模式**：
    ```regex
+   # 转义编码（旧版归档）
    \\\"id\\\":\\\"([^\\\"]+)\\\",\\\"name\\\":\\\"([^\\\"]+)\\\".*?\\\"contextWindow\\\":(\d+)(?:.*?\\\"maxTokens\\\":(\d+))?
+   # 普通 JSON 编码（当前归档）
+   "id":"([^"]+)","name":"([^"]+)".*?"contextWindow":(\d+).*?"maxTokens":(\d+)
    ```
 2. **Slug 归一化与剥离**：
    - 剥离斜杠命名空间（取最后一段，如 `deepseek-ai/DeepSeek-V4` -> `DeepSeek-V4`）。
    - 剥离各厂商通道前缀（如 `global.openai.`、`us.anthropic.`、`jp.anthropic.`、`xai.`、`zai.`、`moonshot.`、`qwen.`、`amazon.`）。
    - 剥离冒号后缀（如 `:batch`、`:preview`）。
    - 转换为全小写，确保与 `charon` 运行时的模型匹配逻辑一致。
+3. **maxTokens 缺失处理**：普通 JSON 编码的正则把 `maxTokens` 作为必选捕获组（当前归档中每个模型对象都带该字段）；转义编码沿用可选组，未命中时记 0，同步到 Go 表时省略该字段。
 
 ---
 

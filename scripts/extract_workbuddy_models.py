@@ -70,20 +70,25 @@ def extract_file_from_asar(asar_path: str, target_file: str) -> bytes:
 
 def parse_code_cache_models(code_cache_text: str):
     """
-    Parses models registered in code-cache.js.
-    Keys and values are escaped JSON strings like:
-    \"id\":\"...\",\"name\":\"...\",...,\"contextWindow\":1050000
+    Parses models registered in code-cache.js. The archive has shipped two
+    encodings: escaped JSON strings (\\\"id\\\":\\\"...\\\", ... \\"contextWindow\\":1050000)
+    and plain JSON ("id":"...", "contextWindow":1050000). Both carry maxTokens
+    after contextWindow in each model object.
     """
-    pattern = re.compile(
-        r'\\\"id\\\":\\\"([^\\\"]+)\\\",\\\"name\\\":\\\"([^\\\"]+)\\\".*?\\\"contextWindow\\\":(\d+)(?:.*?\\\"maxTokens\\\":(\d+))?'
+    escaped = re.compile(
+        r'\\\\"id\\\\":\\\\"([^\\\\"]+)\\\\",\\\\"name\\\\":\\\\"([^\\\\"]+)\\\\".*?\\\\"contextWindow\\\\":(\d+)(?:.*?\\\\"maxTokens\\\\":(\d+))?'
+    )
+    plain = re.compile(
+        r'"id":"([^"]+)","name":"([^"]+)".*?"contextWindow":(\d+).*?"maxTokens":(\d+)'
     )
     models = {}
-    for m in pattern.finditer(code_cache_text):
-        mid = m.group(1)
-        name = m.group(2)
-        cw = int(m.group(3))
-        mt = int(m.group(4)) if m.group(4) else 0
-        models[mid] = {"id": mid, "name": name, "contextWindow": cw, "maxTokens": mt}
+    for pattern in (escaped, plain):
+        for m in pattern.finditer(code_cache_text):
+            mid = m.group(1)
+            name = m.group(2)
+            cw = int(m.group(3))
+            mt = int(m.group(4)) if m.group(4) else 0
+            models[mid] = {"id": mid, "name": name, "contextWindow": cw, "maxTokens": mt}
     return models
 
 
@@ -211,12 +216,13 @@ def main():
             print(json.dumps(out, indent=2, ensure_ascii=False))
 
         elif args.format == "table":
-            print(f"| {'Model Slug':<32} | {'Context Window':<14} | {'Name':<35} |")
-            print(f"|:{'-'*32}-|-{'-'*14}:|-{'-'*35}:|")
+            print(f"| {'Model Slug':<32} | {'Context Window':<14} | {'Max Tokens':<11} | {'Name':<35} |")
+            print(f"|:{'-'*32}-|-{'-'*14}:|-{'-'*11}:|-{'-'*35}:|")
             for s in sorted_slugs:
                 row = slug_map[s]
                 cw = f"{row['contextWindow']:,}" if row['contextWindow'] > 0 else "unknown"
-                print(f"| {s:<32} | {cw:>14} | {row['name']:<35} |")
+                mt = f"{row['maxTokens']:,}" if row['maxTokens'] > 0 else "-"
+                print(f"| {s:<32} | {cw:>14} | {mt:>11} | {row['name']:<35} |")
 
         elif args.format == "go":
             print("// builtinModelWindows generated from WorkBuddy extract")
@@ -225,7 +231,8 @@ def main():
                 row = slug_map[s]
                 if row["contextWindow"] <= 0:
                     continue
-                print(f'\t{{pattern: "{s}", window: {row["contextWindow"]}}}, // {row["name"]}')
+                mt = f', maxTokens: {row["maxTokens"]}' if row["maxTokens"] > 0 else ""
+                print(f'\t{{pattern: "{s}", window: {row["contextWindow"]}{mt}}}, // {row["name"]}')
             print("}")
     except BrokenPipeError:
         devnull = os.open(os.devnull, os.O_WRONLY)

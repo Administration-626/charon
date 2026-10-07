@@ -245,9 +245,11 @@ Claude Code, `claude-*` models with a window of at least 1M get a `[1m]` suffix 
 model entries. These settings size the local budget; a long session must confirm
 that the gateway and upstream actually accept it.
 Pi and omp resolve `maxTokens` separately from the context window, using verified
-output limits in the built-in model table. `gpt-6-luna` uses
+output limits in the built-in model table (sourced from WorkBuddy presets and
+official provider specifications). `gpt-6-luna` uses
 [128,000 output tokens](https://developers.openai.com/api/docs/models/gpt-6-luna);
-models without a verified output preset retain the 8,192 fallback. After upgrading,
+models without a verified output preset derive window/2 from their context
+window, capped at 65,536. After upgrading,
 run `charon reapply <tool> <binding>` to regenerate an existing binding's entries.
 A binding with one model replaces the previous binding's list with that one model.
 Changing the model in the tool does not update the saved binding, and Charon

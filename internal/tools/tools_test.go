@@ -98,7 +98,7 @@ func TestPiAndOmpOutputLimits(t *testing.T) {
 				if len(entries) != wantCount || entries[0].ID != "gpt-6-luna" || entries[0].MaxTokens != 128_000 {
 					t.Fatalf("output limit not projected: %+v", entries)
 				}
-				if withList && (entries[1].ID != "custom" || entries[1].MaxTokens != models.FallbackMaxTokens ||
+				if withList && (entries[1].ID != "custom" || entries[1].MaxTokens != models.FallbackMaxTokensCeiling ||
 					entries[0].ContextWindow != 256_000 || entries[1].ContextWindow != 256_000) {
 					t.Fatalf("output limits mixed with context windows or another model: %+v", entries)
 				}
