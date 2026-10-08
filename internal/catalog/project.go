@@ -8,6 +8,7 @@ import (
 
 // ProjectIfActive re-renders the latest stored version of id only when its tool
 // still points to it as active. The check and write share the same lock as switch.
+// Bindings for tools no longer supported are kept but never projected.
 // It renders a binding into its tool's live config: endpoint and key come from the
 // credential's provider, the default model and the picker list from the models the
 // binding references. It reuses the tool's ApplyAuth, which overwrites only the
@@ -30,7 +31,7 @@ func (c *Catalog) ProjectIfActive(id string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if active[b.Tool] != id {
+	if active[b.Tool] != id || tools.Find(b.Tool) == nil {
 		return false, nil
 	}
 	if err := c.project(b); err != nil {
@@ -56,7 +57,7 @@ func (c *Catalog) project(b Binding) error {
 	if err != nil {
 		return err
 	}
-	spec := tools.AuthSpec{Endpoint: p.BaseURL, Key: cr.Key, Model: slug}
+	spec := tools.AuthSpec{Endpoint: p.BaseURL, Key: cr.Key, Model: slug, PiAPI: b.PiAPI}
 	officialOpenAI := tools.IsOfficialOpenAIEndpoint(p.BaseURL)
 	specs := make([]tools.ModelSpec, 0, len(b.Models))
 	for _, id := range b.Models {

@@ -31,14 +31,6 @@ func TestDescribeReadsConfiguredTokenLimits(t *testing.T) {
 			".pi/agent/settings.json":        `{"defaultProvider":"charon","defaultModel":"legacy-model"}`,
 			".pi/agent/extensions/charon.ts": string(legacyPiExtension(t)),
 		}, 128000, 32000},
-		{"omp selected model", "omp", map[string]string{
-			".omp/agent/config.yml": "modelRoles: {default: charon/gpt-6-luna}\n",
-			".omp/agent/models.yml": "providers: {charon: {models: [{id: other, contextWindow: 900000}, {id: gpt-6-luna, contextWindow: 420000, maxTokens: 32000}]}}\n",
-		}, 420000, 32000},
-		{"omp inactive provider", "omp", map[string]string{
-			".omp/agent/config.yml": "modelRoles: {default: other/gpt-6-luna}\n",
-			".omp/agent/models.yml": "providers: {charon: {models: [{id: gpt-6-luna, contextWindow: 420000, maxTokens: 32000}]}}\n",
-		}, 0, 0},
 		{"codex global overrides catalog", "codex", map[string]string{
 			".codex/config.toml":        "model = 'gpt-6-luna'\nmodel_context_window = 256000\nmodel_catalog_json = 'custom_models.json'\n",
 			".codex/custom_models.json": `{"models":[{"slug":"gpt-6-luna","context_window":420000}]}`,

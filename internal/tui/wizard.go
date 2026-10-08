@@ -21,12 +21,12 @@ const (
 	actionCancel = "\x00cancel"
 )
 
-// Focus positions on the single-page add/edit form: three text inputs followed by the
-// action rows. Named so the wrap-around arithmetic and the renderer can't drift apart.
+// Focus positions on the single-page add/edit form. Non-Pi tools skip the API selector.
 const (
 	focusName int = iota
 	focusURL
 	focusToken
+	focusPiAPI
 	focusFetch  // [ Fetch & Pick Online Models ]
 	focusManual // [ Type Model IDs Manually ]
 	focusSave
@@ -35,10 +35,33 @@ const (
 )
 
 // formInputCount is how many of those positions are text inputs.
-const formInputCount = focusFetch
+const formInputCount = focusPiAPI
+
+var piAPIOptions = []struct {
+	label string
+	api   string
+}{
+	{"OpenAI (Chat Completions)", "openai-completions"},
+	{"OpenAI (Responses)", "openai-responses"},
+	{"Anthropic (Messages)", "anthropic-messages"},
+	{"Gemini (Generate Content)", "google-generative-ai"},
+}
+
+func piAPILabel(api string) string {
+	if api == "" {
+		api, _ = tools.ResolvePiAPI("")
+	}
+	for _, option := range piAPIOptions {
+		if option.api == api {
+			return option.label
+		}
+	}
+	return api
+}
 
 type wizard struct {
 	endpoint, key, model string
+	piAPI                string
 	name                 string // target binding name when editing
 	origName             string // pre-edit name, to clean up on rename
 	edit                 bool   // true = overwrite an existing binding
@@ -119,6 +142,10 @@ func newFormInput(placeholder, value string, isPassword bool) textinput.Model {
 // loadEditForm populates the native multi-input form.
 func (m *model) loadEditForm() {
 	m.formFocus = focusName
+	m.piAPIOpen = false
+	if m.tool.Name == "pi" && m.wiz.piAPI == "" {
+		m.wiz.piAPI, _ = tools.ResolvePiAPI("")
+	}
 	m.formInputs = make([]textinput.Model, formInputCount)
 	m.formInputs[focusName] = newFormInput("e.g. openrouter-fast", m.wiz.name, false)
 	m.formInputs[focusURL] = newFormInput(exampleEndpoint, m.wiz.endpoint, false)
@@ -136,6 +163,9 @@ func (m *model) loadEditFormAt(focus int) {
 }
 
 func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.piAPIOpen {
+		return m.updatePiAPI(msg)
+	}
 	switch msg.String() {
 	case "esc":
 		m.dupSource = ""
@@ -144,12 +174,24 @@ func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.loadProfiles("")
 		return m, nil
 	case "up", "shift+tab":
-		m.formFocus = (m.formFocus - 1 + focusCount) % focusCount
+		m.moveFormFocus(-1)
 		return m.syncFormFocus()
 	case "down", "tab":
-		m.formFocus = (m.formFocus + 1) % focusCount
+		m.moveFormFocus(1)
 		return m.syncFormFocus()
 	case "enter":
+		if m.formFocus == focusPiAPI && m.tool.Name == "pi" {
+			m.piAPIOpen = true
+			m.piAPICursor = 0 // default: OpenAI Chat Completions
+			for i, option := range piAPIOptions {
+				if option.api == m.wiz.piAPI {
+					m.piAPICursor = i
+					break
+				}
+			}
+			m.clearStatus()
+			return m, nil
+		}
 		if m.formFocus == focusFetch {
 			endpoint := strings.TrimRight(strings.TrimSpace(m.formInputs[focusURL].Value()), "/")
 			key := strings.TrimSpace(m.formInputs[focusToken].Value())
@@ -187,7 +229,7 @@ func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.loadProfiles("")
 			return m, nil
 		}
-		m.formFocus = (m.formFocus + 1) % focusCount
+		m.moveFormFocus(1)
 		return m.syncFormFocus()
 	}
 
@@ -198,6 +240,30 @@ func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.wiz.endpoint = strings.TrimRight(strings.TrimSpace(m.formInputs[focusURL].Value()), "/")
 		m.wiz.key = strings.TrimSpace(m.formInputs[focusToken].Value())
 		return m, cmd
+	}
+	return m, nil
+}
+
+func (m *model) moveFormFocus(delta int) {
+	m.formFocus = (m.formFocus + delta + focusCount) % focusCount
+	if m.formFocus == focusPiAPI && m.tool.Name != "pi" {
+		m.formFocus += delta
+	}
+}
+
+func (m model) updatePiAPI(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "shift+tab":
+		m.piAPICursor = (m.piAPICursor - 1 + len(piAPIOptions)) % len(piAPIOptions)
+	case "down", "tab":
+		m.piAPICursor = (m.piAPICursor + 1) % len(piAPIOptions)
+	case "esc":
+		m.piAPIOpen = false
+		m.clearStatus()
+	case "enter":
+		m.wiz.piAPI = piAPIOptions[m.piAPICursor].api
+		m.piAPIOpen = false
+		m.setStatus(statusInfo, "Selected "+piAPILabel(m.wiz.piAPI)+"; choose Save to store the binding")
 	}
 	return m, nil
 }
@@ -763,7 +829,7 @@ func (m model) finishAdd(name string) (tea.Model, tea.Cmd) {
 	for slug := range m.wiz.manualWindows {
 		manualWindows[slug] = m.wiz.windows[slug]
 	}
-	b, err := catalog.StoreBinding(m.cat, m.tool, existing, name, m.wiz.endpoint, m.wiz.key, m.wiz.model, slugs, curated || !m.wiz.edit, manualWindows)
+	b, err := catalog.StoreBinding(m.cat, m.tool, existing, name, m.wiz.endpoint, m.wiz.key, m.wiz.model, slugs, curated || !m.wiz.edit, manualWindows, m.wiz.piAPI)
 	if err != nil {
 		m.setStatus(statusErr, err.Error())
 		return m, nil

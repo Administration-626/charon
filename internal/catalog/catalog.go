@@ -77,6 +77,7 @@ type Binding struct {
 	CredentialID string   `json:"credentialId"`
 	ModelID      string   `json:"modelId"`
 	Models       []string `json:"models"`
+	PiAPI        string   `json:"piApi,omitempty"` // Pi request protocol, not model discovery
 }
 
 // Catalog is the on-disk store, rooted at ~/.config/charon.
@@ -416,13 +417,18 @@ func (c *Catalog) putModel(providerID, slug string, contextWindow *int, source W
 
 // AddBinding stores a new binding for a tool. models are the slugs its picker
 // should offer; defaultSlug is the one selected on render and must be among them.
-// Every slug must belong to the credential's provider.
-func (c *Catalog) AddBinding(tool, name, credentialID, defaultSlug string, models []string) (Binding, error) {
+// Every slug must belong to the credential's provider. piAPI optionally selects
+// Pi's request protocol; omission defaults to OpenAI Chat Completions.
+func (c *Catalog) AddBinding(tool, name, credentialID, defaultSlug string, models []string, piAPI ...string) (Binding, error) {
 	if err := c.lock(); err != nil {
 		return Binding{}, err
 	}
 	defer c.unlock()
 	b, err := c.prepareBinding("", "", tool, name, credentialID, defaultSlug, models)
+	if err != nil {
+		return Binding{}, err
+	}
+	b.PiAPI, err = bindingPiAPI(tool, "", piAPI)
 	if err != nil {
 		return Binding{}, err
 	}
@@ -436,7 +442,8 @@ func (c *Catalog) AddBinding(tool, name, credentialID, defaultSlug string, model
 
 // UpdateBinding replaces the editable fields on an existing binding. Its tool is
 // fixed; a credential can be shared by adding another binding for a different tool.
-func (c *Catalog) UpdateBinding(id, name, credentialID, defaultSlug string, models []string) (Binding, error) {
+// Omitting piAPI preserves the latest stored protocol, including on rename.
+func (c *Catalog) UpdateBinding(id, name, credentialID, defaultSlug string, models []string, piAPI ...string) (Binding, error) {
 	if err := c.lock(); err != nil {
 		return Binding{}, err
 	}
@@ -450,6 +457,10 @@ func (c *Catalog) UpdateBinding(id, name, credentialID, defaultSlug string, mode
 		return Binding{}, fmt.Errorf("binding %q: %w", id, ErrNotFound)
 	}
 	b, err := c.prepareBinding(id, bs[idx].Name, bs[idx].Tool, name, credentialID, defaultSlug, models)
+	if err != nil {
+		return Binding{}, err
+	}
+	b.PiAPI, err = bindingPiAPI(b.Tool, bs[idx].PiAPI, piAPI)
 	if err != nil {
 		return Binding{}, err
 	}

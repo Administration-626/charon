@@ -16,7 +16,7 @@
 </p>
 
 Charon 是一个用 Go 编写的 CLI，可检测 Codex、Claude Code、OpenCode、
-Pi、Oh My Pi（omp）与 Grok，并在命名绑定（binding）之间切换各工具使用的
+Pi 与 Grok，并在命名绑定（binding）之间切换各工具使用的
 endpoint 和凭据。
 一条绑定包含 endpoint、API key 和可供工具选择的模型，不保存工具配置中的其他内容。
 切换绑定时，Charon 会将绑定中的设置写入工具配置，只修改由 Charon 管理的配置项。
@@ -27,15 +27,15 @@ endpoint 和凭据。
 
 ## 功能
 
-- 一条命令，六个工具。用一个交互式菜单或可脚本化的 CLI 管理 Codex、Claude
-  Code、OpenCode、Pi、Oh My Pi（omp）和 Grok。
+- 一条命令，五个工具。用一个交互式菜单或可脚本化的 CLI 管理 Codex、Claude
+  Code、OpenCode、Pi 和 Grok。
 - 命名绑定。保存 endpoint、API key 和该服务提供的模型，然后在不同绑定之间切换。
   同一个 endpoint 可供多个工具使用。
 - 获取模型列表。提供 endpoint 和 API key 即可添加绑定；Charon 会获取模型列表供你选择，
   也可以手动输入模型 ID。
 - 在工具内切换模型。勾选你常用的那几个模型，Charon 会把它们注册进工具自身的
-  选择器（Claude Code 的 /model、OpenCode 的 /models、Pi 的 /model、Oh My Pi 的
-  /model、Grok 的 /model），可以在会话中更换模型，无需返回 Charon。
+  选择器（Claude Code 的 /model、OpenCode 的 /models、Pi 的 /model、
+  Grok 的 /model），可以在会话中更换模型，无需返回 Charon。
 - 按模型设置上下文窗口。Charon 优先使用手动值，其次使用 API 返回值和内置值，
   再将窗口写入工具支持的配置。第三方网关上的 Claude 1M 变体会在 Claude Code 中使用
   `[1m]` 后缀；Codex 中的网关模型会写入明确的窗口，避免落到约 258k 的默认预算。
@@ -57,8 +57,9 @@ endpoint 和凭据。
 | Claude Code | ~/.claude/settings.json（env.ANTHROPIC_BASE_URL） | settings.json 的环境变量键 |
 | OpenCode | ~/.config/opencode/opencode.jsonc（provider.*.options.baseURL） | opencode.jsonc（provider.charon.options.apiKey） |
 | Pi | ~/.pi/agent/models.json（providers.charon.baseUrl） | ~/.pi/agent/models.json（providers.charon.apiKey） |
-| Oh My Pi（omp） | ~/.omp/agent/models.yml（providers.charon.baseUrl） | ~/.omp/agent/models.yml（providers.charon.apiKey） |
 | Grok | ~/.grok/config.toml（[model.charon-*].base_url） | ~/.grok/config.toml（[model.charon-*].api_key） |
+
+Charon 不再支持 Oh My Pi（omp），但不会删除已有绑定或 `~/.omp/agent/` 中的文件。
 
 Pi 的 Charon provider 使用原生 `models.json`。下次写入配置时，Charon 会迁移旧版
 生成的 `extensions/charon.ts`，并在 `models.json` 和 `settings.json` 均写入成功后
@@ -197,8 +198,8 @@ charon completion fish | source
 绑定中保存的模型会出现在工具自身的菜单中，因此可以在当前会话内更换模型：Codex
 的 /model（读取 custom_models.json）、Claude Code
 的 /model（通过 modelPicker）、OpenCode 的 /models（读取 charon provider 的模型
-映射）、Pi 的 /model（读取 models.json 中 providers.charon 的模型列表）、Oh My Pi 的 /model（读取
-providers.charon 的模型列表）以及 Grok 的 /model（一组 [model.charon-<slug>]
+映射）、Pi 的 /model（读取 models.json 中 providers.charon 的模型列表）
+以及 Grok 的 /model（一组 [model.charon-<slug>]
 表）。切换绑定时，工具中的模型列表也会更新。
 只有一个模型的绑定会将工具中的模型列表替换为该模型，不会保留上一条绑定的列表。
 Codex 的 `custom_models.json` 包含当前绑定的完整模型列表，不混入内置模型或其他绑定的模型。
@@ -210,9 +211,9 @@ Codex 的 `custom_models.json` 包含当前绑定的完整模型列表，不混�
 `charon reapply codex <绑定名称>`。重启 Codex 后加载新的目录。
 Claude Code 对窗口达到 1M 的 `claude-*` 模型，
 会在 `ANTHROPIC_MODEL` 和 `/model` 条目中加入 `[1m]` 后缀；其他网关别名仍使用
-`CLAUDE_CODE_MAX_CONTEXT_TOKENS`。OpenCode、Pi、omp 和 Grok 在各自的模型条目中
+`CLAUDE_CODE_MAX_CONTEXT_TOKENS`。OpenCode、Pi 和 Grok 在各自的模型条目中
 保存窗口。窗口是本地预算，网关及上游是否接受这么长的请求仍需用长会话验证。
-Pi 和 omp 的 `maxTokens` 单独查询内置模型表中的已核实输出上限（数据出处为 WorkBuddy
+Pi 的 `maxTokens` 单独查询内置模型表中的已核实输出上限（数据出处为 WorkBuddy
 预设与官方厂商规格），不使用上下文窗口值：
 `gpt-6-luna` 为 [128,000 tokens](https://developers.openai.com/api/docs/models/gpt-6-luna)，
 尚无已核实输出预设的模型按上下文窗口的一半推导，封顶 65,536。升级后运行
@@ -259,7 +260,7 @@ charon edit claude gateway --models glm-4.6   # 只在模型菜单中注册 glm-
 每个工具都会在它自己的配置格式里写入一个专属的 charon provider 条目
 （Codex 的 [model_providers.charon]、Claude 的 env.ANTHROPIC_*、OpenCode 的一个
 @ai-sdk/openai-compatible provider、Pi 的 models.json 中一个 providers.charon 块、
-Oh My Pi 的 models.yml 中一个 providers.charon 块、Grok 的每个模型一张
+Grok 的每个模型一张
 [model.charon-<slug>] 表）。因此切换到其他配置后再切回时，Charon 仍可重新应用该绑定。
 
 示例：先运行 charon add codex --name work-key --key sk-... --model gpt-5，再运行

@@ -6,7 +6,7 @@
 |---|---|---|---|
 | 文件 | 小写领域名；测试追加 `_test.go` | `catalog.go`、`project_test.go` | `internal/` |
 | 函数 | Go 驼峰；导出函数首字母大写 | `ProjectIfActive`、`storeBinding` | `internal/catalog/` |
-| 类型 | 导出类型 PascalCase，内部结构小写 | `Catalog`、`Binding`、`ompProvider` | `internal/catalog/`、`internal/tools/omp.go` |
+| 类型 | 导出类型 PascalCase，内部结构小写 | `Catalog`、`Binding`、`piProviderConfig` | `internal/catalog/`、`internal/tools/pi.go` |
 | 常量和环境键 | 常量用 PascalCase 或全大写语义名，外部键保留工具原名 | `FallbackContextWindow`、`ANTHROPIC_API_KEY` | `internal/models/`、`internal/tools/claude.go` |
 
 ## 2) 格式化和检查

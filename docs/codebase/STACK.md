@@ -15,7 +15,6 @@
 |---|---|---|
 | `bubbletea`、`bubbles`、`lipgloss` | 终端交互界面、列表、输入框和样式 | `go.mod`、`internal/tui/` |
 | `pelletier/go-toml/v2` | 读写 Codex、Grok 的 TOML 配置 | `go.mod`、`internal/tools/edit.go` |
-| `gopkg.in/yaml.v3` | 保留节点结构读写 Oh My Pi YAML | `go.mod`、`internal/tools/edit.go` |
 | `sahilm/fuzzy` | 模型列表模糊搜索 | `go.mod`、`internal/tui/picker.go` |
 | `golang.org/x/sys/unix` | Linux/macOS 的 advisory flock | `go.mod`、`internal/catalog/lock_unix.go` |
 
@@ -41,7 +40,7 @@ make run
 ## 5) 环境与配置
 
 - Charon 自身的数据目录是 `$XDG_CONFIG_HOME/charon`；未设置时回退到 `~/.config/charon`。证据：`internal/catalog/catalog.go`。
-- 工具配置读取用户 `HOME` 下的固定目录，如 `~/.codex`、`~/.claude`、`~/.config/opencode`、`~/.pi/agent`、`~/.omp/agent`、`~/.grok`。证据：`internal/tools/*.go`。
+- 工具配置读取用户 `HOME` 下的固定目录，如 `~/.codex`、`~/.claude`、`~/.config/opencode`、`~/.pi/agent`、`~/.grok`。证据：`internal/tools/*.go`。
 - `HOME` 没有业务配置含义之外的显式环境变量要求；`XDG_CONFIG_HOME` 是 Charon 存储位置覆盖项。密钥链只在 macOS 实现。证据：`internal/catalog/catalog.go`、`internal/secret/keychain_*.go`。
 - 不提供容器或服务进程；运行约束是本地文件权限、用户目录可写以及对应 CLI 的配置格式可解析。
 

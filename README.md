@@ -16,7 +16,7 @@
 </p>
 
 Charon is a tiny Go CLI that detects the Codex, Claude Code,
-OpenCode, Pi, Oh My Pi (omp), and Grok CLIs and switches each one's endpoint +
+OpenCode, Pi, and Grok CLIs and switches each one's endpoint +
 credentials between named bindings. A binding is an endpoint, an API key, and
 the models it should offer — not a snapshot of the tool's config. Switching
 re-renders that binding into the tool, overwriting only the keys charon owns.
@@ -27,15 +27,15 @@ re-renders that binding into the tool, overwriting only the keys charon owns.
 
 ## Features
 
-- One command, six tools. Manage Codex, Claude Code, OpenCode, Pi, Oh My Pi
-  (omp), and Grok from a single interactive menu or a scriptable CLI.
+- One command, five tools. Manage Codex, Claude Code, OpenCode, Pi, and Grok
+  from a single interactive menu or a scriptable CLI.
 - Named bindings. Save an endpoint, an API key, and its models, then switch
   between bindings. One endpoint can serve several tools.
 - Model discovery. Add a binding from an endpoint + key; Charon fetches the
   model list and lets you pick — or type model ids directly.
 - Switch models inside the tool. Check off the models you actually use and
   Charon registers them in the tool's own picker (Claude Code's /model, OpenCode's
-  /models, Pi's /model, Oh My Pi's /model, Grok's /model), so changing
+  /models, Pi's /model, Grok's /model), so changing
   model mid-session never means going back through Charon.
 - Per-model context windows. Charon uses manual values, then API values, then built-in
   estimates. It writes these into supported tool settings. Claude Code gets the `[1m]`
@@ -64,8 +64,10 @@ re-renders that binding into the tool, overwriting only the keys charon owns.
 | Claude Code | ~/.claude/settings.json (env.ANTHROPIC_BASE_URL) | settings.json env key |
 | OpenCode | ~/.config/opencode/opencode.jsonc (provider.*.options.baseURL) | opencode.jsonc (provider.charon.options.apiKey) |
 | Pi | ~/.pi/agent/models.json (providers.charon.baseUrl) | ~/.pi/agent/models.json (providers.charon.apiKey) |
-| Oh My Pi (omp) | ~/.omp/agent/models.yml (providers.charon.baseUrl) | ~/.omp/agent/models.yml (providers.charon.apiKey) |
 | Grok | ~/.grok/config.toml ([model.charon-*].base_url) | ~/.grok/config.toml ([model.charon-*].api_key) |
+
+Oh My Pi (omp) is no longer supported. Its existing bindings and files under
+`~/.omp/agent/` are left untouched.
 
 Pi uses its native `models.json` for the Charon provider. On the next configuration
 write, Charon migrates its old generated `extensions/charon.ts` and removes it only
@@ -75,6 +77,19 @@ disable it manually after reviewing it. Restart Pi after migration to unload the
 old extension. Existing thinking/compaction preferences and `auth.json` logins are
 left alone. Each file is replaced atomically; an I/O failure between writes is
 reported as partial application.
+
+Pi's add/edit form has an **Endpoint Type** dropdown: OpenAI (Chat Completions,
+the default), OpenAI (Responses), Anthropic (Messages), or Gemini (Generate Content).
+The choice is stored per binding and written to `models.json` →
+`providers.charon.api`, including after switching, editing, or duplicating a binding.
+In the dropdown, `[✓]` marks the current choice and `>` marks the cursor; Enter
+confirms a choice, and Save stores the binding. The saved type also appears in the
+binding list.
+Bindings without a type default to Chat Completions; explicitly saved types are
+unchanged. Pi 1.0.4 has no separate Responses Compact protocol, so it is not offered
+in the dropdown. This does not change Pi's compaction settings. Use the base URL
+documented by your provider; for native Gemini, enter model IDs manually because
+model discovery only probes OpenAI/Anthropic.
 
 Charon registers every Pi model with thinking enabled and exposes the standard
 `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` levels. The startup
@@ -226,8 +241,8 @@ status bar flags missing required values on submit.
 The models a binding registers land in the tool's own menu, so you can change model
 without leaving your session: Codex's /model (via custom_models.json), Claude Code's /model (via modelPicker), OpenCode's
 /models (via the charon provider's model map), Pi's /model (via the
-providers.charon model list in models.json), Oh My Pi's /model (via the providers.charon model
-list), and Grok's /model (via [model.charon-<slug>] tables).
+providers.charon model list in models.json), and Grok's /model
+(via [model.charon-<slug>] tables).
 The list travels with the binding — switch bindings and the menu switches too.
 Codex's custom catalog contains the binding's complete model list, not built-in
 presets or another binding's models. Each entry has its own context window and
@@ -241,10 +256,10 @@ the editor or run `charon edit codex <binding> --models 'model-a,model-b'`, then
 catalog. For
 Claude Code, `claude-*` models with a window of at least 1M get a `[1m]` suffix in
 `ANTHROPIC_MODEL` and `/model`; other gateway aliases use
-`CLAUDE_CODE_MAX_CONTEXT_TOKENS`. OpenCode, Pi, omp, and Grok store windows in their
+`CLAUDE_CODE_MAX_CONTEXT_TOKENS`. OpenCode, Pi, and Grok store windows in their
 model entries. These settings size the local budget; a long session must confirm
 that the gateway and upstream actually accept it.
-Pi and omp resolve `maxTokens` separately from the context window, using verified
+Pi resolves `maxTokens` separately from the context window, using verified
 output limits in the built-in model table (sourced from WorkBuddy presets and
 official provider specifications). `gpt-6-luna` uses
 [128,000 output tokens](https://developers.openai.com/api/docs/models/gpt-6-luna);
@@ -301,7 +316,7 @@ picker list.
 Each tool gets a dedicated charon provider entry written into its own config
 format (Codex [model_providers.charon], Claude env.ANTHROPIC_*, OpenCode an
 @ai-sdk/openai-compatible provider, Pi a providers.charon block in models.json,
-Oh My Pi a providers.charon block in models.yml, Grok a
+Grok a
 [model.charon-<slug>] table per model), so Charon can reapply a binding after
 you switch to another one.
 

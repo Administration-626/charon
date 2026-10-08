@@ -25,6 +25,20 @@ const (
 
 var piConfigRE = regexp.MustCompile(`(?s)pi\.registerProvider\("charon",\s*(.*?)\);\s*\n\s*// charon:config:end`)
 
+// ResolvePiAPI validates Pi's request protocol, defaulting to OpenAI Chat Completions.
+// Pi 1.0.4's pi-ai KnownApi has no separate Responses Compact protocol.
+func ResolvePiAPI(api string) (string, error) {
+	if api == "" {
+		return "openai-completions", nil
+	}
+	switch api {
+	case "openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai":
+		return api, nil
+	default:
+		return "", fmt.Errorf("unsupported Pi endpoint type %q", api)
+	}
+}
+
 // piModel is one entry of a pi provider's "models" array.
 type piModel struct {
 	ID               string             `json:"id"`
@@ -173,6 +187,10 @@ func newPi() *Tool {
 		DefaultEndpoint: "https://api.openai.com/v1",
 		ApplyAuth: func(a AuthSpec) error {
 			// Read and validate every input before the first write.
+			api, err := ResolvePiAPI(a.PiAPI)
+			if err != nil {
+				return err
+			}
 			config, err := loadJSONMap(modelsPath)
 			if err != nil {
 				return fmt.Errorf("read models.json: %w", err)
@@ -228,7 +246,7 @@ func newPi() *Tool {
 				"name":    managedProvider,
 				"baseUrl": a.Endpoint,
 				"apiKey":  piEscapeValue(a.Key),
-				"api":     "openai-responses",
+				"api":     api,
 				"models":  entries,
 			}
 			if err := ensureOnlyCharonChanged(original, providers); err != nil {

@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | 高 | API key 在 `credentials.json` 和各目标 CLI 配置中以可读形式存在 | `internal/catalog/catalog.go`、`internal/tools/*.go` | 本地用户目录泄露会同时暴露多份凭据 | 明确威胁模型；可考虑平台密钥链或只保留引用，但不能削弱当前 `0600` |
 | 中 | `StoreBinding` 的跨表写入不是一个完整锁定事务 | `internal/catalog/bind.go` 调用多个分别加锁的 Catalog 方法 | 并发进程可能在 provider、credential、model、binding 写入之间插入操作，留下半成品或重复行 | 增加 catalog 内部的组合 mutation API，让整段读改写只获取一次锁 |
-| 中 | 多文件 mutation 没有跨文件事务 | `internal/catalog/catalog.go`、`internal/tools/omp.go` | 中途崩溃可能出现 catalog 与 live config 不一致，或 omp 两份配置不同步 | 写入临时状态/恢复日志，或把一次投影封装成可检测、可重试的事务步骤 |
+| 中 | 多文件 mutation 没有跨文件事务 | `internal/catalog/catalog.go`、`internal/tools/pi.go` | 中途崩溃可能出现 catalog 与 live config 不一致，或 Pi 两份配置不同步 | 写入临时状态/恢复日志，或把一次投影封装成可检测、可重试的事务步骤 |
 | 中 | OpenCode 路径允许 `opencode.jsonc`，但读取器使用标准 JSON 解析器 | `internal/tools/opencode.go`、`internal/tools/edit.go` | 带注释的合法 JSONC 文件无法被 Charon 读取或合并 | 使用支持 JSONC 注释的解析器，或明确拒绝带注释配置并在检测时给出可定位错误 |
 | 中 | Windows/其他平台的跨进程锁是 no-op | `internal/catalog/lock_other.go` | 同时运行两个 Charon 可能交错写入 | 若支持并发，增加平台锁实现；否则在支持矩阵中明确限制 |
 | 中 | TUI 状态机集中在大文件 | `internal/tui/tui.go`、`wizard.go`、`views.go`；`wc -l` 显示它们是源码中的大文件，`git log` 显示近期持续修改 | 新增流程可能引入视图状态回归 | 抽取纯状态转换和流程服务，保留 Bubble Tea 外壳 |
@@ -16,7 +16,7 @@
 | 债务 | 成因 | 位置 | 忽略风险 | 建议 |
 |---|---|---|---|---|
 | 认证方言不是目录字段 | 同一 endpoint 可被多个 CLI 以不同协议消费 | `internal/catalog/catalog.go`、`internal/tools/*.go` | 用户无法在绑定层表达某个网关要求 `x-api-key` 还是 Bearer | 只有出现真实兼容性需求时再增加显式 auth scheme；不要按 URL 猜测 |
-| 手写配置格式适配分散 | 六种 CLI 的配置结构确实不同 | `internal/tools/codex.go` 等 | 格式变更需要逐个 adapter 更新 | 为每个 adapter 保持独立测试和 owned-key guard，避免过早抽象 |
+| 手写配置格式适配分散 | 五种 CLI 的配置结构确实不同 | `internal/tools/codex.go` 等 | 格式变更需要逐个 adapter 更新 | 为每个 adapter 保持独立测试和 owned-key guard，避免过早抽象 |
 | 内置上下文窗口是静态规则 | API 不一定返回窗口，需 WorkBuddy/官方规则兜底 | `internal/models/builtin.go`、`docs/workbuddy-context-sync.md` | 新模型可能被错误估计，影响压缩行为 | 定期同步规则；继续保留手动覆盖优先级 |
 
 ## 3) 安全风险

@@ -34,6 +34,7 @@ func (i Info) withDefaults(endpoint string) Info {
 // AuthSpec is a new endpoint + API key + model to write into a tool's config.
 type AuthSpec struct {
 	Endpoint string
+	PiAPI    string // Pi request protocol; empty defaults to openai-completions
 	Key      string
 	Model    string
 	Effort   string
@@ -74,7 +75,7 @@ func detected(executable string, paths ...string) bool {
 
 // All returns the supported tools in a stable display order.
 func All() []*Tool {
-	return []*Tool{newCodex(), newClaude(), newOpenCode(), newPi(), newOmp(), newGrok()}
+	return []*Tool{newCodex(), newClaude(), newOpenCode(), newPi(), newGrok()}
 }
 
 // ResolveEndpoint returns ep, or DefaultEndpoint when ep is empty.

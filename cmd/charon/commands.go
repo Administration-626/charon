@@ -709,7 +709,11 @@ func cmdDuplicate(cat *catalog.Catalog, args []string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := catalog.StoreBinding(cat, dstTool, nil, dstName, p.BaseURL, cr.Key, slug, slugs, true, nil); err != nil {
+	piAPI := ""
+	if dstTool.Name == "pi" && b.Tool == "pi" {
+		piAPI = b.PiAPI
+	}
+	if _, err := catalog.StoreBinding(cat, dstTool, nil, dstName, p.BaseURL, cr.Key, slug, slugs, true, nil, piAPI); err != nil {
 		return err
 	}
 	fmt.Printf("Copied %s binding %q → %s %q\n", t.Title, args[1], dstTool.Title, dstName)

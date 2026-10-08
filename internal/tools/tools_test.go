@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	toml "github.com/pelletier/go-toml/v2"
-	"gopkg.in/yaml.v3"
 
 	"charon/internal/models"
 )
@@ -46,64 +45,72 @@ func writeFile(t *testing.T, path, content string) {
 }
 
 func TestFindUnknown(t *testing.T) {
-	if Find("nope") != nil {
-		t.Error("expected nil for unknown tool")
+	sandboxHome(t)
+	for _, name := range []string{"nope", "omp"} {
+		if Find(name) != nil {
+			t.Errorf("expected nil for unsupported tool %q", name)
+		}
 	}
 }
 
-func TestPiAndOmpOutputLimits(t *testing.T) {
-	for _, tool := range []string{"pi", "omp"} {
-		for _, withList := range []bool{false, true} {
-			mode := "single"
-			if withList {
-				mode = "list"
-			}
-			t.Run(tool+"/"+mode, func(t *testing.T) {
-				home := sandboxHome(t)
-				spec := AuthSpec{Endpoint: "https://gateway.example/v1", Key: "sk-test", Model: "gpt-6-luna"}
-				if withList {
-					spec.Models = []ModelSpec{
-						{Slug: "gpt-6-luna", ContextWindow: 256_000},
-						{Slug: "custom", ContextWindow: 256_000},
-					}
-				}
-				if err := Find(tool).ApplyAuth(spec); err != nil {
-					t.Fatal(err)
-				}
-				filename, decode := "models.json", json.Unmarshal
-				if tool == "omp" {
-					filename, decode = "models.yml", yaml.Unmarshal
-				}
-				data, err := os.ReadFile(filepath.Join(home, "."+tool, "agent", filename))
-				if err != nil {
-					t.Fatal(err)
-				}
-				var config struct {
-					Providers map[string]struct {
-						Models []struct {
-							ID            string `json:"id" yaml:"id"`
-							ContextWindow int    `json:"contextWindow" yaml:"contextWindow"`
-							MaxTokens     int    `json:"maxTokens" yaml:"maxTokens"`
-						} `json:"models" yaml:"models"`
-					} `json:"providers" yaml:"providers"`
-				}
-				if err := decode(data, &config); err != nil {
-					t.Fatal(err)
-				}
-				wantCount := 1
-				if withList {
-					wantCount = 2
-				}
-				entries := config.Providers[managedProvider].Models
-				if len(entries) != wantCount || entries[0].ID != "gpt-6-luna" || entries[0].MaxTokens != 128_000 {
-					t.Fatalf("output limit not projected: %+v", entries)
-				}
-				if withList && (entries[1].ID != "custom" || entries[1].MaxTokens != models.FallbackMaxTokensCeiling ||
-					entries[0].ContextWindow != 256_000 || entries[1].ContextWindow != 256_000) {
-					t.Fatalf("output limits mixed with context windows or another model: %+v", entries)
-				}
-			})
+func TestSupportedTools(t *testing.T) {
+	sandboxHome(t)
+	var names []string
+	for _, tool := range All() {
+		names = append(names, tool.Name)
+	}
+	if got := strings.Join(names, ","); got != "codex,claude,opencode,pi,grok" {
+		t.Fatalf("registered tools = %s", got)
+	}
+}
+
+func TestPiOutputLimits(t *testing.T) {
+	for _, withList := range []bool{false, true} {
+		mode := "single"
+		if withList {
+			mode = "list"
 		}
+		t.Run(mode, func(t *testing.T) {
+			home := sandboxHome(t)
+			spec := AuthSpec{Endpoint: "https://gateway.example/v1", Key: "sk-test", Model: "gpt-6-luna"}
+			if withList {
+				spec.Models = []ModelSpec{
+					{Slug: "gpt-6-luna", ContextWindow: 256_000},
+					{Slug: "custom", ContextWindow: 256_000},
+				}
+			}
+			if err := Find("pi").ApplyAuth(spec); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filepath.Join(home, ".pi", "agent", "models.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var config struct {
+				Providers map[string]struct {
+					Models []struct {
+						ID            string `json:"id"`
+						ContextWindow int    `json:"contextWindow"`
+						MaxTokens     int    `json:"maxTokens"`
+					} `json:"models"`
+				} `json:"providers"`
+			}
+			if err := json.Unmarshal(data, &config); err != nil {
+				t.Fatal(err)
+			}
+			wantCount := 1
+			if withList {
+				wantCount = 2
+			}
+			entries := config.Providers[managedProvider].Models
+			if len(entries) != wantCount || entries[0].ID != "gpt-6-luna" || entries[0].MaxTokens != 128_000 {
+				t.Fatalf("output limit not projected: %+v", entries)
+			}
+			if withList && (entries[1].ID != "custom" || entries[1].MaxTokens != models.FallbackMaxTokensCeiling ||
+				entries[0].ContextWindow != 256_000 || entries[1].ContextWindow != 256_000) {
+				t.Fatalf("output limits mixed with context windows or another model: %+v", entries)
+			}
+		})
 	}
 }
 
@@ -1343,248 +1350,4 @@ func configContents(t *testing.T, home string) string {
 		t.Fatal(err)
 	}
 	return b.String()
-}
-
-func TestOmpDescribeAndApply(t *testing.T) {
-	home := sandboxHome(t)
-	modelsPath := filepath.Join(home, ".omp", "agent", "models.yml")
-	configPath := filepath.Join(home, ".omp", "agent", "config.yml")
-	writeFile(t, modelsPath, `# user comment stays
-providers:
-  mine:
-    baseUrl: https://mine.example/v1 # inline comment stays
-    apiKey: sk-mine
-    api: openai-completions
-    models:
-      - id: mine-model
-        name: Mine Model
-  charon:
-    baseUrl: https://old.example/v1
-    apiKey: sk-old
-    api: openai-completions
-    models:
-      - id: old-slug
-        name: old-slug
-`)
-	writeFile(t, configPath, `theme:
-  dark: titanium
-modelRoles:
-  default: charon/old-slug
-  smol: mine/mine-model
-defaultThinkingLevel: high
-`)
-
-	c := Find("omp")
-	if c == nil {
-		t.Fatal("omp tool should be registered")
-	}
-	if !c.Detected() {
-		t.Fatal("omp should be detected via models.yml")
-	}
-
-	info, err := c.Describe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Model != "old-slug" || info.Endpoint != "https://old.example/v1" || info.Secret != "sk-old" || info.AuthMode != "api" || info.Effort != "high" {
-		t.Errorf("before apply: %+v", info)
-	}
-
-	if err := c.ApplyAuth(AuthSpec{
-		Endpoint: "https://gateway.example/v1",
-		Key:      "sk-gw-123456789",
-		Model:    "kimi-k2",
-		Models:   specsFromIDs([]string{"kimi-k2", "glm-4.6"}),
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	info, err = c.Describe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Model != "kimi-k2" || info.Endpoint != "https://gateway.example/v1" || info.Secret != "sk-gw-123456789" || info.AuthMode != "api" {
-		t.Errorf("after apply: %+v", info)
-	}
-
-	var models struct {
-		Providers map[string]struct {
-			BaseURL string `yaml:"baseUrl"`
-			APIKey  string `yaml:"apiKey"`
-			API     string `yaml:"api"`
-			Models  []struct {
-				ID   string `yaml:"id"`
-				Name string `yaml:"name"`
-			} `yaml:"models"`
-		} `yaml:"providers"`
-	}
-	data, err := os.ReadFile(modelsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := yaml.Unmarshal(data, &models); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "# user comment stays") {
-		t.Error("apply dropped the user's comment")
-	}
-	if !strings.Contains(string(data), "# inline comment stays") {
-		t.Error("apply dropped the user's inline comment")
-	}
-	mine := models.Providers["mine"]
-	if mine.BaseURL != "https://mine.example/v1" || mine.APIKey != "sk-mine" || mine.API != "openai-completions" || len(mine.Models) != 1 || mine.Models[0].ID != "mine-model" {
-		t.Errorf("user provider changed: %+v", mine)
-	}
-	charon := models.Providers["charon"]
-	if charon.BaseURL != "https://gateway.example/v1" || charon.APIKey != "sk-gw-123456789" || charon.API != "openai-completions" {
-		t.Errorf("charon provider = %+v", charon)
-	}
-	ids := make([]string, 0, len(charon.Models))
-	for _, m := range charon.Models {
-		ids = append(ids, m.ID)
-	}
-	if got := strings.Join(ids, ","); got != "kimi-k2,glm-4.6" {
-		t.Errorf("charon models = %q, want the replacement list", got)
-	}
-
-	var cfg struct {
-		Theme struct {
-			Dark string `yaml:"dark"`
-		} `yaml:"theme"`
-		ModelRoles           map[string]string `yaml:"modelRoles"`
-		DefaultThinkingLevel string            `yaml:"defaultThinkingLevel"`
-	}
-	cfgData, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := yaml.Unmarshal(cfgData, &cfg); err != nil {
-		t.Fatal(err)
-	}
-	if cfg.ModelRoles["default"] != "charon/kimi-k2" {
-		t.Errorf("modelRoles.default = %q, want charon/kimi-k2", cfg.ModelRoles["default"])
-	}
-	if cfg.ModelRoles["smol"] != "mine/mine-model" || cfg.Theme.Dark != "titanium" || cfg.DefaultThinkingLevel != "high" {
-		t.Errorf("apply rewrote unrelated config.yml keys: %+v", cfg)
-	}
-}
-
-func TestOmpApplyWithoutListKeepsRegisteredModels(t *testing.T) {
-	home := sandboxHome(t)
-	modelsPath := filepath.Join(home, ".omp", "agent", "models.yml")
-	configPath := filepath.Join(home, ".omp", "agent", "config.yml")
-	writeFile(t, modelsPath, `providers:
-  charon:
-    baseUrl: https://one.example/v1
-    apiKey: sk-one
-    api: openai-completions
-    models:
-      - id: kimi-k2
-        name: kimi-k2
-        maxTokens: 32000
-        customSetting: kept
-      - id: glm-4.6
-        name: glm-4.6
-`)
-
-	c := Find("omp")
-	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://two.example/v1", Key: "sk-two", Model: "glm-4.6"}); err != nil {
-		t.Fatal(err)
-	}
-
-	var models struct {
-		Providers map[string]struct {
-			BaseURL string `yaml:"baseUrl"`
-			APIKey  string `yaml:"apiKey"`
-			Models  []struct {
-				ID            string `yaml:"id"`
-				MaxTokens     int    `yaml:"maxTokens"`
-				CustomSetting string `yaml:"customSetting"`
-			} `yaml:"models"`
-		} `yaml:"providers"`
-	}
-	data, err := os.ReadFile(modelsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := yaml.Unmarshal(data, &models); err != nil {
-		t.Fatal(err)
-	}
-	charon := models.Providers["charon"]
-	ids := make([]string, 0, len(charon.Models))
-	for _, m := range charon.Models {
-		ids = append(ids, m.ID)
-	}
-	if got := strings.Join(ids, ","); got != "kimi-k2,glm-4.6" {
-		t.Errorf("registered models = %q, want the previous list kept", got)
-	}
-	if len(charon.Models) != 2 || charon.Models[0].MaxTokens != 32000 || charon.Models[0].CustomSetting != "kept" {
-		t.Errorf("existing output limit or custom metadata changed: %+v", charon.Models)
-	}
-	if charon.BaseURL != "https://two.example/v1" || charon.APIKey != "sk-two" {
-		t.Errorf("charon provider = %+v", charon)
-	}
-
-	var cfg struct {
-		ModelRoles map[string]string `yaml:"modelRoles"`
-	}
-	cfgData, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("config.yml should be created: %v", err)
-	}
-	if err := yaml.Unmarshal(cfgData, &cfg); err != nil {
-		t.Fatal(err)
-	}
-	if cfg.ModelRoles["default"] != "charon/glm-4.6" {
-		t.Errorf("modelRoles.default = %q, want charon/glm-4.6", cfg.ModelRoles["default"])
-	}
-}
-
-func TestOmpRefusesNonMappingProviders(t *testing.T) {
-	for _, content := range []string{"providers: []\n", "providers: {charon: {models: {}}}\n"} {
-		t.Run(content, func(t *testing.T) {
-			home := sandboxHome(t)
-			modelsPath := filepath.Join(home, ".omp", "agent", "models.yml")
-			writeFile(t, modelsPath, content)
-			c := Find("omp")
-			if err := c.ApplyAuth(AuthSpec{Endpoint: "https://x.example/v1", Key: "sk-x", Model: "m"}); err == nil {
-				t.Fatal("expected a refusal for invalid providers/models")
-			}
-			data, err := os.ReadFile(modelsPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if string(data) != content {
-				t.Errorf("refused write still changed the file: %q", data)
-			}
-		})
-	}
-}
-
-func TestOmpDescribeIgnoresInactiveCharonProvider(t *testing.T) {
-	home := sandboxHome(t)
-	writeFile(t, filepath.Join(home, ".omp", "agent", "models.yml"), `providers:
-  charon:
-    baseUrl: https://gateway.example/v1
-    apiKey: sk-gw-123456789
-    api: openai-completions
-    models:
-      - id: kimi-k2
-        name: kimi-k2
-`)
-	writeFile(t, filepath.Join(home, ".omp", "agent", "config.yml"), `modelRoles:
-  default: mine/mine-model
-`)
-
-	c := Find("omp")
-	info, err := c.Describe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Model != "mine/mine-model" {
-		t.Errorf("model = %q, want the pinned non-charon role", info.Model)
-	}
-	if info.AuthMode != "none" || info.Endpoint != "(provider default)" || info.Secret != "" {
-		t.Errorf("inactive charon provider leaked into info: %+v", info)
-	}
 }

@@ -102,8 +102,52 @@ func TestPiSingleModelKeepsExplicitEffort(t *testing.T) {
 	if entry["reasoning"] != true || levels["max"] != "max" {
 		t.Fatalf("single model lost explicit thinking capability: %#v", entry)
 	}
-	if readPiProvider(t, home)["api"] != "openai-responses" {
-		t.Fatalf("Pi provider api = %#v, want openai-responses", readPiProvider(t, home)["api"])
+	if readPiProvider(t, home)["api"] != "openai-completions" {
+		t.Fatalf("Pi provider api = %#v, want openai-completions", readPiProvider(t, home)["api"])
+	}
+}
+
+func TestPiEndpointTypes(t *testing.T) {
+	for _, api := range []string{"", "openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai"} {
+		t.Run("api="+api, func(t *testing.T) {
+			home := sandboxHome(t)
+			tool := Find("pi")
+			spec := AuthSpec{Endpoint: "https://example.test/v1", Key: "sk-test", Model: "custom", PiAPI: api}
+			if err := tool.ApplyAuth(spec); err != nil {
+				t.Fatal(err)
+			}
+			want := api
+			if want == "" {
+				want = "openai-completions"
+			}
+			if got := readPiProvider(t, home)["api"]; got != want {
+				t.Fatalf("api = %v, want %s", got, want)
+			}
+			paths := []string{
+				filepath.Join(home, ".pi", "agent", "models.json"),
+				filepath.Join(home, ".pi", "agent", "settings.json"),
+			}
+			for _, invalid := range []string{"openai-responses-compact", "unknown"} {
+				before := make([][]byte, len(paths))
+				for i, path := range paths {
+					before[i], _ = os.ReadFile(path)
+				}
+				spec.PiAPI = invalid
+				if err := tool.ApplyAuth(spec); err == nil {
+					t.Fatalf("accepted unsupported API %q", invalid)
+				}
+				for i, path := range paths {
+					after, err := os.ReadFile(path)
+					if err != nil || !bytes.Equal(before[i], after) {
+						t.Fatalf("invalid API changed %s: %v", path, err)
+					}
+					info, err := os.Stat(path)
+					if err != nil || info.Mode().Perm() != 0o600 {
+						t.Fatalf("unsafe permissions for %s: %v", path, err)
+					}
+				}
+			}
+		})
 	}
 }
 

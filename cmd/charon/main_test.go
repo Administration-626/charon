@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"charon/internal/catalog"
+	"charon/internal/tools"
 )
 
 func TestUpdateHelpers(t *testing.T) {
@@ -113,6 +114,7 @@ func TestRunRejectsUnknownCommandAndTool(t *testing.T) {
 	for _, args := range [][]string{
 		{"rm", "faketool", "x"},
 		{"switch", "faketool", "x"},
+		{"switch", "omp", "x"},
 		{"edit", "faketool", "x"},
 		{"ls", "faketool"},
 		{"cp", "faketool", "a", "b"},
@@ -312,6 +314,34 @@ func TestRunCopyBindingAcrossTools(t *testing.T) {
 	}
 	if slugs, err := c.ModelSlugs(copied.Models); err != nil || strings.Join(slugs, ",") != "kimi-k2,glm-4.6" {
 		t.Fatalf("copied models = %v, err=%v; want kimi-k2,glm-4.6 for Codex", slugs, err)
+	}
+}
+
+func TestRunPreservesPiEndpointType(t *testing.T) {
+	sandbox(t)
+	c := openCatalog(t)
+	if _, err := catalog.StoreBinding(c, tools.Find("pi"), nil, "work", "https://example.test", "sk-test", "custom", nil, false, nil, "anthropic-messages"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		args []string
+		tool string
+		name string
+		api  string
+	}{
+		{[]string{"edit", "pi", "work", "--key", "sk-rotated"}, "pi", "work", "anthropic-messages"},
+		{[]string{"rename", "pi", "work", "renamed"}, "pi", "renamed", "anthropic-messages"},
+		{[]string{"cp", "pi", "renamed", "copy"}, "pi", "copy", "anthropic-messages"},
+		{[]string{"cp", "pi", "renamed", "claude", "copy"}, "claude", "copy", ""},
+		{[]string{"cp", "claude", "copy", "pi", "from-claude"}, "pi", "from-claude", "openai-completions"},
+	} {
+		if err := run(tc.args); err != nil {
+			t.Fatal(err)
+		}
+		b, found, err := c.BindingByName(tc.tool, tc.name)
+		if err != nil || !found || b.PiAPI != tc.api {
+			t.Fatalf("%v: API = %q, found=%v, err=%v", tc.args, b.PiAPI, found, err)
+		}
 	}
 }
 

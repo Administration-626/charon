@@ -523,3 +523,51 @@ func TestProjectIfActiveUsesCurrentBindingAndSkipsInactive(t *testing.T) {
 		t.Fatalf("active = %+v, found=%v, err=%v", active, found, err)
 	}
 }
+
+func TestRetiredToolBindingIsPreservedAndNotProjected(t *testing.T) {
+	c := openTest(t)
+	_, cr := seed(t, c, "https://example.test/v1", "sk-test", "custom")
+	b, err := c.AddBinding("omp", "legacy", cr.ID, "custom", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An older Charon could have left this tool active before support was removed.
+	if err := c.writeActive(map[string]string{"omp": b.ID}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(os.Getenv("HOME"), ".omp", "agent", "models.yml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("# existing user config\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{path}
+	for _, file := range []string{"bindings.json", "active.json", "providers.json", "credentials.json", "models.json"} {
+		paths = append(paths, c.table(file))
+	}
+	before := make(map[string]string, len(paths))
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[path] = string(data)
+	}
+	reopened, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applied, err := reopened.ProjectIfActive(b.ID); err != nil || applied {
+		t.Fatalf("retired tool should be skipped: applied=%v, err=%v", applied, err)
+	}
+	if _, err := reopened.Reapply(b.ID); err == nil || !strings.Contains(err.Error(), "unknown tool") {
+		t.Fatalf("explicit reapply should reject a retired tool: %v", err)
+	}
+	for path, want := range before {
+		data, err := os.ReadFile(path)
+		if err != nil || string(data) != want {
+			t.Fatalf("retiring tool changed %s: %v", path, err)
+		}
+	}
+}

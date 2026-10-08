@@ -6,7 +6,7 @@
 |---|---|---|
 | `cmd/charon/` | CLI 入口、子命令分发、shell 补全 | `cmd/charon/main.go`、`commands.go`、`completions.go` |
 | `internal/catalog/` | provider、credential、model、binding、active 指针和投影 | `internal/catalog/*.go` |
-| `internal/tools/` | Codex、Claude、OpenCode、Pi、omp、Grok 的配置适配器 | `internal/tools/tool.go`、各工具文件 |
+| `internal/tools/` | Codex、Claude、OpenCode、Pi、Grok 的配置适配器 | `internal/tools/tool.go`、各工具文件 |
 | `internal/models/` | 远端模型列表获取和上下文窗口规则 | `internal/models/fetch.go`、`builtin.go` |
 | `internal/artifact/` | 临时文件、同步、权限、rename 原子写入 | `internal/artifact/artifact.go` |
 | `internal/secret/` | 密钥遮罩和平台密钥链读取 | `internal/secret/` |
@@ -27,8 +27,8 @@
 | 边界 | 属于这里的职责 | 不应放入这里的职责 |
 |---|---|---|
 | `cmd/charon` | 参数解析、输出、调用应用服务 | 工具配置格式细节、目录表完整性规则 |
-| `internal/tui` | 键盘事件、视图状态、表单和选择器 | 直接解析六种工具配置 |
-| `internal/catalog` | 本地目录模型、绑定校验、锁、激活和投影编排 | 具体 JSON/TOML/YAML 字段渲染 |
+| `internal/tui` | 键盘事件、视图状态、表单和选择器 | 直接解析五种工具配置 |
+| `internal/catalog` | 本地目录模型、绑定校验、锁、激活和投影编排 | 具体 JSON/TOML 字段渲染 |
 | `internal/tools` | 每个工具的检测、描述、ApplyAuth、配置合并 | 绑定持久化和 CLI 参数解析 |
 | `internal/models` | `/v1/models` 请求、方言重试、上下文窗口推断 | 修改工具配置 |
 | `internal/artifact` | 通用原子文件替换 | 业务字段和认证策略 |

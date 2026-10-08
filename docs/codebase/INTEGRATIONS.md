@@ -8,7 +8,6 @@
 | Claude Code | 本地 CLI 配置和 macOS Keychain | 写入 `settings.json`；读取 OAuth 账户状态 | 官方 endpoint 使用 API key；自定义 endpoint 使用 `ANTHROPIC_AUTH_TOKEN` | 高 | `internal/tools/claude.go`、`internal/secret/keychain_darwin.go` |
 | OpenCode | 本地 JSONC/JSON 配置 | 写入 `provider.charon` | provider `apiKey` | 高 | `internal/tools/opencode.go` |
 | Pi | 本地 JSON 配置 | 写入 `models.json` 的 `providers.charon` 和默认模型；安全迁移旧版生成的扩展 | provider `apiKey` | 高 | `internal/tools/pi.go` |
-| Oh My Pi | 本地 YAML 配置 | 写入 `providers.charon` 和默认角色 | provider `apiKey` | 高 | `internal/tools/omp.go` |
 | Grok | 本地 TOML 配置 | 管理 `[model.charon-*]` 和默认模型 | model `api_key` | 高 | `internal/tools/grok.go` |
 | OpenAI/Anthropic 兼容 endpoint | HTTP API | 获取 `/v1/models` | Bearer、`x-api-key` 和 Anthropic 版本头；按方言重试 | 中 | `internal/models/fetch.go`、`cmd/charon/commands.go` |
 | GitHub Releases | HTTP 下载 | `charon update` 下载 `charon_<os>_<arch>.tar.gz` 和 `checksums.txt`，本地校验后原地替换二进制；不执行远程脚本 | HTTPS；SHA-256 校验 release 自带的 `checksums.txt` | 中 | `cmd/charon/commands.go`、`.goreleaser.yaml` |
@@ -34,7 +33,7 @@
 
 - 模型 HTTP 请求设置 20 秒 context timeout；跨主机重定向会删除认证头；没有重试或熔断。证据：`internal/models/fetch.go`。
 - 模型发现失败时，TUI 切换到手动输入模型 ID；CLI 直接返回错误。证据：`internal/tui/picker.go`、`cmd/charon/commands.go`。
-- 目标配置写入通过临时文件、`Sync`、`Chmod`、`Rename`；omp 的两份 YAML 配置仍然分两次写入。证据：`internal/artifact/artifact.go`、`internal/tools/omp.go`。
+- 目标配置写入通过临时文件、`Sync`、`Chmod`、`Rename`；Pi 的两份 JSON 配置仍然分两次写入。证据：`internal/artifact/artifact.go`、`internal/tools/pi.go`。
 
 ## 5) 可观测性
 

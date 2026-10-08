@@ -10,10 +10,13 @@ import (
 // StoreBinding writes the provider, credential, and model rows a binding needs, then
 // adds or updates the binding itself. modelsExplicit is true when the caller passed a
 // model list; otherwise an existing binding keeps its list, and a new one stores only
-// the default slug.
-func StoreBinding(cat *Catalog, t *tools.Tool, existing *Binding, name, endpoint, key, model string, modelList []string, modelsExplicit bool, manualWindows map[string]int) (Binding, error) {
+// the default slug. piAPI optionally sets Pi's request protocol.
+func StoreBinding(cat *Catalog, t *tools.Tool, existing *Binding, name, endpoint, key, model string, modelList []string, modelsExplicit bool, manualWindows map[string]int, piAPI ...string) (Binding, error) {
 	if t == nil {
 		return Binding{}, fmt.Errorf("tool is required")
+	}
+	if _, err := bindingPiAPI(t.Name, "", piAPI); err != nil {
+		return Binding{}, err
 	}
 	if existing == nil {
 		if err := validateName(name); err != nil {
@@ -91,9 +94,25 @@ func StoreBinding(cat *Catalog, t *tools.Tool, existing *Binding, name, endpoint
 	}
 
 	if existing == nil {
-		return cat.AddBinding(t.Name, name, cr.ID, model, slugs)
+		return cat.AddBinding(t.Name, name, cr.ID, model, slugs, piAPI...)
 	}
-	return cat.UpdateBinding(existing.ID, name, cr.ID, model, slugs)
+	return cat.UpdateBinding(existing.ID, name, cr.ID, model, slugs, piAPI...)
+}
+
+func bindingPiAPI(tool, current string, override []string) (string, error) {
+	if len(override) > 1 {
+		return "", fmt.Errorf("at most one Pi endpoint type is allowed")
+	}
+	if len(override) == 1 {
+		current = override[0]
+	}
+	if tool != "pi" {
+		if current != "" {
+			return "", fmt.Errorf("endpoint type selection is only supported for Pi")
+		}
+		return "", nil
+	}
+	return tools.ResolvePiAPI(current)
 }
 
 func contains(ss []string, s string) bool {

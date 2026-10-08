@@ -29,6 +29,14 @@ func (m model) modelMenuNote() string {
 }
 
 func (m model) endpointHint(endpoint string) string {
+	if m.tool != nil && m.tool.Name == "pi" {
+		switch m.wiz.piAPI {
+		case "google-generative-ai":
+			return hintStyle.Render("Gemini: use the provider's base URL; type model IDs manually.")
+		case "anthropic-messages":
+			return ""
+		}
+	}
 	if tools.EndpointHasClaudeV1(m.tool, endpoint) {
 		return warnStyle.Render("Warning: this URL includes /v1; Claude Code requests /v1/messages. Confirm the gateway base URL.")
 	}
@@ -173,6 +181,33 @@ func (m model) View() string {
 				}
 				inputStr := hintStyle.Render(inputVal)
 				formLines = append(formLines, bar+labelStr+inputStr)
+			}
+		}
+
+		if m.tool.Name == "pi" {
+			label := piAPILabel(m.wiz.piAPI)
+			row := "Endpoint Type: [ " + label + " ]"
+			if m.formFocus == focusPiAPI {
+				formLines = append(formLines, promptStyle.Render("▌ "+row))
+			} else {
+				formLines = append(formLines, "  "+hintStyle.Render("Endpoint Type: [ ")+promptStyle.Render(label)+hintStyle.Render(" ]"))
+			}
+			if m.piAPIOpen {
+				for i, option := range piAPIOptions {
+					mark := "[ ] "
+					if option.api == m.wiz.piAPI {
+						mark = "[✓] "
+					}
+					row := mark + option.label
+					if i == m.piAPICursor {
+						row = promptStyle.Render("  > " + row)
+					} else if option.api == m.wiz.piAPI {
+						row = promptStyle.Render("    " + row)
+					} else {
+						row = hintStyle.Render("    " + row)
+					}
+					formLines = append(formLines, row)
+				}
 			}
 		}
 

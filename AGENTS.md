@@ -1,15 +1,15 @@
 # AGENTS.md
 
 Guidance for AI coding agents (and humans) working in this repository.
-`charon` is a small Go CLI that detects the Codex, Claude Code, OpenCode, Pi, Oh My
-Pi (omp), and Grok CLIs and switches each one's **endpoint + credentials** between
+`charon` is a small Go CLI that detects the Codex, Claude Code, OpenCode, Pi,
+and Grok CLIs and switches each one's **endpoint + credentials** between
 named bindings.
 
 ## Golden rule: this tool edits real user credentials
 
 `charon` reads and writes live config for other tools (`~/.codex`, `~/.claude`,
-`~/.config/opencode`, `~/.local/share/opencode`, `~/.pi/agent`, `~/.grok`,
-`~/.omp/agent`). It stores API keys of its own under `~/.config/charon/`.
+`~/.config/opencode`, `~/.local/share/opencode`, `~/.pi/agent`, `~/.grok`).
+It stores API keys of its own under `~/.config/charon/`.
 
 - **Never** run `charon add`, `charon switch`, `charon edit`, or the interactive menu
   against your real `$HOME` while developing. Always sandbox:
@@ -48,8 +48,8 @@ internal/artifact/  atomic writes
 internal/tools/     per-tool adapters
   tool.go           Tool struct, AuthSpec, registry (All/Find)
   providers.go      guards for the shared "charon" provider entry (codex/opencode)
-  edit.go           JSON/TOML/YAML load-merge-write helpers (preserve unknown keys)
-  codex.go / claude.go / opencode.go / pi.go / omp.go / grok.go   one file per tool
+  edit.go           JSON/TOML load-merge-write helpers (preserve unknown keys)
+  codex.go / claude.go / opencode.go / pi.go / grok.go   one file per tool
 internal/catalog/   the store: providers, credentials, models, bindings, active pointer
 internal/models/    fetch model lists from a provider API (openai/anthropic wire)
 internal/secret/    masking
@@ -93,8 +93,8 @@ provider name `"charon"`).
 ### Model lists (`AuthSpec.Models`)
 
 A binding's model list is what charon registers in the **tool's own** model picker
-(Codex `custom_models.json`, Claude `modelPicker`, OpenCode `provider.charon.models`, Pi `models.json` → `providers.charon.models`, omp
-`providers.charon.models`, Grok `[model.charon-<slug>]`), so switching model
+(Codex `custom_models.json`, Claude `modelPicker`, OpenCode `provider.charon.models`,
+Pi `models.json` → `providers.charon.models`, Grok `[model.charon-<slug>]`), so switching model
 mid-session doesn't need charon. It is passed to `ApplyAuth` as
 `AuthSpec.Models`. Two rules a new tool must honor:
 
@@ -112,9 +112,14 @@ the global `model_context_window`, which would override those per-model windows.
 A single built-in OpenAI model at the official endpoint still uses Codex's native
 catalog when no explicit window override is needed.
 
-Which wire dialect an endpoint speaks is **not stored**. `models.Fetch` is called
+The model-discovery wire dialect is **not stored**. `models.Fetch` is called
 twice when listing models — the tool's historical dialect first, then the other —
 and the winner is not persisted.
+Pi bindings separately store an optional `piApi` request protocol, selected in the
+TUI and projected to `providers.charon.api`. An absent value means
+`openai-completions`; edits and copies within Pi must preserve explicitly saved
+types. Pi 1.0.4 does not support a separate Responses Compact API, so never offer
+it in the dropdown or write it as an API value.
 
 ### Built-in context windows (`internal/models/builtin.go`)
 

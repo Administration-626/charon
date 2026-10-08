@@ -144,8 +144,10 @@ type model struct {
 
 	footerKeys []key.Binding // keys the current screen answers to, shown in the bottom legend
 
-	formInputs []textinput.Model // native form inputs for Name, URL, Token, Model
-	formFocus  int               // index of focused form element (0: Name, 1: URL, 2: Token, 3: Model, 4: Save, 5: Cancel)
+	formInputs  []textinput.Model // native form inputs for Name, URL, Token, Model
+	formFocus   int               // focusName through focusCancel; non-Pi forms skip focusPiAPI
+	piAPIOpen   bool
+	piAPICursor int
 
 	spinner    spinner.Model
 	loadingMsg string      // playful line shown on the loading screen, picked per fetch
@@ -567,6 +569,9 @@ func (m *model) profileDetail(name string) string {
 	if extra > 0 {
 		detail += fmt.Sprintf(" +%d", extra)
 	}
+	if b.Tool == "pi" {
+		detail = piAPILabel(b.PiAPI) + " · " + detail
+	}
 	if active, ok, err := m.cat.Active(m.tool.Name); err == nil && ok && active.Name == name && m.tool.Describe != nil {
 		if info, err := m.tool.Describe(); err == nil {
 			detail = "saved: " + detail + " · live: " + info.Endpoint + " · " + info.Model
@@ -788,7 +793,7 @@ func (m model) onEditKey() (tea.Model, tea.Cmd) {
 		}
 	}
 	m.wiz = wizard{name: it.value, origName: it.value, edit: true,
-		endpoint: p.BaseURL, key: cr.Key, model: slug, models: slugs, windows: windows}
+		endpoint: p.BaseURL, key: cr.Key, model: slug, models: slugs, windows: windows, piAPI: b.PiAPI}
 	m.editField = ""
 	m.view = viewEditForm
 	m.clearStatus()
@@ -842,7 +847,7 @@ func (m model) startBackup(name string) (tea.Model, tea.Cmd) {
 		m.setStatus(statusErr, err.Error())
 		return m, nil
 	}
-	if _, err := m.cat.AddBinding(b.Tool, newName, b.CredentialID, slug, slugs); err != nil {
+	if _, err := m.cat.AddBinding(b.Tool, newName, b.CredentialID, slug, slugs, b.PiAPI); err != nil {
 		m.setStatus(statusErr, err.Error())
 		return m, nil
 	}
@@ -889,7 +894,11 @@ func (m model) copyBindingToTool(src, toolName string) error {
 		names[i] = row.Name
 	}
 	dst := nextDuplicateName(names, src)
-	_, err = catalog.StoreBinding(m.cat, dstTool, nil, dst, p.BaseURL, cr.Key, slug, slugs, true, nil)
+	piAPI := ""
+	if dstTool.Name == "pi" && b.Tool == "pi" {
+		piAPI = b.PiAPI
+	}
+	_, err = catalog.StoreBinding(m.cat, dstTool, nil, dst, p.BaseURL, cr.Key, slug, slugs, true, nil, piAPI)
 	return err
 }
 
