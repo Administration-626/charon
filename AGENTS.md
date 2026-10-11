@@ -131,6 +131,23 @@ it in the dropdown or write it as an API value.
 - When extending or updating built-in rules, reference WorkBuddy model presets or official vendor specifications.
   Use `scripts/extract_workbuddy_models.py --mainstream --format go` to extract up-to-date mappings from WorkBuddy's installation archive (`docs/workbuddy-context-sync.md`).
 
+### Built-in thinking presets (`internal/models/thinking.go`)
+
+- `LookupThinkingPreset` returns a vendor's verified thinking-level map plus OpenAI-completions
+  compat flags (thinking format, `max_tokens` field, reasoning-content tagging) for recognized
+  families. Pi tool generation merges them into `providers.charon.models` entries so each model
+  offers exactly the levels its vendor supports (and pi sends the right request shape through a
+  gateway, where its baseUrl fingerprinting cannot detect the vendor).
+- Presets are curated from WorkBuddy (`scripts/extract_workbuddy_models.py --thinking`); official
+  vendor channels win over hosts and aggregators. Claude presets bind to `anthropic-messages`
+  bindings only (their official maps are dialect-specific and adaptive-thinking requires an
+  explicit compat flag pi cannot infer at a gateway); MiniMax and Muse stay unpreset (no
+  authoritative OpenAI-compatible dialect data); MiMo is a toggle-only preset (compat flags
+  only, no level map); Grok presets carry an explicit `supportsReasoningEffort: false` since pi
+  only knows xAI's rejection behind its endpoint fingerprint.
+- Manual per-model maps (`catalog.Model.ThinkingLevelMap`, set via the TUI thinking-map field)
+  always win over presets; unknown models keep the generic off/xhigh/max fallback.
+
 ## Conventions
 
 - Standard Go style: `gofmt`/`goimports`, tabs, error wrapping with `%w`,

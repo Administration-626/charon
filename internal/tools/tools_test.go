@@ -972,12 +972,13 @@ func TestNotDetectedInEmptyHome(t *testing.T) {
 
 func TestPiBuildModelsEnablesThinkingByDefault(t *testing.T) {
 	for _, slug := range []string{"gpt-5.6-luna", "gpt-4o", "moonshotai/kimi-k3", "z-ai/glm-5.3-flash"} {
-		models := piBuildModels([]ModelSpec{{Slug: slug}})
-		if len(models) != 1 || !models[0].Reasoning {
-			t.Fatalf("%s reasoning = %#v, want true", slug, models)
+		built := piBuildModels([]ModelSpec{{Slug: slug}}, "")
+		if len(built) != 1 || !built[0].Reasoning {
+			t.Fatalf("%s reasoning = %#v, want true", slug, built)
 		}
-		if len(models[0].ThinkingLevelMap) != 3 {
-			t.Fatalf("%s thinking levels = %#v, want off/xhigh/max", slug, models[0].ThinkingLevelMap)
+		// Vendor presets or the generic fallback both yield a usable level set.
+		if len(built[0].ThinkingLevelMap) == 0 {
+			t.Fatalf("%s thinking levels empty", slug)
 		}
 	}
 }

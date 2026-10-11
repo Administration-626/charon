@@ -165,6 +165,12 @@ const FallbackContextWindow = 500_000
 // inflated window from producing a request the upstream rejects outright.
 const FallbackMaxTokensCeiling = 65_536
 
+// matchBuiltinPattern reports whether a normalized slug matches a built-in
+// rule pattern: as a prefix, or as a hyphenated segment ("gateway-gpt-6-luna").
+func matchBuiltinPattern(norm, pattern string) bool {
+	return strings.HasPrefix(norm, pattern) || strings.Contains(norm, "-"+pattern)
+}
+
 // DefaultMaxTokens returns a model's maximum output tokens, independently of its
 // context window. Models without a verified output limit derive window/2 from
 // the builtin context window, capped at FallbackMaxTokensCeiling.
@@ -174,7 +180,7 @@ func DefaultMaxTokens(slug string) int {
 		return 0
 	}
 	for _, rule := range builtinModelWindows {
-		if rule.maxTokens > 0 && (strings.HasPrefix(norm, rule.pattern) || strings.Contains(norm, "-"+rule.pattern)) {
+		if rule.maxTokens > 0 && matchBuiltinPattern(norm, rule.pattern) {
 			return rule.maxTokens
 		}
 	}
@@ -203,7 +209,7 @@ func DefaultContextWindow(slug string) int {
 		return 0
 	}
 	for _, rule := range builtinModelWindows {
-		if strings.HasPrefix(norm, rule.pattern) || strings.Contains(norm, "-"+rule.pattern) {
+		if matchBuiltinPattern(norm, rule.pattern) {
 			return clampDefaultWindow(rule.window)
 		}
 	}
@@ -222,7 +228,7 @@ func clampDefaultWindow(window int) int {
 func IsReasoningBuiltin(slug string) bool {
 	norm := NormalizeSlug(slug)
 	for _, pattern := range builtinReasoningPatterns {
-		if strings.HasPrefix(norm, pattern) || strings.Contains(norm, "-"+pattern) {
+		if matchBuiltinPattern(norm, pattern) {
 			return true
 		}
 	}
@@ -237,7 +243,7 @@ func IsKnownBuiltin(slug string) bool {
 		return false
 	}
 	for _, rule := range builtinModelWindows {
-		if strings.HasPrefix(norm, rule.pattern) || strings.Contains(norm, "-"+rule.pattern) {
+		if matchBuiltinPattern(norm, rule.pattern) {
 			return true
 		}
 	}

@@ -5,8 +5,12 @@ extract_workbuddy_models.py
 Extracts model metadata, context window token limits, and max tokens from WorkBuddy's
 packaged app.asar file (located in Windows AppData / WSL mount) and user configuration.
 
+With --thinking it additionally extracts per-model thinking-level presets
+(thinkingLevelMap plus OpenAI-completions compat flags) for the charon built-in
+table in internal/models/thinking.go.
+
 Usage:
-    python3 scripts/extract_workbuddy_models.py [--asar /path/to/app.asar] [--format go|table|json] [--mainstream]
+    python3 scripts/extract_workbuddy_models.py [--asar /path/to/app.asar] [--format go|table|json] [--mainstream] [--thinking]
 """
 
 import argparse
@@ -120,6 +124,91 @@ def load_user_models(path: str):
         return {}
 
 
+def family_providers(slug: str) -> tuple:
+    """Official vendor channels for a model family, used to break channel ties
+    so e.g. glm rows prefer z.ai over qwen-token-plan at the same tier."""
+    if slug.startswith("deepseek"):
+        return ("deepseek",)
+    if slug.startswith("glm"):
+        return ("zai", "zai-coding-cn")
+    if slug.startswith("kimi"):
+        return ("moonshotai", "moonshotai-cn", "kimi-coding")
+    if slug.startswith(("gpt-", "o1", "o3", "o4")):
+        return ("openai", "openai-codex")
+    if slug.startswith("qwen"):
+        return ("qwen-token-plan", "qwen-token-plan-cn", "qwen-token-plan-individual")
+    return ()
+
+
+def parse_thinking_models(code_cache_text: str):
+    """
+    Parses model objects carrying thinkingLevelMap out of code-cache.js by
+    locating each occurrence, walking back to the enclosing {"id":" object,
+    and brace-balancing to the end of the object.
+    """
+    models = {}
+    for match in re.finditer(r'"thinkingLevelMap"', code_cache_text):
+        start = code_cache_text.rfind('{"id":"', 0, match.start())
+        if start < 0:
+            continue
+        depth, i, end, in_str, esc = 0, start, -1, False, False
+        while i < len(code_cache_text):
+            ch = code_cache_text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+            elif ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+            i += 1
+        if end < 0:
+            continue
+        try:
+            obj = json.loads(code_cache_text[start:end])
+        except json.JSONDecodeError:
+            continue
+        if not obj.get("thinkingLevelMap") or obj.get("api") not in ("openai-completions", "openai-responses"):
+            continue
+        slug = clean_slug(obj["id"]).lower()
+        if not any(slug.startswith(p) or f"-{p}" in slug for p in THINKING_FAMILIES):
+            continue
+        compat = {k: obj["compat"][k] for k in THINKING_COMPAT_KEYS if k in (obj.get("compat") or {})}
+        row = {"slug": slug, "id": obj["id"], "provider": obj.get("provider"), "api": obj.get("api"),
+               "thinkingLevelMap": obj["thinkingLevelMap"], "compat": compat}
+        tier = 1 if obj.get("provider") in THINKING_TIER1 else (3 if obj.get("provider") in THINKING_TIER3 else 2)
+        row["tier"] = tier
+        prev = models.get(slug)
+        rank = (tier, 0 if obj.get("provider") in family_providers(slug) else 1, obj.get("provider") or "", obj["id"])
+        if prev is None:
+            models[slug] = row
+        else:
+            prev_rank = (prev["tier"], 0 if prev["provider"] in family_providers(slug) else 1, prev["provider"] or "", prev["id"])
+            if rank < prev_rank:
+                models[slug] = row
+    return models
+
+
+def format_thinking_levels(levels: dict) -> str:
+    """Renders a thinkingLevelMap in charon's level=value TUI syntax."""
+    parts = []
+    for level in ("off", "minimal", "low", "medium", "high", "xhigh", "max"):
+        if level not in levels:
+            continue
+        value = levels[level]
+        parts.append(f"{level}=off" if value is None else f"{level}={value}")
+    return ",".join(parts)
+
+
 def is_mainstream(slug: str) -> bool:
     slug_lower = slug.lower()
     keywords = [
@@ -142,6 +231,22 @@ def is_mainstream(slug: str) -> bool:
         "qwen3",
     ]
     return any(k in slug_lower for k in keywords)
+
+
+# thinking presets are only curated for vendors whose own endpoints speak the
+# OpenAI-compatible reasoning dialect. Channel tiers: official vendor first,
+# then first-party hosts, aggregators last (their maps describe their own
+# routing, not the vendor API).
+THINKING_FAMILIES = ("gpt-", "o1", "o3", "o4", "deepseek-", "glm-", "kimi-", "qwen3")
+THINKING_TIER1 = {
+    "deepseek", "zai", "zai-coding-cn", "moonshotai", "moonshotai-cn", "kimi-coding",
+    "openai", "openai-codex", "qwen-token-plan", "qwen-token-plan-cn", "qwen-token-plan-individual",
+}
+THINKING_TIER3 = {"openrouter", "opencode", "opencode-go", "cloudflare-workers-ai"}
+THINKING_COMPAT_KEYS = (
+    "thinkingFormat", "supportsReasoningEffort", "maxTokensField",
+    "requiresReasoningContentOnAssistantMessages", "supportsStore", "supportsDeveloperRole",
+)
 
 
 def clean_slug(model_id: str) -> str:
@@ -175,6 +280,8 @@ def main():
     parser.add_argument("--user-models", help="Path to ~/.workbuddy/models.json")
     parser.add_argument("--format", choices=["table", "go", "json"], default="table")
     parser.add_argument("--mainstream", action="store_true", help="Filter for mainstream modern models")
+    parser.add_argument("--thinking", action="store_true",
+                        help="Extract thinking-level presets (thinkingLevelMap + compat) instead of context windows")
     args = parser.parse_args()
 
     asar_path = args.asar or find_default_asar()
@@ -211,6 +318,11 @@ def main():
     sorted_slugs = sorted(slug_map.keys())
 
     try:
+        if args.thinking:
+            thinking_models = parse_thinking_models(code_cache_text)
+            print(f"Extracted {len(thinking_models)} thinking presets from code-cache.js", file=sys.stderr)
+            emit_thinking(thinking_models, args)
+            return
         if args.format == "json":
             out = {k: slug_map[k] for k in sorted_slugs}
             print(json.dumps(out, indent=2, ensure_ascii=False))
@@ -238,6 +350,40 @@ def main():
         devnull = os.open(os.devnull, os.O_WRONLY)
         os.dup2(devnull, sys.stdout.fileno())
         sys.exit(0)
+
+
+def emit_thinking(models: dict, args):
+    """Prints thinking presets as a draft for internal/models/thinking.go."""
+    rows = [models[k] for k in sorted(models.keys())]
+    if args.mainstream:
+        rows = [r for r in rows if is_mainstream(r["slug"])]
+    if args.format == "json":
+        print(json.dumps(rows, indent=2, ensure_ascii=False))
+        return
+    if args.format == "table":
+        for r in rows:
+            print(f"{r['slug']:<36} {r['provider']:<22} {format_thinking_levels(r['thinkingLevelMap'])}")
+            if r["compat"]:
+                print(f"{'':<36} {'':<22} compat={json.dumps(r['compat'], sort_keys=True)}")
+        return
+    print("// draft rows generated from WorkBuddy extract;")
+    print("// curate into thinkingPresets (official channels win; skip aggregator-specific flags)")
+    for r in rows:
+        levels = format_thinking_levels(r["thinkingLevelMap"])
+        compat = r["compat"]
+        extra = []
+        if compat.get("thinkingFormat"):
+            extra.append(f'format: "{compat["thinkingFormat"]}"')
+        if "supportsReasoningEffort" in compat:
+            extra.append(f"effort: boolPtr({str(compat['supportsReasoningEffort']).lower()})")
+        if compat.get("maxTokensField"):
+            extra.append(f'maxTokens: "{compat["maxTokensField"]}"')
+        if compat.get("requiresReasoningContentOnAssistantMessages"):
+            extra.append("reasoningContent: true")
+        if compat.get("supportsStore") is False:
+            extra.append("noStore: true")
+        suffix = f", {', '.join(extra)}" if extra else ""
+        print(f'\t{{pattern: "{r["slug"]}", levels: "{levels}"{suffix}}}, // {r["provider"]}')
 
 
 if __name__ == "__main__":

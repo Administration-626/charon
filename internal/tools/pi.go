@@ -49,6 +49,7 @@ type piModel struct {
 	ContextWindow    int                `json:"contextWindow"`
 	MaxTokens        int                `json:"maxTokens"`
 	ThinkingLevelMap map[string]*string `json:"thinkingLevelMap,omitempty"`
+	Compat           *piCompat          `json:"compat,omitempty"`
 }
 
 type piCost struct {
@@ -76,19 +77,75 @@ func piEscapeValue(s string) string {
 	return s
 }
 
-// piThinkingLevelMap gives every Charon model Pi's standard thinking controls.
-// Charon has no authoritative per-model capability table, so extended levels are
-// passed through by name; explicit mappings (including null/disabled levels) win.
-func piThinkingLevelMap(spec ModelSpec) map[string]*string {
+// piCompat is the subset of pi's model compat object emitted when a vendor
+// thinking preset documents request-format differences. The thinkingFormat /
+// supports* keys belong to OpenAI-completions; ForceAdaptiveThinking belongs
+// to Anthropic-messages.
+type piCompat struct {
+	ThinkingFormat string `json:"thinkingFormat,omitempty"`
+	// Pointer so an explicit false is written while an unset flag is omitted.
+	SupportsReasoningEffort                     *bool  `json:"supportsReasoningEffort,omitempty"`
+	SupportsStore                               *bool  `json:"supportsStore,omitempty"`
+	SupportsDeveloperRole                       *bool  `json:"supportsDeveloperRole,omitempty"`
+	MaxTokensField                              string `json:"maxTokensField,omitempty"`
+	RequiresReasoningContentOnAssistantMessages bool   `json:"requiresReasoningContentOnAssistantMessages,omitempty"`
+	ForceAdaptiveThinking                       *bool  `json:"forceAdaptiveThinking,omitempty"`
+}
+
+// piCompatFor translates a vendor thinking preset into pi compat flags.
+// Nil (no preset) keeps pi's derived defaults for a generic endpoint.
+func piCompatFor(preset models.ThinkingPreset, found bool) *piCompat {
+	if !found {
+		return nil
+	}
+	c := &piCompat{
+		ThinkingFormat:          preset.Format,
+		SupportsReasoningEffort: preset.SupportsReasoningEffort,
+		MaxTokensField:          preset.MaxTokensField,
+		RequiresReasoningContentOnAssistantMessages: preset.RequiresReasoningContentOnAssistantMessages,
+	}
+	if preset.ForceAdaptiveThinking {
+		c.ForceAdaptiveThinking = boolPtr(true)
+	}
+	if preset.NoStore {
+		c.SupportsStore, c.SupportsDeveloperRole = boolPtr(false), boolPtr(false)
+	}
+	if c.ThinkingFormat == "" && c.SupportsReasoningEffort == nil && c.MaxTokensField == "" &&
+		!c.RequiresReasoningContentOnAssistantMessages && c.SupportsStore == nil && c.ForceAdaptiveThinking == nil {
+		return nil
+	}
+	return c
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+// piThinkingLevelMap gives every Charon model Pi's thinking controls.
+// Manual mappings (including null/disabled levels) win; otherwise a curated
+// vendor preset supplies the model's verified levels (empty for toggle-only
+// APIs like MiMo, where the map stays unset), and unknown models get Pi's
+// generic extended levels. api is the binding's Pi request protocol; dialect-
+// bound presets (Claude) only apply when it matches.
+func piThinkingLevelMap(spec ModelSpec, api string) map[string]*string {
 	if spec.ThinkingLevelMap != nil {
 		return spec.ThinkingLevelMap
+	}
+	if preset, ok := models.LookupThinkingPreset(spec.Slug, api); ok {
+		if len(preset.Levels) > 0 {
+			return preset.Levels
+		}
+		return nil // toggle-only vendor API: pi manages the switch via compat
 	}
 	off, xhigh, maxLevel := "none", "xhigh", "max"
 	return map[string]*string{"off": &off, "xhigh": &xhigh, "max": &maxLevel}
 }
 
-// piBuildModels turns a list of model ids into pi model entries.
-func piBuildModels(specs []ModelSpec) []piModel {
+// piBuildModels turns a list of model ids into pi model entries. api is the
+// provider's request protocol (ResolvePiAPI form); it selects dialect-bound
+// thinking presets and defaults to openai-completions.
+func piBuildModels(specs []ModelSpec, api string) []piModel {
+	if api == "" {
+		api = "openai-completions"
+	}
 	entries := make([]piModel, 0, len(specs))
 	for _, spec := range specs {
 		if spec.Slug == "" {
@@ -98,16 +155,19 @@ func piBuildModels(specs []ModelSpec) []piModel {
 		if window == 0 {
 			window = models.DefaultContextWindow(spec.Slug)
 		}
+		preset, hasPreset := models.LookupThinkingPreset(spec.Slug, api)
 		entries = append(entries, piModel{
 			ID:   spec.Slug,
 			Name: spec.Slug,
 			// Charon does not have authoritative per-model thinking metadata. Pi
-			// offers its standard thinking levels and lets the user turn them off.
+			// offers the model's vendor thinking levels (or the generic ones for
+			// unknown models) and lets the user turn them off.
 			Reasoning:        true,
 			Input:            []string{"text", "image"},
 			ContextWindow:    window,
 			MaxTokens:        models.DefaultMaxTokens(spec.Slug),
-			ThinkingLevelMap: piThinkingLevelMap(spec),
+			ThinkingLevelMap: piThinkingLevelMap(spec, api),
+			Compat:           piCompatFor(preset, hasPreset),
 		})
 	}
 	return entries
@@ -239,7 +299,7 @@ func newPi() *Tool {
 				if specs == nil && modelSlug != "" {
 					specs = []ModelSpec{{Slug: modelSlug, Effort: a.Effort}}
 				}
-				entries = piBuildModels(specs)
+				entries = piBuildModels(specs, api)
 			}
 			original := snapshotProviders(providers)
 			providers[managedProvider] = map[string]any{

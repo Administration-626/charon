@@ -66,3 +66,44 @@ python3 scripts/extract_workbuddy_models.py --mainstream --format go
 ```sh
 python3 scripts/extract_workbuddy_models.py --format json > /tmp/workbuddy_models.json
 ```
+
+---
+
+## 5. 思考档位（thinkingLevelMap）提取与同步
+
+WorkBuddy 的模型注册表还内置了每个模型在各自渠道上的思考档位映射
+（`thinkingLevelMap`，pi 的 7 级思考级别到厂商原生 effort 值的映射，`null`
+表示该级别不受支持）以及 OpenAI 兼容端点的请求格式差异（`compat`：
+`thinkingFormat`、`supportsReasoningEffort`、`maxTokensField` 等）。这些数据
+是 `internal/models/thinking.go` 内置思考预设表的源数据：
+
+```sh
+# 查看全部思考预设草稿（官方渠道优先，qwen/glm 等家族平级时偏好自家厂商渠道）
+python3 scripts/extract_workbuddy_models.py --thinking
+
+# 生成 Go 内置表草稿（人工策展后并入 thinkingPresets）
+python3 scripts/extract_workbuddy_models.py --thinking --format go
+
+# 完整 JSON（含渠道与 compat 明细）
+python3 scripts/extract_workbuddy_models.py --thinking --format json
+```
+
+策展规则（与上下文长度同步相同的精神）：
+
+1. **渠道优先级**：官方厂商渠道（deepseek/zai/moonshotai/openai/…）>
+   一方托管（baseten/fireworks/…）> 聚合器（openrouter/opencode/…）。
+   聚合器会改写 reasoning 协议，其映射只描述它自己的路由，不代表厂商 API。
+2. **只收 OpenAI 兼容方言**（`openai-completions`/`openai-responses`）。
+   Claude、Gemini、Grok 的官方端点不说这套方言，网关侧无权威预设，
+   保持缺省（通用扩展档位）。
+3. **模式匹配沿用内置上下文表的前缀规则**（`NormalizeSlug` + 前缀，
+   最长模式优先），因此模式同时覆盖带日期/变体后缀的别名
+   （`glm-5.3` 覆盖 `glm-5.3-flash`）。
+4. **手动设置永远优先**：目录里用户通过 `set-effort` / TUI thinking map
+   写入的手动映射不会被预设覆盖（`piThinkingLevelMap` 的既有语义）。
+5. **方言绑定**：Claude 的官方档位表是 anthropic-messages 语义（且全部
+   adaptive 模型需 `forceAdaptiveThinking` compat），只在该协议的绑定上
+   生效；openai-completions 绑定下同一 slug 保持通用兑底（聚合器改写过
+   的档位表不代表厂商 API）。MiniMax（官方仅 anthropic-messages 渠道）、
+   Muse（无官方渠道，仅聚合器数据）、grok-4.20（早于档位 API）不收录。
+   Gemini 同理。这些保持通用兑底，用户可在 TUI 手动补映射。

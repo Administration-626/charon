@@ -49,7 +49,14 @@ func legacyPiExtension(t *testing.T) []byte {
 
 func TestPiBuildModelsThinkingLevels(t *testing.T) {
 	none, xhigh, maxLevel, maximum := "none", "xhigh", "max", "maximum"
+	// Unknown models get the generic extended levels; known vendors get their
+	// curated preset (see internal/models/thinking.go).
 	defaultLevels := map[string]*string{"off": &none, "xhigh": &xhigh, "max": &maxLevel}
+	presetGPT6 := map[string]*string{"off": &none, "minimal": nil, "low": strPtr("low"), "medium": strPtr("medium"), "high": strPtr("high"), "xhigh": &xhigh, "max": &maxLevel}
+	lockedGPT6 := map[string]*string{"off": nil, "minimal": nil, "low": strPtr("low"), "medium": strPtr("medium"), "high": strPtr("high"), "xhigh": &xhigh, "max": &maxLevel}
+	kimiK3 := map[string]*string{"off": nil, "minimal": nil, "low": strPtr("low"), "medium": nil, "high": strPtr("high"), "xhigh": nil, "max": &maxLevel}
+	glm53 := map[string]*string{"off": nil, "minimal": nil, "low": strPtr("low"), "medium": nil, "high": strPtr("high"), "xhigh": nil, "max": &maxLevel}
+	o3levels := map[string]*string{"off": nil, "minimal": nil, "low": strPtr("low"), "medium": strPtr("medium"), "high": strPtr("high"), "xhigh": nil, "max": nil}
 	manualLevels := map[string]*string{"max": &maximum, "xhigh": nil}
 	for _, tc := range []struct {
 		name      string
@@ -57,28 +64,34 @@ func TestPiBuildModelsThinkingLevels(t *testing.T) {
 		reasoning bool
 		levels    map[string]*string
 	}{
-		{"luna", ModelSpec{Slug: "gpt-6-luna"}, true, defaultLevels},
-		{"sol", ModelSpec{Slug: "gpt-6-sol"}, true, defaultLevels},
-		{"astra", ModelSpec{Slug: "gpt-6-astra"}, true, defaultLevels},
-		{"sol 6.1", ModelSpec{Slug: "gpt-6.1-sol"}, true, defaultLevels},
-		{"namespaced", ModelSpec{Slug: "openai/gpt-6-luna:free"}, true, defaultLevels},
+		{"luna", ModelSpec{Slug: "gpt-6-luna"}, true, presetGPT6},
+		{"sol", ModelSpec{Slug: "gpt-6-sol"}, true, presetGPT6},
+		{"astra", ModelSpec{Slug: "gpt-6-astra"}, true, lockedGPT6},
+		{"sol 6.1", ModelSpec{Slug: "gpt-6.1-sol"}, true, lockedGPT6},
+		{"namespaced", ModelSpec{Slug: "openai/gpt-6-luna:free"}, true, presetGPT6},
 		{"manual map wins", ModelSpec{Slug: "gpt-6-luna", Effort: "max", ThinkingLevelMap: manualLevels}, true, manualLevels},
 		{"explicit empty map", ModelSpec{Slug: "gpt-6-luna", ThinkingLevelMap: map[string]*string{}}, true, map[string]*string{}},
 		{"custom max", ModelSpec{Slug: "custom", Effort: "max"}, true, defaultLevels},
 		{"custom xhigh", ModelSpec{Slug: "custom", Effort: "xhigh"}, true, defaultLevels},
 		{"custom mapping", ModelSpec{Slug: "custom", ThinkingLevelMap: manualLevels}, true, manualLevels},
-		{"older reasoning model", ModelSpec{Slug: "o3-mini"}, true, defaultLevels},
+		{"older reasoning model", ModelSpec{Slug: "o3-mini"}, true, o3levels},
 		{"known non-reasoning model", ModelSpec{Slug: "gpt-4o"}, true, defaultLevels},
 		{"unknown model", ModelSpec{Slug: "custom"}, true, defaultLevels},
-		{"kimi k3", ModelSpec{Slug: "moonshotai/kimi-k3"}, true, defaultLevels},
-		{"glm 5.3", ModelSpec{Slug: "z-ai/glm-5.3"}, true, defaultLevels},
+		{"kimi k3", ModelSpec{Slug: "moonshotai/kimi-k3"}, true, kimiK3},
+		{"glm 5.3", ModelSpec{Slug: "z-ai/glm-5.3"}, true, glm53},
+		{"glm 4.7", ModelSpec{Slug: "glm-4.7"}, true, map[string]*string{"off": &none}},
+		{"deepseek v4 pro", ModelSpec{Slug: "deepseek-v4-pro"}, true, map[string]*string{"minimal": nil, "low": nil, "medium": nil, "high": strPtr("high"), "max": &maxLevel}},
+		{"gpt 5.5", ModelSpec{Slug: "openai/gpt-5.5"}, true, map[string]*string{"off": &none, "minimal": nil, "low": strPtr("low"), "medium": strPtr("medium"), "high": strPtr("high"), "xhigh": &xhigh, "max": nil}},
+		// Toggle-only APIs (MiMo) and effort-rejecting vendors (Grok) stay mapless.
+		{"mimo toggle-only", ModelSpec{Slug: "xiaomi/mimo-v2.5"}, true, nil},
+		{"grok 4.5", ModelSpec{Slug: "grok-4.5"}, true, map[string]*string{"off": nil, "minimal": nil, "low": strPtr("low"), "medium": strPtr("medium"), "high": strPtr("high"), "xhigh": nil, "max": nil}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before, err := json.Marshal(tc.spec)
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := piBuildModels([]ModelSpec{tc.spec})
+			got := piBuildModels([]ModelSpec{tc.spec}, "")
 			if len(got) != 1 || got[0].Reasoning != tc.reasoning || !reflect.DeepEqual(got[0].ThinkingLevelMap, tc.levels) {
 				t.Fatalf("models = %+v, want reasoning=%v, levels=%v", got, tc.reasoning, tc.levels)
 			}
@@ -87,6 +100,115 @@ func TestPiBuildModelsThinkingLevels(t *testing.T) {
 				t.Fatal("building Pi models mutated the input spec")
 			}
 		})
+	}
+}
+
+// strPtr is a test helper for non-nil string map values.
+func strPtr(s string) *string { return &s }
+
+func TestPiCompatPresetProjectsVendorFormat(t *testing.T) {
+	home := sandboxHome(t)
+	if err := Find("pi").ApplyAuth(AuthSpec{
+		Endpoint: "https://gateway.example/v1", Key: "sk-test",
+		Models: []ModelSpec{{Slug: "deepseek-v4-pro"}, {Slug: "glm-5.3"}, {Slug: "custom"}, {Slug: "gpt-6-luna"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Providers map[string]struct {
+			Models []struct {
+				ID     string         `json:"id"`
+				Compat map[string]any `json:"compat"`
+			} `json:"models"`
+		} `json:"providers"`
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".pi", "agent", "models.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	compat := map[string]map[string]any{}
+	for _, m := range config.Providers[managedProvider].Models {
+		compat[m.ID] = m.Compat
+	}
+	deepseek := compat["deepseek-v4-pro"]
+	if deepseek["thinkingFormat"] != "deepseek" || deepseek["maxTokensField"] != "max_tokens" ||
+		deepseek["requiresReasoningContentOnAssistantMessages"] != true ||
+		deepseek["supportsStore"] != false || deepseek["supportsDeveloperRole"] != false {
+		t.Fatalf("deepseek compat = %#v", deepseek)
+	}
+	glm := compat["glm-5.3"]
+	if glm["thinkingFormat"] != "zai" || glm["supportsReasoningEffort"] != true || glm["maxTokensField"] != "max_tokens" {
+		t.Fatalf("glm compat = %#v", glm)
+	}
+	// Unknown models and plain-effort vendors carry no compat object.
+	if compat["custom"] != nil {
+		t.Fatalf("custom compat = %#v, want none", compat["custom"])
+	}
+	if compat["gpt-6-luna"] != nil {
+		t.Fatalf("gpt compat = %#v, want none", compat["gpt-6-luna"])
+	}
+}
+
+func TestPiClaudeDialectPreset(t *testing.T) {
+	home := sandboxHome(t)
+	models := []ModelSpec{{Slug: "claude-opus-5"}, {Slug: "claude-sonnet-5"}, {Slug: "claude-opus-4-6"}}
+	// Anthropic-dialect bindings get the official adaptive presets.
+	if err := Find("pi").ApplyAuth(AuthSpec{
+		Endpoint: "https://gateway.example/v1", Key: "sk-test", PiAPI: "anthropic-messages", Models: models,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	readCompat := func() (map[string]map[string]any, map[string]map[string]any) {
+		data, err := os.ReadFile(filepath.Join(home, ".pi", "agent", "models.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var config struct {
+			Providers map[string]struct {
+				Models []struct {
+					ID               string         `json:"id"`
+					ThinkingLevelMap map[string]any `json:"thinkingLevelMap"`
+					Compat           map[string]any `json:"compat"`
+				} `json:"models"`
+			} `json:"providers"`
+		}
+		if err := json.Unmarshal(data, &config); err != nil {
+			t.Fatal(err)
+		}
+		compat, maps := map[string]map[string]any{}, map[string]map[string]any{}
+		for _, m := range config.Providers[managedProvider].Models {
+			compat[m.ID] = m.Compat
+			maps[m.ID] = m.ThinkingLevelMap
+		}
+		return compat, maps
+	}
+	compat, maps := readCompat()
+	if maps["claude-opus-5"]["off"] != nil || maps["claude-opus-5"]["xhigh"] != "xhigh" {
+		t.Fatalf("opus-5 map = %#v, want locked xhigh/max", maps["claude-opus-5"])
+	}
+	for _, slug := range []string{"claude-opus-5", "claude-sonnet-5", "claude-opus-4-6"} {
+		if compat[slug]["forceAdaptiveThinking"] != true {
+			t.Fatalf("%s compat = %#v, want forceAdaptiveThinking", slug, compat[slug])
+		}
+	}
+	// The same slugs on an openai-completions binding keep the generic fallback
+	// and no compat: aggregator-rewritten levels must not leak in.
+	if err := Find("pi").ApplyAuth(AuthSpec{
+		Endpoint: "https://gateway.example/v1", Key: "sk-test", PiAPI: "openai-completions", Models: models,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	compat, maps = readCompat()
+	for _, slug := range []string{"claude-opus-5", "claude-sonnet-5", "claude-opus-4-6"} {
+		if compat[slug] != nil {
+			t.Fatalf("%s compat = %#v, want none on openai-completions", slug, compat[slug])
+		}
+		if maps[slug]["off"] == nil {
+			t.Fatalf("%s map = %#v, want the generic fallback on openai-completions", slug, maps[slug])
+		}
 	}
 }
 
