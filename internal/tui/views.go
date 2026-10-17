@@ -346,7 +346,13 @@ func (m model) prompt() string {
 	case viewAddCustomModel:
 		return "Enter model IDs — comma-separated (e.g. kimi-k3:1m, z-ai/glm-5.3, custom:200k):"
 	case viewDupName:
-		return "Name the duplicate of " + m.dupSource + ":"
+		dst := "this tool"
+		if m.dupTool != "" && m.dupTool != m.tool.Name {
+			if t := m.findTool(m.dupTool); t != nil {
+				dst = t.Title
+			}
+		}
+		return "Duplicate " + m.dupSource + " in " + dst + " as:"
 	default:
 		return ""
 	}

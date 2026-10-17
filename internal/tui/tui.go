@@ -49,7 +49,7 @@ const (
 	viewReviewModels   // wizard: compact review table
 	viewAddName        // wizard: name the binding
 	viewDupName        // clone: name the duplicate
-	viewCopyTool       // copy: choose the destination tool
+	viewCopyTool       // duplicate: choose the destination tool
 	viewEditForm       // edit: field picker (url/name/token/model)
 	viewEditField      // edit: single-field text input
 )
@@ -103,19 +103,20 @@ func (i item) FilterValue() string { return i.title }
 
 // Contextual key bindings shown in the list's help footer (and "?"-expanded).
 var (
-	keySwitch    = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "switch"))
-	keyReapply   = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reapply"))
-	keyEdit      = key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit"))
-	keyBackup    = key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "clone"))
-	keyCopy      = key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "copy"))
-	keyDelete    = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete"))
-	keyAdd       = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add"))
-	keyBack      = key.NewBinding(key.WithKeys("esc", "q"), key.WithHelp("esc", "back"))
-	keyQuit      = key.NewBinding(key.WithKeys("q", "esc"), key.WithHelp("q/esc", "quit"))
-	keyOpen      = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open"))
-	keyChoose    = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "choose"))
-	keyToggle    = key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "toggle"))
-	keyToggleAll = key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "all"))
+	keySwitch  = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "switch"))
+	keyReapply = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reapply"))
+	keyEdit    = key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit"))
+	// keyDuplicateRow covers both former shortcuts: cloning within a tool and
+	// copying to another one are the same action with a different destination.
+	keyDuplicateRow = key.NewBinding(key.WithKeys("c", "x"), key.WithHelp("c", "duplicate"))
+	keyDelete       = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete"))
+	keyAdd          = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add"))
+	keyBack         = key.NewBinding(key.WithKeys("esc", "q"), key.WithHelp("esc", "back"))
+	keyQuit         = key.NewBinding(key.WithKeys("q", "esc"), key.WithHelp("q/esc", "quit"))
+	keyOpen         = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open"))
+	keyChoose       = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "choose"))
+	keyToggle       = key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "toggle"))
+	keyToggleAll    = key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "all"))
 	// keyFilter never matches a real press; it only advertises type-to-search.
 	keyFilter  = key.NewBinding(key.WithKeys("\x00filter"), key.WithHelp("type", "search"))
 	keyRefresh = key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl+r", "refresh"))
@@ -155,8 +156,8 @@ type model struct {
 	editField     string // which field the single-field editor is editing
 	fromForm      bool   // model picker/fetch was launched from the edit form
 	delTarget     string // binding name pending delete confirmation
-	dupSource     string // binding being duplicated
-	copySource    string // binding being copied to another tool
+	dupSource     string // binding being duplicated (destination chosen next)
+	dupTool       string // chosen duplicate destination ("" until a row is picked)
 	showConfirm   bool   // when true, render a confirmation dialog over the binding list
 	configSummary string // read-only on-disk values, refreshed with the binding list
 
@@ -508,9 +509,15 @@ func (m *model) editModelEffortByID(id string) error {
 	return nil
 }
 
-// loadCopyTools shows every other tool that can receive the pending binding.
-func (m *model) loadCopyTools() {
+// loadDuplicateTools lists the duplicate destinations: this tool first, then every
+// other tool, marking whether each is installed on this machine.
+func (m *model) loadDuplicateTools() {
 	var items []list.Item
+	items = append(items, item{
+		title: "This tool: " + m.tool.Title,
+		desc:  "duplicate within " + m.tool.Title + " — shares the endpoint and key",
+		value: m.tool.Name,
+	})
 	for _, t := range m.allTools {
 		if t.Name == m.tool.Name {
 			continue
@@ -523,7 +530,7 @@ func (m *model) loadCopyTools() {
 	}
 	m.list.SetItems(items)
 	m.list.Select(0)
-	m.list.Title = "Copy " + m.copySource + " to"
+	m.list.Title = "Duplicate " + m.dupSource + " to"
 	m.setFooterKeys(keyChoose, keyBack)
 	m.setDelegate(themedDelegate())
 }
@@ -590,7 +597,7 @@ func (m *model) loadProfiles(selectName string) {
 	m.list.SetItems(items)
 	m.list.Select(selectedIndex)
 	m.list.Title = m.tool.Title + " bindings (✓ active)"
-	m.setFooterKeys(keySwitch, keyAdd, keyReapply, keyEdit, keyBackup, keyCopy, keyDelete, keyRefresh, keyBack)
+	m.setFooterKeys(keySwitch, keyAdd, keyReapply, keyEdit, keyDuplicateRow, keyDelete, keyRefresh, keyBack)
 	m.setDelegate(themedTableDelegate())
 	m.resize()
 	if len(saved) == 0 && m.status == "" && m.tool.ApplyAuth != nil {
@@ -823,22 +830,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == viewModels {
 				return m.editContextFromList()
 			}
-		case "c":
+		case "c", "x":
 			if m.view == viewProfiles {
 				if it, ok := m.selectedBinding(); ok {
-					return m.startBackup(it.value)
+					return m.startDuplicate(it.value)
 				}
 				return m, nil
-			}
-		case "x":
-			if m.view == viewProfiles {
-				if it, ok := m.selectedBinding(); ok {
-					m.copySource = it.value
-					m.view = viewCopyTool
-					m.clearStatus()
-					m.loadCopyTools()
-					return m, nil
-				}
 			}
 		case "d":
 			if m.view == viewProfiles {
@@ -943,56 +940,53 @@ func (m model) onDeleteKey() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// startBackup clones the highlighted binding ("c") into the first free
-// "<name>-copy" (then "<name>-copy-2", …). The clone shares the credential and
-// model list and is not activated.
-func (m model) startBackup(name string) (tea.Model, tea.Cmd) {
-	b, found, err := m.cat.BindingByName(m.tool.Name, name)
-	if err != nil || !found {
+// startDuplicate opens the destination chooser for the highlighted binding
+// ("c" or "x"). The first row duplicates within the current tool; the rest copy
+// to another tool. A naming step follows either way, so no "-copy" suffix is
+// ever written without the user seeing it first.
+func (m model) startDuplicate(name string) (tea.Model, tea.Cmd) {
+	if _, found, err := m.cat.BindingByName(m.tool.Name, name); err != nil || !found {
 		m.setStatus(statusErr, "no binding named "+name)
 		return m, nil
 	}
-	saved, err := m.cat.Bindings(m.tool.Name)
-	if err != nil {
-		m.setStatus(statusErr, err.Error())
-		return m, nil
-	}
-	names := make([]string, len(saved))
-	for i, s := range saved {
-		names[i] = s.Name
-	}
-	newName := nextDuplicateName(names, name)
-	slugs, err := m.cat.ModelSlugs(b.Models)
-	if err != nil {
-		m.setStatus(statusErr, err.Error())
-		return m, nil
-	}
-	slug, err := m.cat.ModelSlug(b.ModelID)
-	if err != nil {
-		m.setStatus(statusErr, err.Error())
-		return m, nil
-	}
-	if _, err := m.cat.AddBinding(b.Tool, newName, b.CredentialID, slug, slugs, b.PiAPI); err != nil {
-		m.setStatus(statusErr, err.Error())
-		return m, nil
-	}
-	m.loadProfiles(newName)
-	m.setStatus(statusOK, fmt.Sprintf("Cloned %s as %s", name, newName))
+	m.dupSource = name
+	m.dupTool = ""
+	m.view = viewCopyTool
+	m.clearStatus()
+	m.loadDuplicateTools()
 	return m, nil
 }
 
-// copyBindingToTool copies a saved binding to another tool without activating it.
-func (m model) copyBindingToTool(src, toolName string) error {
-	dstTool := m.findTool(toolName)
-	if dstTool == nil {
-		return fmt.Errorf("unknown tool %s", toolName)
+// duplicateBinding copies the binding srcName into dstToolName under newName.
+// Within the same tool the copy shares the credential row — that is the point of
+// duplicating, and why the first destination row exists. Across tools
+// StoreBinding writes a fresh provider/credential pair, reusing an existing row
+// only when the endpoint and key match one exactly. Pi's request protocol
+// survives only pi→pi; other tools have no such setting. The duplicate is never
+// activated.
+func (m model) duplicateBinding(srcName, dstToolName, newName string) error {
+	dst := m.findTool(dstToolName)
+	if dst == nil {
+		return fmt.Errorf("unknown tool %s", dstToolName)
 	}
-	b, found, err := m.cat.BindingByName(m.tool.Name, src)
+	b, found, err := m.cat.BindingByName(m.tool.Name, srcName)
 	if err != nil {
 		return err
 	}
 	if !found {
-		return fmt.Errorf("no binding named %s", src)
+		return fmt.Errorf("no binding named %s", srcName)
+	}
+	slug, err := m.cat.ModelSlug(b.ModelID)
+	if err != nil {
+		return err
+	}
+	slugs, err := m.cat.ModelSlugs(b.Models)
+	if err != nil {
+		return err
+	}
+	if dst.Name == m.tool.Name {
+		_, err = m.cat.AddBinding(dst.Name, newName, b.CredentialID, slug, slugs, b.PiAPI)
+		return err
 	}
 	cr, err := m.cat.Credential(b.CredentialID)
 	if err != nil {
@@ -1002,28 +996,11 @@ func (m model) copyBindingToTool(src, toolName string) error {
 	if err != nil {
 		return err
 	}
-	slug, err := m.cat.ModelSlug(b.ModelID)
-	if err != nil {
-		return err
-	}
-	slugs, err := m.cat.ModelSlugs(b.Models)
-	if err != nil {
-		return err
-	}
-	saved, err := m.cat.Bindings(dstTool.Name)
-	if err != nil {
-		return err
-	}
-	names := make([]string, len(saved))
-	for i, row := range saved {
-		names[i] = row.Name
-	}
-	dst := nextDuplicateName(names, src)
 	piAPI := ""
-	if dstTool.Name == "pi" && b.Tool == "pi" {
+	if dst.Name == "pi" && b.Tool == "pi" {
 		piAPI = b.PiAPI
 	}
-	_, err = catalog.StoreBinding(m.cat, dstTool, nil, dst, p.BaseURL, cr.Key, slug, slugs, true, nil, piAPI)
+	_, err = catalog.StoreBinding(m.cat, dst, nil, newName, p.BaseURL, cr.Key, slug, slugs, true, nil, piAPI)
 	return err
 }
 
@@ -1092,13 +1069,17 @@ func (m model) onEsc() (tea.Model, tea.Cmd) {
 		m.resize()
 		return m, nil
 	case viewCopyTool:
+		src := m.dupSource
+		m.dupSource = ""
+		m.dupTool = ""
 		m.view = viewProfiles
 		m.clearStatus()
-		m.loadProfiles(m.copySource)
+		m.loadProfiles(src)
 		return m, nil
 	case viewEditForm:
 		m.editField = ""
 		m.dupSource = ""
+		m.dupTool = ""
 		m.view = viewProfiles
 		m.setStatus(statusInfo, "cancelled")
 		m.loadProfiles("")
@@ -1141,14 +1122,22 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case viewCopyTool:
-		if err := m.copyBindingToTool(m.copySource, it.value); err != nil {
+		// Destination chosen: name the duplicate before anything is written.
+		m.dupTool = it.value
+		m.view = viewDupName
+		existing, err := m.cat.Bindings(it.value)
+		if err != nil {
 			m.setStatus(statusErr, err.Error())
 			return m, nil
 		}
-		m.view = viewProfiles
-		m.setStatus(statusOK, "Copied "+m.copySource+" to "+it.title)
-		m.loadProfiles(m.copySource)
-		return m, nil
+		names := make([]string, len(existing))
+		for i, b := range existing {
+			names[i] = b.Name
+		}
+		m.startInput("name", false)
+		m.input.SetValue(nextDuplicateName(names, m.dupSource))
+		m.clearStatus()
+		return m, textinput.Blink
 
 	case viewModels:
 		if it.value == addSentinel {

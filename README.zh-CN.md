@@ -41,7 +41,7 @@ endpoint 和凭据。
   `[1m]` 后缀；Codex 中的网关模型会写入明确的窗口，避免落到约 258k 的默认预算。
 - 按模型设置 reasoning effort。用 `charon set-effort codex <绑定> <模型> <级别>`
   或在模型库按 `r`，可将 low、medium、high、xhigh、max 或 ultra 写入当前激活的 Codex 绑定。
-- 单页表单。在同一屏新增或编辑绑定（Name、URL、Token、Model），可直接输入，
+- 单页表单。在同一屏新增或编辑绑定（Name、Endpoint、Token、Model），可直接输入，
   并使用 [ Save ] / [ Cancel ] 按钮。
 - 快速复制与搜索。按 c 复制绑定，按 x 复制到其他工具；在模型列表中输入文字即可实时模糊搜索。
 - Unicode 名称。绑定名支持中文等文字；不允许空白或控制字符。
@@ -195,7 +195,7 @@ charon completion fish | source
 - 在模型行按 Enter 可将该模型设为默认模型；若尚未勾选，该模型会自动加入注册列表。默认模型会显示勾号。
 - 如果没有勾选模型，工具会注册获取到的全部模型。
 
-按 Tab 选中 [ Save ] 并保存后，Charon 会将 endpoint、key 和 model 写入工具当前配置并激活该绑定。选择 [ Cancel ] 可放弃修改。Name、key 和至少一个模型为必填项；URL 留空时使用工具默认值。必填项缺失时，底部状态栏会显示提示。
+按 Tab 选中 [ Save ] 并保存后，Charon 会将 endpoint、key 和 model 写入工具当前配置并激活该绑定。选择 [ Cancel ] 可放弃修改。Name、key 和至少一个模型为必填项；Endpoint 留空时使用工具默认值。必填项缺失时，底部状态栏会显示提示。
 
 ### 在工具内切换模型
 
@@ -225,12 +225,12 @@ Pi 的 `maxTokens` 单独查询内置模型表中的已核实输出上限（数�
 在工具内更改模型不会更新 Charon 保存的绑定；只要这条绑定仍是当前绑定，Charon 会保留实况模型。
 应用另一条绑定时会替换模型列表。
 
-在菜单里按 c 可直接复制绑定，并命名为 <name>-copy；按 x 可选择其他工具并复制为
-<name>-copy。副本与原绑定共用 API key，创建后不会自动激活。
+在菜单里按 c（或 x）复制绑定：先选择目标工具（列表第一项是当前工具），再命名副本——
+默认预填 <name>-copy，可改。副本与原绑定共用 API key，创建后不会自动激活。
 
 ### 编辑已有绑定
 
-在某绑定上按 e 打开编辑表单，查看当前的 Name、URL、
+在某绑定上按 e 打开编辑表单，查看当前的 Name、Endpoint、
 Token（内容隐藏）与 Model。可直接修改任意字段；Model 字段下的
 [ Fetch & Pick Online Models ] 与 [ Type Model IDs Manually ]
 按钮可重新获取或手动调整模型。除非重新调整，绑定中保存的模型列表会保持不变；改名

@@ -172,23 +172,37 @@ func TestPiEndpointTypeSaveEditAndCopy(t *testing.T) {
 	if err != nil || !strings.Contains(string(before), `"api": "google-generative-ai"`) {
 		t.Fatalf("active edit was not applied: %v", err)
 	}
-	next, _ = m.startBackup("work")
+	// Duplicating within pi goes through the naming step; the clone keeps the
+	// saved protocol because it shares the credential row.
+	next, _ = m.startDuplicate("work")
+	m = next.(model)
+	if m.view != viewCopyTool {
+		t.Fatalf("startDuplicate view = %v, want viewCopyTool", m.view)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // first row: this tool
+	m = next.(model)
+	if m.view != viewDupName {
+		t.Fatalf("this-tool destination = %v, want viewDupName", m.view)
+	}
+	m.input.SetValue("work-copy")
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
 	cloned, found, err := st.BindingByName("pi", "work-copy")
 	if err != nil || !found || cloned.PiAPI != b.PiAPI {
-		t.Fatalf("clone protocol = %q, err=%v", cloned.PiAPI, err)
+		t.Fatalf("duplicate protocol = %q, err=%v", cloned.PiAPI, err)
 	}
+	// Cross-tool duplication: the protocol survives only pi→pi.
 	for _, dst := range []string{"pi", "claude"} {
-		if err := m.copyBindingToTool("work", dst); err != nil {
-			t.Fatal(err)
-		}
-		name, wantAPI := "work-copy-2", b.PiAPI
+		name, wantAPI := "pi-dup", b.PiAPI
 		if dst != "pi" {
-			name, wantAPI = "work-copy", ""
+			name, wantAPI = "claude-dup", ""
+		}
+		if err := m.duplicateBinding("work", dst, name); err != nil {
+			t.Fatal(err)
 		}
 		cloned, found, err = st.BindingByName(dst, name)
 		if err != nil || !found || cloned.PiAPI != wantAPI {
-			t.Fatalf("copy to %s protocol = %q, err=%v", dst, cloned.PiAPI, err)
+			t.Fatalf("duplicate to %s protocol = %q, err=%v", dst, cloned.PiAPI, err)
 		}
 	}
 	after, err := os.ReadFile(path)

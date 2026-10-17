@@ -851,7 +851,7 @@ func TestAKeyInProfilesOpensAddForm(t *testing.T) {
 	}
 }
 
-func TestXKeyCopiesBindingToAnotherTool(t *testing.T) {
+func TestDuplicateFlowNamesAndCopiesBinding(t *testing.T) {
 	st := openTestCatalog(t, false)
 	m := newModel(st, "v0.0.0")
 	m.tool = m.findTool("claude")
@@ -861,12 +861,22 @@ func TestXKeyCopiesBindingToAnotherTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.loadProfiles("work")
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
-	if got := m2.(model).view; got != viewCopyTool {
-		t.Fatalf("pressing x = %v, want viewCopyTool", got)
+
+	// "c" and "x" both open the destination chooser; this tool leads the list.
+	var chosen tea.Model
+	for _, key := range []string{"c", "x"} {
+		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+		if got := m2.(model).view; got != viewCopyTool {
+			t.Fatalf("pressing %q = %v, want viewCopyTool", key, got)
+		}
+		if row, ok := m2.(model).list.SelectedItem().(item); !ok || row.value != "claude" {
+			t.Fatalf("first destination row = %+v, want this tool (claude)", row)
+		}
+		chosen = m2
 	}
 
-	updated := m2.(model)
+	// Destination: another tool → a naming step with a prefilled "-copy" name.
+	updated := chosen.(model)
 	updated.width = 100
 	updated.height = 30
 	updated.resize()
@@ -882,17 +892,119 @@ func TestXKeyCopiesBindingToAnotherTool(t *testing.T) {
 		t.Fatal("could not move cursor to opencode")
 	}
 	enteredModel, _ := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	final := enteredModel.(model)
+	naming := enteredModel.(model)
+	if naming.view != viewDupName {
+		t.Fatalf("Enter on target tool = %v, want viewDupName; status = %q", naming.view, naming.status)
+	}
+	if got := naming.input.Value(); got != "work-copy" {
+		t.Fatalf("prefilled name = %q, want work-copy", got)
+	}
+	naming.input.SetValue("shared-gateway")
+	finalModel, _ := naming.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	final := finalModel.(model)
 	if final.view != viewProfiles {
-		t.Fatalf("Enter on target tool = %v, want viewProfiles; status = %q", final.view, final.status)
+		t.Fatalf("naming submit = %v, want viewProfiles; status = %q", final.view, final.status)
 	}
 
-	copied, found, err := st.BindingByName("opencode", "work-copy")
+	copied, found, err := st.BindingByName("opencode", "shared-gateway")
 	if err != nil || !found {
 		t.Fatalf("copied binding missing: found=%v err=%v", found, err)
 	}
+	if _, found, err := st.BindingByName("opencode", "work-copy"); found || err != nil {
+		t.Fatalf("prefilled name must not be written when the user renames: found=%v err=%v", found, err)
+	}
 	if slugs, err := st.ModelSlugs(copied.Models); err != nil || len(slugs) != 2 {
 		t.Fatalf("copied models = %v, err=%v; want two models", slugs, err)
+	}
+}
+
+// TestDuplicateWithinToolSharesCredential drives the first destination row
+// ("This tool") through the naming step: the clone must reuse the credential row
+// and land under the cursor, while the source binding stays active.
+func TestDuplicateWithinToolSharesCredential(t *testing.T) {
+	st := openTestCatalog(t, false)
+	m := newModel(st, "v0.0.0")
+	m.tool = m.findTool("claude")
+	m.view = viewProfiles
+
+	work, err := catalog.StoreBinding(st, m.tool, nil, "work", "https://gateway.example", "sk-test", "kimi-k2", []string{"kimi-k2", "glm-4.6"}, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Activate(work.ID); err != nil {
+		t.Fatal(err)
+	}
+	m.loadProfiles("work")
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = next.(model)
+	// First row is "This tool"; enter accepts it and lands on the naming step.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if m.view != viewDupName {
+		t.Fatalf("this-tool destination = %v, want viewDupName", m.view)
+	}
+	if got := m.input.Value(); got != "work-copy" {
+		t.Fatalf("prefilled name = %q, want work-copy", got)
+	}
+	m.input.SetValue("work-backup")
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if m.view != viewProfiles {
+		t.Fatalf("naming submit = %v, want viewProfiles; status = %q", m.view, m.status)
+	}
+
+	clone, found, err := st.BindingByName("claude", "work-backup")
+	if err != nil || !found {
+		t.Fatalf("clone missing: found=%v err=%v", found, err)
+	}
+	if clone.CredentialID != work.CredentialID {
+		t.Errorf("clone credential = %s, want shared %s", clone.CredentialID, work.CredentialID)
+	}
+	if active, found, err := st.Active("claude"); err != nil || !found || active.Name != "work" {
+		t.Errorf("active binding changed by cloning: %+v found=%v err=%v", active, found, err)
+	}
+	if it, ok := m.list.SelectedItem().(item); !ok || it.value != "work-backup" {
+		t.Errorf("cursor after clone = %+v, want the new clone", it)
+	}
+}
+
+// TestDuplicateRejectsTakenName cancels nothing but writes nothing either: a
+// name already used inside the destination tool is refused with the catalog's
+// own message, and the naming step stays open.
+func TestDuplicateRejectsTakenName(t *testing.T) {
+	st := openTestCatalog(t, false)
+	m := newModel(st, "v0.0.0")
+	m.tool = m.findTool("claude")
+	m.view = viewProfiles
+
+	if _, err := catalog.StoreBinding(st, m.tool, nil, "work", "https://gateway.example", "sk-test", "kimi-k2", []string{"kimi-k2"}, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.StoreBinding(st, m.tool, nil, "taken", "https://gateway.example", "sk-test", "kimi-k2", []string{"kimi-k2"}, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	m.loadProfiles("work")
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = next.(model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // This tool
+	m = next.(model)
+	m.input.SetValue("taken")
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if m.view != viewDupName {
+		t.Fatalf("view after refused name = %v, want viewDupName (stay on the step)", m.view)
+	}
+	if m.statusLvl != statusErr || !strings.Contains(m.status, "taken") {
+		t.Errorf("status = %q (lvl %v), want an error naming the conflict", m.status, m.statusLvl)
+	}
+	saved, err := st.Bindings("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved) != 2 {
+		t.Errorf("bindings after refused name = %d, want the original two", len(saved))
 	}
 }
 
@@ -1685,7 +1797,7 @@ func TestChromePinnedToTheBottom(t *testing.T) {
 		legend string
 	}{
 		{"tools", viewTools, nil, "enter open • q/esc quit"},
-		{"bindings", viewProfiles, func(m *model) { m.loadProfiles("") }, "enter switch • a add • r reapply • e edit • c clone • x copy • d delete • ctrl+r refresh"},
+		{"bindings", viewProfiles, func(m *model) { m.loadProfiles("") }, "enter switch • a add • r reapply • e edit • c duplicate • d delete • ctrl+r refresh"},
 		{"form", viewEditForm, func(m *model) { m.loadEditForm() }, "↑/↓/j/k move • tab next field • enter select • esc cancel"},
 		{"input step", viewAddEndpoint, nil, "enter continue • esc back"},
 		{"picker", viewPickModel, func(m *model) { m.showModels([]string{"glm-4.6", "kimi-k2"}) }, "enter finish • esc back"},

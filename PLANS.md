@@ -29,9 +29,11 @@ completion via the hidden `charon __profiles` command, retained for existing scr
 `charon status --json` and `charon ls <tool> --json` emit structured records
 (secrets masked, never raw).
 
-### CLI rename / edit / clone
-`charon rename`, `charon edit`, and `charon cp` match the TUI. `c` in the menu
-clones a binding to `<name>-copy` without activating it.
+### CLI rename / edit / duplicate
+`charon rename`, `charon edit`, and `charon cp` match the TUI. `c` (or `x`) in
+the menu duplicates a binding: pick a destination tool — this tool leads the
+list — then name the copy (prefilled `<name>-copy`). The duplicate shares the
+source key and is not activated.
 
 ## Deferred / do not do
 

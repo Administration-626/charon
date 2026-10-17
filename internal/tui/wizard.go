@@ -169,6 +169,7 @@ func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.dupSource = ""
+		m.dupTool = ""
 		m.view = viewProfiles
 		m.setStatus(statusInfo, "cancelled")
 		m.loadProfiles("")
@@ -224,6 +225,7 @@ func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.formFocus == focusCancel {
 			m.dupSource = ""
+			m.dupTool = ""
 			m.view = viewProfiles
 			m.setStatus(statusInfo, "cancelled")
 			m.loadProfiles("")
@@ -326,6 +328,7 @@ func (m model) onEditFormSelect(field string) (tea.Model, tea.Cmd) {
 		return m.finishAdd(name)
 	case actionCancel:
 		m.dupSource = ""
+		m.dupTool = ""
 		m.view = viewProfiles
 		m.setStatus(statusInfo, "cancelled")
 		m.loadProfiles("")
@@ -474,6 +477,7 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		src := m.dupSource
 		m.dupSource = ""
+		m.dupTool = ""
 		m.view = viewProfiles
 		m.setStatus(statusInfo, "cancelled")
 		m.loadProfiles(src) // land back on the binding that was being duplicated, if any
@@ -738,14 +742,23 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			src := m.dupSource
-			if err := m.cloneBinding(src, val); err != nil {
+			dst := m.dupTool
+			if err := m.duplicateBinding(src, dst, val); err != nil {
 				m.setStatus(statusErr, err.Error())
 				return m, nil
 			}
 			m.dupSource = ""
+			m.dupTool = ""
 			m.view = viewProfiles
-			m.setStatus(statusOK, "Duplicated "+src+" → "+val)
-			m.loadProfiles(src)
+			if dst == m.tool.Name {
+				m.setStatus(statusOK, "Duplicated "+src+" → "+val)
+				m.loadProfiles(val) // land the cursor on the new clone
+				return m, nil
+			}
+			if t := m.findTool(dst); t != nil {
+				m.setStatus(statusOK, "Duplicated "+src+" → "+val+" in "+t.Title)
+			}
+			m.loadProfiles(src) // stay on the source binding in this tool
 			return m, nil
 		}
 	}
@@ -851,11 +864,6 @@ func (m model) finishAdd(name string) (tea.Model, tea.Cmd) {
 	m.view = viewProfiles
 	m.loadProfiles(name)
 	return m, nil
-}
-
-// cloneBinding copies a binding under a new name, sharing its credential and models.
-func (m model) cloneBinding(src, _ string) error {
-	return m.copyBindingToTool(src, m.tool.Name)
 }
 
 // parseContextWindow parses a token count or unit string (e.g. "1m", "200k", "1048576").

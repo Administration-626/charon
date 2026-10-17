@@ -45,10 +45,11 @@ re-renders that binding into the tool, overwriting only the keys charon owns.
 - Per-model reasoning effort. Use `charon set-effort codex <binding> <model> <level>`
   or the Model Library’s `r` key to write low, medium, high, xhigh, max, or ultra to
   Codex when that binding is active.
-- Single-page form. Add or edit a binding on one screen (Name, URL, Token,
-  Model) with direct typing and [ Save ] / [ Cancel ] buttons.
-- Instant clone & cross-tool copy. Press c to duplicate a binding, or x to
-  copy it to another tool; type to fuzzy-filter the model list in real time.
+- Single-page form. Add or edit a binding on one screen (Name, Endpoint,
+  Token, Model) with direct typing and [ Save ] / [ Cancel ] buttons.
+- Duplicate with a name. Press c (or x) on a binding, pick the destination —
+  this tool or another one — then name the copy (prefilled <name>-copy). The
+  duplicate shares the endpoint and key and is never activated.
 - Unicode names. Binding names support any script, including Chinese; spaces
   and control characters are rejected.
 - Safe by default. Writes are atomic. Deleting the binding a tool is
@@ -240,7 +241,7 @@ In the model picker, just start typing to fuzzy-filter the list in real time
 - Check nothing and the whole fetched list is registered.
 Tab to [ Save ] to write the endpoint/key/model into the tool's live
 config and switch to it, or [ Cancel ] to discard. Name, key, and at least
-one model are required. Leave URL blank to use the tool's default endpoint; a red
+one model are required. Leave Endpoint blank to use the tool's default endpoint; a red
 status bar flags missing required values on submit.
 
 ### Switching model inside the tool
@@ -278,14 +279,15 @@ Changing the model in the tool does not update the saved binding, and Charon
 keeps the live model while that binding stays active. Rendering another binding
 replaces the model list.
 
-In the menu, press c on a binding to clone it instantly into <name>-copy;
-press x to pick another tool and copy it there as <name>-copy. Both copies
-share the source key and are not activated.
+In the menu, press c (or x) on a binding to duplicate it: pick the destination
+tool — this tool leads the list — then name the copy, prefilled as <name>-copy
+and still editable. Both kinds of duplicates share the source key and are not
+activated.
 
 ### Editing an existing binding
 
 Press e on a binding to open its edit form, showing the current Name,
-URL, Token (masked), and Model on a single screen. Type directly into
+Endpoint, Token (masked), and Model on a single screen. Type directly into
 any field; the Model field's [ Fetch & Pick Online Models ] and
 [ Type Model IDs Manually ] buttons let you update or re-fetch the registered
 models. The model list saved on this binding stays as-is unless you curate a new list,
