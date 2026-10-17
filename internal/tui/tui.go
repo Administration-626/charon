@@ -691,6 +691,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.KeyMsg:
+		// Lazy expiry: the scheduled tick clears an idle screen's status, and
+		// this catches statuses set on paths that never arm one — any keypress
+		// sweeps a message older than its TTL.
+		if m.status != "" && time.Since(m.statusAt) > statusTTL {
+			m.clearStatus()
+		}
 		// ctrl+c is the only way to quit, from any screen.
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
