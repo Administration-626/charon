@@ -25,6 +25,17 @@ func newClaude() *Tool {
 		ModelMenu:       "/model",
 		DefaultEndpoint: "https://api.anthropic.com",
 		Files:           []string{settingsPath},
+		Owned: []OwnedFile{{
+			Path: settingsPath,
+			JSON: []string{
+				"env.ANTHROPIC_API_KEY", "env.ANTHROPIC_AUTH_TOKEN", "env.ANTHROPIC_BASE_URL",
+				"env.ANTHROPIC_MODEL", "env.ANTHROPIC_CUSTOM_MODEL_OPTION",
+				"env.CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+				"model", "modelPicker",
+			},
+		}},
+		// customApiKeyResponses keeps an approved id of a key charon used:
+		// harmless without the key, so off leaves it alone.
 		ApplyAuth: func(a AuthSpec) error {
 			// Preserve the already-registered list when a caller does not supply one.
 			existingModels := claudeExistingModels(settingsPath)

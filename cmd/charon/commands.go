@@ -247,6 +247,23 @@ func cmdReapply(cat *catalog.Catalog, args []string) error {
 	return cmdApply(cat, args, true)
 }
 
+// cmdOff takes charon back out of a tool: owned entries removed, the
+// pre-charon values the stash remembered restored, the active pointer cleared.
+func cmdOff(cat *catalog.Catalog, args []string) error {
+	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
+		return fmt.Errorf("usage: charon off <tool>")
+	}
+	t, err := requireTool(args[0])
+	if err != nil {
+		return err
+	}
+	if err := cat.Off(t.Name); err != nil {
+		return err
+	}
+	fmt.Printf("Took charon out of %s — owned entries removed, pre-charon values restored\n", t.Title)
+	return nil
+}
+
 // cmdApply handles switch and reapply: two positionals (tool, binding),
 // flags anywhere after them.
 func cmdApply(cat *catalog.Catalog, args []string, reapply bool) error {

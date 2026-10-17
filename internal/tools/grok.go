@@ -114,6 +114,14 @@ func newGrok() *Tool {
 		ModelMenu:       "/model",
 		DefaultEndpoint: "https://api.x.ai/v1",
 		Files:           []string{configPath},
+		Owned: []OwnedFile{{
+			Path:     configPath,
+			TOMLKeys: []string{"models.default"},
+			// Quoted or not, a charon- model table is charon's; the parser
+			// names it with the quotes it was written with, so the prefix
+			// match runs on the bare name (edit matches both spellings).
+			Prefixes: []string{"model." + grokModelPrefix},
+		}},
 		ApplyAuth: func(a AuthSpec) error {
 			cfg, err := loadTOMLMap(configPath)
 			if err != nil {

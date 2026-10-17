@@ -247,6 +247,12 @@ func newPi() *Tool {
 		ModelMenu:       "/model",
 		DefaultEndpoint: "https://api.openai.com/v1",
 		Files:           []string{modelsPath, settingsPath, extensionPath},
+		Owned: []OwnedFile{
+			{Path: modelsPath, JSON: []string{"providers." + managedProvider}},
+			{Path: settingsPath, JSON: []string{"defaultProvider", "defaultModel"}},
+		},
+		// A legacy charon.ts extension migrated away stays gone: it was
+		// charon's own artifact, not the user's.
 		ApplyAuth: func(a AuthSpec) error {
 			// Read and validate every input before the first write.
 			api, err := ResolvePiAPI(a.PiAPI)

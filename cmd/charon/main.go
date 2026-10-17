@@ -54,6 +54,8 @@ func run(args []string) error {
 		return cmdSwitch(cat, args[1:])
 	case "reapply":
 		return cmdReapply(cat, args[1:])
+	case "off":
+		return cmdOff(cat, args[1:])
 	case "models":
 		return cmdModels(cat, args[1:])
 	case "add":
@@ -97,6 +99,7 @@ Usage:
   charon cp <tool> <src> <tool> <dst>  copy a binding to another tool
 	  charon switch <tool> <b>   render a saved binding into the tool (--dry-run)
 	  charon reapply <tool> <b>  render a binding even if it was last confirmed (--dry-run)
+	  charon off <tool>          take charon out of a tool, restoring pre-charon values
   charon rm <tool> <b>       delete a saved binding (not the active one)
   charon completion <shell>  print a bash/zsh/fish completion script
   charon update              upgrade charon to the latest version

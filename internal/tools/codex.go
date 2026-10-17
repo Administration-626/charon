@@ -200,6 +200,15 @@ func newCodex() *Tool {
 		ModelMenu:       "/model",
 		DefaultEndpoint: "https://api.openai.com/v1",
 		Files:           []string{configPath, catalogPath},
+		Owned: []OwnedFile{{
+			Path: configPath,
+			TOMLTop: []string{
+				"model", "model_provider", "model_context_window",
+				"model_catalog_json", "model_reasoning_effort",
+			},
+			TOMLTables: []string{"model_providers." + managedProvider},
+		}},
+		Created: []string{catalogPath},
 		ApplyAuth: func(a AuthSpec) error {
 			// Read-only: the current model and catalog pointer decide what to pin.
 			cfg, err := loadTOMLMap(configPath)

@@ -51,6 +51,9 @@ internal/edit/      format-preserving JSON/JSONC + TOML editors (adapted from
                     validated before any write
 internal/preview/   dry-run previews: apply a binding against copies of the
                     tool's config under a temporary home, diff, write nothing
+stash               Tool.Owned/Created declare what ApplyAuth owns per file;
+                    `charon off` (catalog.Off) removes it and restores the
+                    stashed pre-charon values (catalog stash.json)
 internal/tools/     per-tool adapters
   tool.go           Tool struct, AuthSpec, registry (All/Find)
   edit.go           JSON/TOML read helpers (loadJSONMap/loadTOMLMap)

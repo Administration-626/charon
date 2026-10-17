@@ -130,6 +130,7 @@ func (c *Catalog) activate(id string, reapply bool) (Binding, error) {
 	if same && !reapply {
 		return b, nil
 	}
+	c.captureStash(b.Tool)
 	if err := c.project(b); err != nil {
 		return Binding{}, err
 	}

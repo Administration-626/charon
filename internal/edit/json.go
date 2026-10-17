@@ -393,3 +393,102 @@ func delJSONBytes(raw []byte, keyPath string) ([]byte, bool, error) {
 	}
 	return out, true, nil
 }
+
+// PrevJSONKey is the key before keyPath's key in its parent object, as the
+// file orders them ("" when it is first or nothing is found): the anchor for
+// putting a key back where it was.
+func PrevJSONKey(path, keyPath string) string {
+	raw, err := Read(path)
+	if err != nil || len(raw) == 0 {
+		return ""
+	}
+	stripped := jsonc.ToJSONInPlace(append([]byte(nil), raw...))
+	parts := splitPath(keyPath)
+	parent := gjson.ParseBytes(stripped)
+	if len(parts) > 1 {
+		parent = gjson.GetBytes(stripped, strings.Join(parts[:len(parts)-1], "."))
+	}
+	if !parent.IsObject() {
+		return ""
+	}
+	key := unescapeKey(parts[len(parts)-1])
+	prev, found := "", false
+	parent.ForEach(func(k, _ gjson.Result) bool {
+		if k.String() == key {
+			found = true
+			return false
+		}
+		prev = k.String()
+		return true
+	})
+	if !found {
+		return ""
+	}
+	return prev
+}
+
+// SetJSONAfter sets one key path in a JSON/JSONC file, inserting a missing
+// key right after the anchor's member — anchor is a dot path naming a sibling
+// in the same parent object — so a key taken out and put back keeps its
+// place. An anchor that is missing, or a key that already exists, falls back
+// to SetJSON's behavior (replace in place, or first-member insert).
+func SetJSONAfter(path, anchor, keyPath string, value any) error {
+	raw, err := Read(path)
+	if err != nil {
+		return err
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		raw = []byte("{}\n")
+	}
+	orig := raw
+	raw, err = setJSONAfterBytes(raw, anchor, keyPath, value)
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	return WriteAtomic(path, keepCRLF(raw, orig))
+}
+
+func setJSONAfterBytes(raw []byte, anchor, keyPath string, value any) ([]byte, error) {
+	stripped := jsonc.ToJSONInPlace(append([]byte(nil), raw...))
+	if !json.Valid(stripped) {
+		return nil, fmt.Errorf("invalid JSON/JSONC")
+	}
+	parts := splitPath(keyPath)
+	if gjson.GetBytes(stripped, keyPath).Exists() {
+		return setJSONBytes(raw, keyPath, value) // replace in place
+	}
+	var a gjson.Result
+	if anchor != "" {
+		a = gjson.GetBytes(stripped, anchor)
+	}
+	if !a.Exists() || a.Index == 0 {
+		return setJSONBytes(raw, keyPath, value) // first-member insert
+	}
+	k, _ := json.Marshal(unescapeKey(parts[len(parts)-1]))
+	pretty := bytes.IndexByte(raw, '\n') >= 0
+	// a comma after the anchor's value means the anchor is not the last
+	// member; the key goes between the comma and the next member
+	at := a.Index + len(a.Raw)
+	for at < len(stripped) && (stripped[at] == ' ' || stripped[at] == '\t' || stripped[at] == '\n' || stripped[at] == '\r') {
+		at++
+	}
+	comma := at < len(stripped) && stripped[at] == ','
+	if !pretty {
+		v, _ := json.Marshal(value)
+		if comma {
+			return splice(raw, at+1, 0, []byte(string(v)+","))
+		}
+		return splice(raw, a.Index+len(a.Raw), 0, []byte(","+string(v)))
+	}
+	// pretty: the member goes on its own line at the anchor's indentation
+	indent := lineIndent(raw, a.Index)
+	unit := indentUnit(raw, a.Index, indent)
+	v, _ := json.MarshalIndent(value, indent, unit)
+	member := indent + string(k) + ": " + string(v)
+	if comma {
+		return splice(raw, at+1, 0, []byte("\n"+member+","))
+	}
+	// last member: right after the anchor's value, before its line end, so
+	// the closing brace keeps its own line
+	return splice(raw, a.Index+len(a.Raw), 0, []byte(",\n"+member))
+}

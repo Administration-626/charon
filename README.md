@@ -56,6 +56,10 @@ re-renders that binding into the tool, overwriting only the keys charon owns.
 - Dry-run preview. `charon switch <tool> <b> --dry-run` renders the binding
   into copies of the tool's config under a temporary home and prints a unified
   diff of what would change — comments included, nothing written.
+- Clean uninstall. `charon off <tool>` takes charon back out of a tool:
+  its entries are removed, the values that were there before charon's first
+  switch are put back byte-exact, files charon created are deleted, and the
+  active binding is cleared.
 - Non-destructive. Charon only ever touches its own charon provider entry
   in each tool's config, never your hand-authored providers.
 

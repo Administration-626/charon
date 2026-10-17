@@ -220,6 +220,23 @@ func GetTOMLTop(path, key string) (string, bool) {
 	return "", false
 }
 
+// GetTOMLTopRaw is a top-level key's value exactly as the file writes it
+// (a string with its quotes, a number), for putting back verbatim as a Raw
+// value. A file TOML's parser refuses answers false: there is nothing
+// trustworthy to put back.
+func GetTOMLTopRaw(path, key string) (string, bool) {
+	doc, err := tomlFileOf(path)
+	if err != nil {
+		return "", false
+	}
+	for _, kv := range doc.root.keys {
+		if kv.name == key {
+			return kv.text, true
+		}
+	}
+	return "", false
+}
+
 // getTOMLTopLines is GetTOMLTop for a file that isn't valid TOML: the first
 // line that looks like `key = value` before one that looks like a header.
 func getTOMLTopLines(path, key string) (string, bool) {
@@ -489,10 +506,10 @@ func splitTOMLName(name string) []string {
 	return append(parts, cur.String())
 }
 
-// bareTOMLName is name with each dot-separated part unquoted, so a table is
+// BareTOMLName is name with each dot-separated part unquoted, so a table is
 // found however its name was spelled: model."charon-a.b" and a wrongly
 // unquoted model.charon-a.b are the same table to a lookup.
-func bareTOMLName(name string) string {
+func BareTOMLName(name string) string {
 	parts := splitTOMLName(name)
 	for i, p := range parts {
 		if len(p) >= 2 && p[0] == '"' && p[len(p)-1] == '"' {
@@ -542,7 +559,7 @@ func parseTOMLTable(lines []string, name string) (tomlTableSpan, error) {
 
 func tomlTableNamed(tables []tomlTableSpan, name string) (tomlTableSpan, bool) {
 	for _, table := range tables {
-		if table.name == name || bareTOMLName(table.name) == bareTOMLName(name) {
+		if table.name == name || BareTOMLName(table.name) == BareTOMLName(name) {
 			return table, true
 		}
 	}
@@ -858,9 +875,9 @@ func SetTOMLTablesMatching(path string, names, prefixes []string, tables []Table
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	owned := func(name string) bool {
-		bare := bareTOMLName(name)
+		bare := BareTOMLName(name)
 		for _, n := range names {
-			if name == n || bare == bareTOMLName(n) {
+			if name == n || bare == BareTOMLName(n) {
 				return true
 			}
 		}

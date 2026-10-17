@@ -873,3 +873,63 @@ func TestSwitchDryRunPreviewsWithoutWriting(t *testing.T) {
 		t.Errorf("dry runs modified the catalog file")
 	}
 }
+
+func TestOffCommandRestoresAndClearsActive(t *testing.T) {
+	home := sandbox(t)
+	seedCodex(t, home)
+	config := filepath.Join(home, ".codex", "config.toml")
+	orig := "# my config\nmodel = \"gpt-5\"   # daily\n\n[model_providers.mine]\nname = \"mine\"\n"
+	writeTestFile(t, config, orig)
+
+	if err := run([]string{"add", "codex", "--name", "work", "--key", "sk-test", "--endpoint", "https://example.com/v1", "--model", "gpt-5.5"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	got, _ := os.ReadFile(config)
+	if string(got) == orig {
+		t.Fatal("switching should have modified the config")
+	}
+
+	if err := run([]string{"off", "codex"}); err != nil {
+		t.Fatalf("off: %v", err)
+	}
+	mustEqualFile(t, config, orig)
+
+	// No binding is active anymore, and a new switch takes a fresh stash.
+	out, err := captureStdout(t, func() error {
+		return run([]string{"ls", "codex"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "●") || strings.Contains(out, "active") {
+		t.Errorf("ls still shows an active binding after off:\n%s", out)
+	}
+	if err := run([]string{"switch", "codex", "work"}); err != nil {
+		t.Fatalf("switch after off: %v", err)
+	}
+	if err := run([]string{"off", "codex"}); err != nil {
+		t.Fatalf("second off: %v", err)
+	}
+	mustEqualFile(t, config, orig)
+}
+
+func TestOffCommandUsageAndUnknownTool(t *testing.T) {
+	sandbox(t)
+	if err := run([]string{"off"}); err == nil {
+		t.Error("off without a tool must fail")
+	}
+	if err := run([]string{"off", "nope"}); err == nil {
+		t.Error("off with an unknown tool must fail")
+	}
+}
+
+func mustEqualFile(t *testing.T, path, want string) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Errorf("%s not as wanted:\n--want--\n%s\n--got--\n%s", path, want, got)
+	}
+}

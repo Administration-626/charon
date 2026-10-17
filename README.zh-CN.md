@@ -48,6 +48,8 @@ endpoint 和凭据。
 - 默认安全。写入采用原子替换。正在使用的绑定不能删除；删除前须切换到另一条绑定。
 - 试运行预览。`charon switch <工具> <绑定> --dry-run` 把绑定渲染到临时 HOME 下的配置副本，
   以 unified diff 打印将要发生的改动（含注释上下文），不写入任何文件。
+- 干净卸载。`charon off <工具>` 把 charon 从工具中取出：删除自己的条目、
+  按字节恢复 charon 首次切换前的原值、删除 charon 创建的文件、清除活跃绑定。
 - 非破坏性。Charon 只修改每个工具配置中由它管理的 charon provider 条目，
   绝不碰你手写的 provider。
 
