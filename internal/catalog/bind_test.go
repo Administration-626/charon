@@ -43,8 +43,8 @@ func TestPiBindingProtocolRoundTrip(t *testing.T) {
 				API string `json:"api"`
 			} `json:"providers"`
 		}
-		if err := json.Unmarshal(data, &cfg); err != nil || cfg.Providers["charon"].API != want {
-			t.Fatalf("projected API = %q, err=%v, want %q", cfg.Providers["charon"].API, err, want)
+		if err := json.Unmarshal(data, &cfg); err != nil || cfg.Providers[piDefaultProvider(t)].API != want {
+			t.Fatalf("projected API = %q, err=%v, want %q", cfg.Providers[piDefaultProvider(t)].API, err, want)
 		}
 	}
 	for _, b := range bindings {

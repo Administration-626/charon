@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -14,21 +15,44 @@ import (
 
 func readPiProvider(t *testing.T, home string) map[string]any {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(home, ".pi", "agent", "models.json"))
+	providers := readPiProviders(t, home)
+	if provider, ok := providers[managedProvider]; ok {
+		return provider // written by an older charon
+	}
+	var found map[string]any
+	for name, provider := range providers {
+		if !strings.HasPrefix(name, managedProvider+"-") {
+			continue
+		}
+		if found != nil {
+			t.Fatalf("several charon providers, pick one by name: %v", piProviderNames(providers))
+		}
+		found = provider
+	}
+	if found == nil {
+		t.Fatal("missing charon provider")
+	}
+	return found
+}
+
+// piDefaultProvider is the provider key charon made default in settings.json:
+// the endpoint-keyed name of the binding's own entry.
+func piDefaultProvider(t *testing.T, home string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(home, ".pi", "agent", "settings.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var cfg struct {
-		Providers map[string]map[string]any `json:"providers"`
+	var s struct {
+		DefaultProvider string `json:"defaultProvider"`
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := json.Unmarshal(data, &s); err != nil {
 		t.Fatal(err)
 	}
-	provider, ok := cfg.Providers[managedProvider]
-	if !ok {
-		t.Fatal("missing charon provider")
+	if s.DefaultProvider == "" {
+		t.Fatal("settings.json has no defaultProvider")
 	}
-	return provider
+	return s.DefaultProvider
 }
 
 func legacyPiExtension(t *testing.T) []byte {
@@ -91,7 +115,7 @@ func TestPiBuildModelsThinkingLevels(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := piBuildModels([]ModelSpec{tc.spec}, "")
+			got := piBuildModels([]ModelSpec{tc.spec}, "", "")
 			if len(got) != 1 || got[0].Reasoning != tc.reasoning || !reflect.DeepEqual(got[0].ThinkingLevelMap, tc.levels) {
 				t.Fatalf("models = %+v, want reasoning=%v, levels=%v", got, tc.reasoning, tc.levels)
 			}
@@ -130,7 +154,7 @@ func TestPiCompatPresetProjectsVendorFormat(t *testing.T) {
 		t.Fatal(err)
 	}
 	compat := map[string]map[string]any{}
-	for _, m := range config.Providers[managedProvider].Models {
+	for _, m := range config.Providers[piDefaultProvider(t, home)].Models {
 		compat[m.ID] = m.Compat
 	}
 	deepseek := compat["deepseek-v4-pro"]
@@ -179,7 +203,7 @@ func TestPiClaudeDialectPreset(t *testing.T) {
 			t.Fatal(err)
 		}
 		compat, maps := map[string]map[string]any{}, map[string]map[string]any{}
-		for _, m := range config.Providers[managedProvider].Models {
+		for _, m := range config.Providers[piDefaultProvider(t, home)].Models {
 			compat[m.ID] = m.Compat
 			maps[m.ID] = m.ThinkingLevelMap
 		}
@@ -226,6 +250,33 @@ func TestPiSingleModelKeepsExplicitEffort(t *testing.T) {
 	}
 	if readPiProvider(t, home)["api"] != "openai-completions" {
 		t.Fatalf("Pi provider api = %#v, want openai-completions", readPiProvider(t, home)["api"])
+	}
+}
+
+func TestPiNamesProviderAfterEndpoint(t *testing.T) {
+	home := sandboxHome(t)
+	if err := Find("pi").ApplyAuth(AuthSpec{
+		Endpoint: "https://gw.example:8443/v1", Key: "sk-test", Model: "custom",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	providers := readPiProviders(t, home)
+	// Pi prints a model as provider/id; a bare "charon" would hide the endpoint
+	// even when it is the only one.
+	if got := piProviderNames(providers); !reflect.DeepEqual(got, []string{"charon-gw-example"}) {
+		t.Fatalf("providers = %v, want the endpoint-keyed entry", got)
+	}
+	entry := providers["charon-gw-example"]
+	if entry["name"] != "gw.example" || entry["baseUrl"] != "https://gw.example:8443/v1" {
+		t.Fatalf("entry = %#v, want the host as its name", entry)
+	}
+	if got := piDefaultProvider(t, home); got != "charon-gw-example" {
+		t.Fatalf("defaultProvider = %q, want the endpoint-keyed entry", got)
+	}
+	// Nothing is aggregated here, so model names stay bare slugs: the provider
+	// key already carries the endpoint.
+	if got := piModelField(entry["models"], "name"); !reflect.DeepEqual(got, []string{"custom"}) {
+		t.Fatalf("model names = %v", got)
 	}
 }
 
@@ -301,6 +352,14 @@ func TestPiAuthUpdatePreservesFullModelEntries(t *testing.T) {
 	got := readPiProvider(t, home)
 	if !reflect.DeepEqual(got["models"], before) {
 		t.Fatalf("model metadata changed: got %#v, want %#v", got["models"], before)
+	}
+	// The legacy entry is carried over to the endpoint-keyed one and removed, so
+	// /model never lists the same endpoint twice.
+	if _, exists := readPiProviders(t, home)[managedProvider]; exists {
+		t.Fatal("legacy providers.charon entry survived the rename")
+	}
+	if entry := readPiProviders(t, home)["charon-new-example"]; entry == nil {
+		t.Fatalf("entry not keyed by endpoint: %v", piProviderNames(readPiProviders(t, home)))
 	}
 	if got["baseUrl"] != "https://new.example/v1" || got["apiKey"] != "sk-rotated" {
 		t.Fatal("endpoint/key not updated")
@@ -530,5 +589,419 @@ func TestPiEscapesLiteralKey(t *testing.T) {
 	key := readPiProvider(t, home)["apiKey"].(string)
 	if key != "$!not-a-command-$$KEY-$${OTHER}" || strings.HasPrefix(key, "!") {
 		t.Fatalf("literal key incorrectly escaped: %q", key)
+	}
+}
+
+// readPiProviders returns every provider entry of models.json, keyed by its
+// provider name, for assertions over a whole aggregated file.
+func readPiProviders(t *testing.T, home string) map[string]map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(home, ".pi", "agent", "models.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Providers map[string]map[string]any `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	return cfg.Providers
+}
+
+// piModelField collects one string field from every entry of a decoded
+// models array.
+func piModelField(entries any, field string) []string {
+	list, _ := entries.([]any)
+	values := make([]string, 0, len(list))
+	for _, entry := range list {
+		m, _ := entry.(map[string]any)
+		value, _ := m[field].(string)
+		values = append(values, value)
+	}
+	return values
+}
+
+// piProviderNames is the sorted key set of a providers map.
+func piProviderNames(providers map[string]map[string]any) []string {
+	names := make([]string, 0, len(providers))
+	for name := range providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func TestPiAggregatesEveryEndpoint(t *testing.T) {
+	home := sandboxHome(t)
+	dir := filepath.Join(home, ".pi", "agent")
+	writeFile(t, filepath.Join(dir, "models.json"), `{
+		"customSetting": "kept",
+		"providers": {
+			"mine": {"baseUrl": "https://mine.example", "apiKey": "sk-mine", "models": [{"id": "m"}]}
+		}
+	}`)
+	writeFile(t, filepath.Join(dir, "settings.json"),
+		`{"theme":"custom","defaultThinkingLevel":"high","defaultProvider":"other","defaultModel":"old"}`)
+
+	spec := AuthSpec{
+		Endpoint: "https://primary.example/v1",
+		Key:      "sk-primary",
+		Model:    "m-1",
+		Models:   []ModelSpec{{Slug: "m-1"}, {Slug: "m-2"}},
+		Groups: []EndpointGroup{
+			{Endpoint: "https://g1.example/v1", Key: "sk-g1", Models: []ModelSpec{{Slug: "a-1"}}},
+			{Endpoint: "https://g2.example:8443/v1", Key: "sk-g2", Models: []ModelSpec{{Slug: "b-1"}, {Slug: "b-2"}}},
+		},
+	}
+	if err := Find("pi").ApplyAuth(spec); err != nil {
+		t.Fatal(err)
+	}
+
+	providers := readPiProviders(t, home)
+	wantNames := []string{"charon-g1-example", "charon-g2-example", "charon-primary", "mine"}
+	if got := piProviderNames(providers); !reflect.DeepEqual(got, wantNames) {
+		t.Fatalf("providers = %v, want %v", got, wantNames)
+	}
+	// Pi prints a model as provider/id, so the binding's own entry is keyed
+	// after its endpoint instead of a bare "charon".
+	if got := piDefaultProvider(t, home); got != "charon-primary" {
+		t.Fatalf("defaultProvider = %q, want the endpoint-keyed provider", got)
+	}
+
+	main := providers["charon-primary"]
+	if main["name"] != "primary" || main["baseUrl"] != spec.Endpoint ||
+		main["apiKey"] != "sk-primary" || main["api"] != "openai-completions" {
+		t.Fatalf("primary provider = %#v", main)
+	}
+	if got := piModelField(main["models"], "id"); !reflect.DeepEqual(got, []string{"m-1", "m-2"}) {
+		t.Fatalf("primary model ids = %v", got)
+	}
+	if got := piModelField(main["models"], "name"); !reflect.DeepEqual(got, []string{"m-1 (primary)", "m-2 (primary)"}) {
+		t.Fatalf("primary model names = %v", got)
+	}
+
+	g1 := providers["charon-g1-example"]
+	if g1["name"] != "g1.example" || g1["baseUrl"] != "https://g1.example/v1" ||
+		g1["apiKey"] != "sk-g1" || g1["api"] != "openai-completions" {
+		t.Fatalf("g1 provider = %#v", g1)
+	}
+	if got := piModelField(g1["models"], "id"); !reflect.DeepEqual(got, []string{"a-1"}) {
+		t.Fatalf("g1 model ids = %v", got)
+	}
+	if got := piModelField(g1["models"], "name"); !reflect.DeepEqual(got, []string{"a-1 (g1.example)"}) {
+		t.Fatalf("g1 model names = %v", got)
+	}
+
+	// A port is not part of the label: Hostname() drops it.
+	g2 := providers["charon-g2-example"]
+	if g2["name"] != "g2.example" || g2["baseUrl"] != "https://g2.example:8443/v1" || g2["apiKey"] != "sk-g2" {
+		t.Fatalf("g2 provider = %#v", g2)
+	}
+	if got := piModelField(g2["models"], "name"); !reflect.DeepEqual(got, []string{"b-1 (g2.example)", "b-2 (g2.example)"}) {
+		t.Fatalf("g2 model names = %v", got)
+	}
+
+	mine := providers["mine"]
+	if !reflect.DeepEqual(mine, map[string]any{
+		"baseUrl": "https://mine.example", "apiKey": "sk-mine",
+		"models": []any{map[string]any{"id": "m"}},
+	}) {
+		t.Fatalf("user provider changed: %#v", mine)
+	}
+	modelsFile, err := loadJSONMap(filepath.Join(dir, "models.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modelsFile["customSetting"] != "kept" {
+		t.Fatalf("unrelated models.json keys changed: %#v", modelsFile)
+	}
+
+	settings, err := loadJSONMap(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings["theme"] != "custom" || settings["defaultThinkingLevel"] != "high" {
+		t.Fatalf("user preferences changed: %#v", settings)
+	}
+	if settings["defaultProvider"] != "charon-primary" || settings["defaultModel"] != "m-1" {
+		t.Fatalf("defaults = %v/%v, want charon-primary/m-1", settings["defaultProvider"], settings["defaultModel"])
+	}
+
+	// Group entries follow the primary entry in group order, so /model and a
+	// diff of the file both read the same way on every apply.
+	raw, err := os.ReadFile(filepath.Join(dir, "models.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	positions := make([]int, 0, 3)
+	for _, key := range []string{`"charon-primary"`, `"charon-g1-example"`, `"charon-g2-example"`} {
+		at := strings.Index(string(raw), key)
+		if at < 0 {
+			t.Fatalf("models.json lost %s:\n%s", key, raw)
+		}
+		positions = append(positions, at)
+	}
+	if positions[0] >= positions[1] || positions[1] >= positions[2] {
+		t.Fatalf("provider order = %v in\n%s", positions, raw)
+	}
+
+	info, err := os.Stat(filepath.Join(dir, "models.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("models.json mode = %o, want 600", info.Mode().Perm())
+	}
+}
+
+func TestPiAggregationDropsStaleProviders(t *testing.T) {
+	home := sandboxHome(t)
+	tool := Find("pi")
+	base := AuthSpec{
+		Endpoint: "https://primary.example/v1",
+		Key:      "sk-primary",
+		Model:    "m-1",
+		Models:   []ModelSpec{{Slug: "m-1"}},
+	}
+	both := base
+	both.Groups = []EndpointGroup{
+		{Endpoint: "https://a.example/v1", Key: "sk-a", Models: []ModelSpec{{Slug: "a-1"}}},
+		{Endpoint: "https://b.example/v1", Key: "sk-b", Models: []ModelSpec{{Slug: "b-1"}}},
+	}
+	if err := tool.ApplyAuth(both); err != nil {
+		t.Fatal(err)
+	}
+	if names := piProviderNames(readPiProviders(t, home)); !reflect.DeepEqual(names,
+		[]string{"charon-a-example", "charon-b-example", "charon-primary"}) {
+		t.Fatalf("aggregated providers = %v", names)
+	}
+
+	onlyB := base
+	onlyB.Groups = []EndpointGroup{
+		{Endpoint: "https://b.example/v1", Key: "sk-b2", Models: []ModelSpec{{Slug: "b-2"}}},
+	}
+	if err := tool.ApplyAuth(onlyB); err != nil {
+		t.Fatal(err)
+	}
+	providers := readPiProviders(t, home)
+	if got := piProviderNames(providers); !reflect.DeepEqual(got, []string{"charon-b-example", "charon-primary"}) {
+		t.Fatalf("providers after dropping A = %v", got)
+	}
+	b := providers["charon-b-example"]
+	if b["apiKey"] != "sk-b2" || !reflect.DeepEqual(piModelField(b["models"], "id"), []string{"b-2"}) {
+		t.Fatalf("updated B provider = %#v", b)
+	}
+	main := providers["charon-primary"]
+	if main["baseUrl"] != base.Endpoint || main["apiKey"] != "sk-primary" ||
+		!reflect.DeepEqual(piModelField(main["models"], "id"), []string{"m-1"}) {
+		t.Fatalf("charon provider changed: %#v", main)
+	}
+}
+
+func TestPiEndpointLabelsStayShort(t *testing.T) {
+	// Pi prints the label beside every model, so the label keeps only the
+	// part of the host that names the service.
+	short := piEndpointLabels("https://newapi.maimaidx.icu/v1", []EndpointGroup{
+		{Endpoint: "https://grok-heavy.878.indevs.in/v1"},
+		{Endpoint: "https://luckyg.131518.xyz/v1"},
+	})
+	for endpoint, want := range map[string]string{
+		"https://newapi.maimaidx.icu/v1":      "newapi",
+		"https://grok-heavy.878.indevs.in/v1": "grok-heavy",
+		"https://luckyg.131518.xyz/v1":        "luckyg",
+	} {
+		if got := short[endpoint]; got != want {
+			t.Fatalf("label of %s = %q, want %q", endpoint, got, want)
+		}
+	}
+
+	// A first label too short to say anything keeps the second one.
+	if got := piEndpointLabels("https://ai.hyper.nyc.mn/v1", nil)["https://ai.hyper.nyc.mn/v1"]; got != "ai.hyper" {
+		t.Fatalf("label of ai.hyper.nyc.mn = %q, want ai.hyper", got)
+	}
+
+	// Two services under the same short label cannot share it, so both keep
+	// their whole host.
+	twins := piEndpointLabels("https://newapi.one.example/v1", []EndpointGroup{
+		{Endpoint: "https://newapi.two.example/v1"},
+	})
+	for endpoint, want := range map[string]string{
+		"https://newapi.one.example/v1": "newapi.one.example",
+		"https://newapi.two.example/v1": "newapi.two.example",
+	} {
+		if got := twins[endpoint]; got != want {
+			t.Fatalf("label of %s = %q, want %q", endpoint, got, want)
+		}
+	}
+
+	// An address has no service label, so it stays whole.
+	if got := piEndpointLabels("http://127.0.0.1:8080/v1", nil)["http://127.0.0.1:8080/v1"]; got != "127.0.0.1" {
+		t.Fatalf("label of an address = %q, want 127.0.0.1", got)
+	}
+}
+
+func TestPiAggregationSameHostUsesURL(t *testing.T) {
+	home := sandboxHome(t)
+	spec := AuthSpec{
+		Endpoint: "https://primary.example/v1",
+		Key:      "sk-primary",
+		Model:    "m-1",
+		Models:   []ModelSpec{{Slug: "m-1"}},
+		Groups: []EndpointGroup{
+			{Endpoint: "https://new.sharedchat.cc/v1", Key: "sk-1", Models: []ModelSpec{{Slug: "s-1"}}},
+			{Endpoint: "https://new.sharedchat.cc/codex", Key: "sk-2", Models: []ModelSpec{{Slug: "s-2"}}},
+		},
+	}
+	if err := Find("pi").ApplyAuth(spec); err != nil {
+		t.Fatal(err)
+	}
+	providers := readPiProviders(t, home)
+	if got := piProviderNames(providers); !reflect.DeepEqual(got,
+		[]string{"charon-https---new-sharedchat-cc-codex", "charon-https---new-sharedchat-cc-v1", "charon-primary"}) {
+		t.Fatalf("providers = %v", got)
+	}
+	for endpoint, key := range map[string]string{
+		"https://new.sharedchat.cc/v1":    "charon-https---new-sharedchat-cc-v1",
+		"https://new.sharedchat.cc/codex": "charon-https---new-sharedchat-cc-codex",
+	} {
+		entry := providers[key]
+		if entry["name"] != endpoint || entry["baseUrl"] != endpoint {
+			t.Fatalf("%s entry = %#v, want the full URL as name and baseUrl", key, entry)
+		}
+	}
+	// The label reaches the model display names too, so two entries of the
+	// same model id stay distinguishable in /model.
+	if got := piModelField(providers["charon-https---new-sharedchat-cc-v1"]["models"], "name"); !reflect.DeepEqual(
+		got, []string{"s-1 (https://new.sharedchat.cc/v1)"}) {
+		t.Fatalf("v1 model names = %v", got)
+	}
+}
+
+func TestPiAggregationReapplyIsStable(t *testing.T) {
+	home := sandboxHome(t)
+	dir := filepath.Join(home, ".pi", "agent")
+	writeFile(t, filepath.Join(dir, "models.json"), `{
+		"providers": {
+			"mine": {"baseUrl": "https://mine.example", "apiKey": "sk-mine"}
+		}
+	}`)
+	spec := AuthSpec{
+		Endpoint: "https://primary.example/v1",
+		Key:      "sk-primary",
+		Model:    "m-1",
+		Models:   []ModelSpec{{Slug: "m-1"}, {Slug: "m-2"}},
+		Groups: []EndpointGroup{
+			{Endpoint: "https://a.example/v1", Key: "sk-a", Models: []ModelSpec{{Slug: "a-1"}}},
+			{Endpoint: "https://b.example/v1", Key: "sk-b", Models: []ModelSpec{{Slug: "b-1"}}},
+		},
+	}
+	tool := Find("pi")
+	if err := tool.ApplyAuth(spec); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "models.json")
+	first, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tool.ApplyAuth(spec); err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatalf("reapplying one spec changed models.json:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
+func TestPiAggregationUsesEachGroupProtocol(t *testing.T) {
+	home := sandboxHome(t)
+	spec := AuthSpec{
+		Endpoint: "https://primary.example/v1",
+		PiAPI:    "openai-responses",
+		Key:      "sk-primary",
+		Model:    "m-1",
+		Models:   []ModelSpec{{Slug: "m-1"}},
+		Groups: []EndpointGroup{
+			{Endpoint: "https://claude.example/v1", Key: "sk-claude", PiAPI: "anthropic-messages", Models: []ModelSpec{{Slug: "claude-opus-5"}}},
+			{Endpoint: "https://plain.example/v1", Key: "sk-plain", Models: []ModelSpec{{Slug: "plain"}}},
+		},
+	}
+	if err := Find("pi").ApplyAuth(spec); err != nil {
+		t.Fatal(err)
+	}
+	providers := readPiProviders(t, home)
+	if got := providers["charon-primary"]["api"]; got != "openai-responses" {
+		t.Fatalf("primary api = %v, want openai-responses", got)
+	}
+	if got := providers["charon-claude"]["api"]; got != "anthropic-messages" {
+		t.Fatalf("claude group api = %v, want the protocol its own binding saved", got)
+	}
+	// An endpoint whose binding never chose a protocol keeps pi's default; it
+	// must not inherit the primary binding's dialect, which its gateway would
+	// reject.
+	if got := providers["charon-plain"]["api"]; got != "openai-completions" {
+		t.Fatalf("plain group api = %v, want openai-completions", got)
+	}
+}
+
+func TestPiAggregationRejectsUnknownGroupProtocol(t *testing.T) {
+	home := sandboxHome(t)
+	dir := filepath.Join(home, ".pi", "agent")
+	before := `{"providers":{"mine":{"baseUrl":"https://mine.example"}}}`
+	writeFile(t, filepath.Join(dir, "models.json"), before)
+	err := Find("pi").ApplyAuth(AuthSpec{
+		Endpoint: "https://primary.example/v1", Key: "sk-primary", Model: "m-1",
+		Groups: []EndpointGroup{
+			{Endpoint: "https://g.example/v1", Key: "sk-g", PiAPI: "openai-responses-compact", Models: []ModelSpec{{Slug: "g"}}},
+		},
+	})
+	if err == nil {
+		t.Fatal("accepted an unsupported group protocol")
+	}
+	data, readErr := os.ReadFile(filepath.Join(dir, "models.json"))
+	if readErr != nil || string(data) != before {
+		t.Fatalf("models.json written before the group was validated: %s", data)
+	}
+}
+
+func TestPiOffRemovesAggregatedProviders(t *testing.T) {
+	home := sandboxHome(t)
+	dir := filepath.Join(home, ".pi", "agent")
+	writeFile(t, filepath.Join(dir, "models.json"), `{
+		"customSetting": "kept",
+		"providers": {
+			"mine": {"baseUrl": "https://mine.example", "apiKey": "sk-mine"}
+		}
+	}`)
+	tool := Find("pi")
+	if err := tool.ApplyAuth(AuthSpec{
+		Endpoint: "https://primary.example/v1",
+		Key:      "sk-primary",
+		Model:    "m-1",
+		Models:   []ModelSpec{{Slug: "m-1"}},
+		Groups: []EndpointGroup{
+			{Endpoint: "https://a.example/v1", Key: "sk-a", Models: []ModelSpec{{Slug: "a-1"}}},
+			{Endpoint: "https://b.example/v1", Key: "sk-b", Models: []ModelSpec{{Slug: "b-1"}}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tool.Off(ToolStash{}); err != nil {
+		t.Fatal(err)
+	}
+	providers := readPiProviders(t, home)
+	if got := piProviderNames(providers); !reflect.DeepEqual(got, []string{"mine"}) {
+		t.Fatalf("providers after off = %v, want only the user's", got)
+	}
+	modelsFile, err := loadJSONMap(filepath.Join(dir, "models.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modelsFile["customSetting"] != "kept" {
+		t.Fatalf("off touched unrelated keys: %#v", modelsFile)
 	}
 }

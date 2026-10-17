@@ -335,6 +335,20 @@ func (m *model) selectedBinding() (item, bool) {
 	return it, true
 }
 
+// aggregationNote summarizes the endpoints a multi-endpoint tool registers
+// beyond the binding's own, or "" when there is nothing extra to show: the tool
+// holds one endpoint, the catalog cannot be read, or only one endpoint qualifies.
+func aggregationNote(t *tools.Tool, cat *catalog.Catalog) string {
+	if t == nil || !t.MultiEndpoint || t.ModelMenu == "" || cat == nil {
+		return ""
+	}
+	endpoints, models, err := cat.AggregateCounts(t.Name)
+	if err != nil || endpoints <= 1 {
+		return ""
+	}
+	return fmt.Sprintf("%s: %d endpoints (%d models)", t.ModelMenu, endpoints, models)
+}
+
 func (m *model) loadTools() {
 	var items []list.Item
 	selectedIndex := 0
@@ -355,6 +369,11 @@ func (m *model) loadTools() {
 				}
 			}
 			desc = strings.Join(segs, " · ")
+			// The note only shows for a detected tool: it describes what a switch
+			// would write, which is pointless next to "not detected".
+			if note := aggregationNote(t, m.cat); note != "" {
+				desc += " · " + note
+			}
 		}
 		items = append(items, item{title: t.Title, desc: desc, value: t.Name})
 		if m.tool != nil && t.Name == m.tool.Name {
@@ -836,7 +855,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if _, err := m.cat.Reapply(b.ID); err != nil {
 					m.setStatus(statusErr, err.Error())
 				} else {
-					m.setStatus(statusOK, "Reapplied "+it.value)
+					status := "Reapplied " + it.value
+					if note := aggregationNote(m.tool, m.cat); note != "" {
+						status += " · " + note
+					}
+					m.setStatus(statusOK, status)
 					m.loadProfiles(it.value)
 				}
 				return m, nil
@@ -1267,8 +1290,12 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 			m.setStatus(statusErr, err.Error())
 		} else {
 			info, _ := m.tool.Describe()
-			m.setStatus(statusOK, fmt.Sprintf("Switched to %s (%s · %s)",
-				it.value, info.Endpoint, secret.Mask(info.Secret)))
+			status := fmt.Sprintf("Switched to %s (%s · %s)",
+				it.value, info.Endpoint, secret.Mask(info.Secret))
+			if note := aggregationNote(m.tool, m.cat); note != "" {
+				status += " · " + note
+			}
+			m.setStatus(statusOK, status)
 			m.loadProfiles(it.value)
 		}
 

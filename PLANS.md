@@ -25,6 +25,18 @@ Codex's config has no such field, so a Codex binding carries exactly one model.
 `charon completion <bash|zsh|fish>` prints a script (dynamic binding-name
 completion via the hidden `charon __profiles` command, retained for existing scripts).
 
+### Pi endpoint aggregation
+Activating a Pi binding registers the catalog's other Pi bindings as separate
+providers in `models.json`, one per endpoint, each carrying the key, model list
+and request protocol that binding saved. Every entry, the active binding's
+included, is keyed `charon-<label>`, where the label is the host's first part
+(full host, then full URL, when two endpoints would collide), so Pi's
+`provider/id` label names the gateway instead of reading `charon`. `/model` therefore lists every endpoint
+configured for Pi, and each request goes to the gateway that serves it. Endpoints
+only other tools use are left out, and the active binding still sets the default
+endpoint, the default model and its own list; `charon off` removes every
+`charon*` provider.
+
 ### `--json` output
 `charon status --json` and `charon ls <tool> --json` emit structured records
 (secrets masked, never raw).

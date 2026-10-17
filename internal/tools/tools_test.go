@@ -102,7 +102,7 @@ func TestPiOutputLimits(t *testing.T) {
 			if withList {
 				wantCount = 2
 			}
-			entries := config.Providers[managedProvider].Models
+			entries := config.Providers[piDefaultProvider(t, home)].Models
 			if len(entries) != wantCount || entries[0].ID != "gpt-6-luna" || entries[0].MaxTokens != 128_000 {
 				t.Fatalf("output limit not projected: %+v", entries)
 			}
@@ -962,7 +962,7 @@ func TestNotDetectedInEmptyHome(t *testing.T) {
 
 func TestPiBuildModelsEnablesThinkingByDefault(t *testing.T) {
 	for _, slug := range []string{"gpt-5.6-luna", "gpt-4o", "moonshotai/kimi-k3", "z-ai/glm-5.3-flash"} {
-		built := piBuildModels([]ModelSpec{{Slug: slug}}, "")
+		built := piBuildModels([]ModelSpec{{Slug: slug}}, "", "")
 		if len(built) != 1 || !built[0].Reasoning {
 			t.Fatalf("%s reasoning = %#v, want true", slug, built)
 		}
@@ -1013,9 +1013,11 @@ func TestPiDescribeAndApply(t *testing.T) {
 	if err := json.Unmarshal(data, &modelsConfig); err != nil {
 		t.Fatal(err)
 	}
-	cfg, ok := modelsConfig.Providers["charon"]
+	// The binding's own provider is keyed after its endpoint, so provider/id in
+	// pi's picker names the gateway instead of reading "charon".
+	cfg, ok := modelsConfig.Providers["charon-openrouter"]
 	if !ok {
-		t.Fatal("charon provider missing from models.json")
+		t.Fatalf("charon provider missing from models.json: %v", modelsConfig.Providers)
 	}
 	if len(cfg.Models) != 2 {
 		t.Errorf("models = %v, want 2 entries", cfg.Models)
@@ -1028,8 +1030,8 @@ func TestPiDescribeAndApply(t *testing.T) {
 	var s map[string]any
 	sd, _ := os.ReadFile(settingsPath)
 	_ = json.Unmarshal(sd, &s)
-	if s["defaultProvider"] != "charon" || s["defaultModel"] != "x/y" {
-		t.Errorf("settings.json = %v, want defaultProvider/defaultModel set to charon/x/y", s)
+	if s["defaultProvider"] != "charon-openrouter" || s["defaultModel"] != "x/y" {
+		t.Errorf("settings.json = %v, want defaultProvider/defaultModel set to charon-openrouter/x/y", s)
 	}
 
 	// A rename/key-rotation call without AllModels must preserve the previously
@@ -1039,7 +1041,7 @@ func TestPiDescribeAndApply(t *testing.T) {
 	}
 	data, _ = os.ReadFile(modelsPath)
 	_ = json.Unmarshal(data, &modelsConfig)
-	cfg = modelsConfig.Providers["charon"]
+	cfg = modelsConfig.Providers["charon-openrouter"]
 	if len(cfg.Models) != 2 {
 		t.Errorf("models after re-apply = %v, want preserved 2 entries", cfg.Models)
 	}

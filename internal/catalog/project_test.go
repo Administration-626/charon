@@ -5,11 +5,33 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"charon/internal/models"
+	"charon/internal/tools"
 )
+
+// piDefaultProvider is the provider key charon made default in settings.json:
+// the endpoint-keyed name of the active binding's own entry.
+func piDefaultProvider(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".pi", "agent", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s struct {
+		DefaultProvider string `json:"defaultProvider"`
+	}
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.DefaultProvider == "" {
+		t.Fatal("settings.json has no defaultProvider")
+	}
+	return s.DefaultProvider
+}
 
 func TestProjectCodexMultipleModels(t *testing.T) {
 	for _, endpoint := range []string{"https://gateway.example/v1", "https://api.openai.com/v1"} {
@@ -98,7 +120,7 @@ func TestReapplyPiRepairsThinkingCapabilities(t *testing.T) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		t.Fatal(err)
 	}
-	entries := config.Providers["charon"].Models
+	entries := config.Providers[piDefaultProvider(t)].Models
 	if len(entries) != 2 || entries[0].ID != "gpt-6-luna" || !entries[0].Reasoning {
 		t.Fatalf("Pi models not repaired: %+v", entries)
 	}
@@ -313,7 +335,10 @@ func TestProjectSingleModelReplacesExistingList(t *testing.T) {
 }
 
 func TestProjectBindingReplacesPreviousToolsModelList(t *testing.T) {
-	for _, tool := range []string{"claude", "opencode", "pi"} {
+	// Pi is excluded on purpose: activating one pi binding keeps every other
+	// endpoint registered (see TestProjectSpecAggregatesEndpointsForPi), so its
+	// previous endpoint is not supposed to disappear from models.json.
+	for _, tool := range []string{"claude", "opencode"} {
 		t.Run(tool, func(t *testing.T) {
 			c := openTest(t)
 			home := t.TempDir()
@@ -569,5 +594,169 @@ func TestRetiredToolBindingIsPreservedAndNotProjected(t *testing.T) {
 		if err != nil || string(data) != want {
 			t.Fatalf("retiring tool changed %s: %v", path, err)
 		}
+	}
+}
+
+func TestProjectSpecAggregatesToolBindingsForPi(t *testing.T) {
+	c := openTest(t)
+	// The binding's own endpoint keeps a catalog larger than its curated list:
+	// aggregation follows pi's bindings, so the unselected model stays out.
+	own, ownCredential := seed(t, c, "https://own.example/v1", "sk-own", "own-default", "own-extra")
+	if _, err := c.PutModelWithWindow(own.ID, "own-default", 128000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.PutModelWithWindow(own.ID, "own-extra", 40000); err != nil {
+		t.Fatal(err)
+	}
+
+	// A key and models another tool uses are that tool's business: pi must not
+	// register an endpoint it has no binding for.
+	claudeOnly, claudeCredential := seed(t, c, "https://claude-only.example/v1", "sk-claude", "claude-a")
+	if _, err := c.PutModelWithWindow(claudeOnly.ID, "claude-a", 200000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.AddBinding("claude", "c", claudeCredential.ID, "claude-a", []string{"claude-a"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Sorts before the other endpoint, so group order cannot be binding order.
+	earlier, earlierCredential := seed(t, c, "https://a5.example/v1", "sk-five", "five-a")
+	if _, err := c.PutModelWithWindow(earlier.ID, "five-a", 200000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.AddBinding("pi", "five", earlierCredential.ID, "five-a", []string{"five-a"}); err != nil {
+		t.Fatal(err)
+	}
+
+	second, secondCredential := seed(t, c, "https://m2.example/v1", "sk-two", "two-a", "two-b")
+	if _, err := c.PutModelWithWindow(second.ID, "two-a", 64000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.PutModelWithWindow(second.ID, "two-b", 32000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.AddBinding("pi", "two", secondCredential.ID, "two-a", []string{"two-a", "two-b"}, "anthropic-messages"); err != nil {
+		t.Fatal(err)
+	}
+	// A second pi binding on the same endpoint keeps the first entry only.
+	rotated, err := c.PutCredential(second.ID, "sk-two-rotated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.AddBinding("pi", "two-copy", rotated.ID, "two-a", []string{"two-a"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A second pi binding on the binding's own endpoint (a rotated key) must not
+	// become another entry for the endpoint providers.charon already holds.
+	ownRotated, err := c.PutCredential(own.ID, "sk-own-rotated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.AddBinding("pi", "own-copy", ownRotated.ID, "own-default", []string{"own-default"}); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := c.AddBinding("pi", "agg", ownCredential.ID, "own-default", []string{"own-default"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := c.ProjectSpec(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Endpoint != "https://own.example/v1" || spec.Key != "sk-own" || spec.Model != "own-default" {
+		t.Fatalf("binding's own endpoint changed: %+v", spec)
+	}
+	wantGroups := []tools.EndpointGroup{
+		{Endpoint: "https://a5.example/v1", Key: "sk-five", PiAPI: "openai-completions", Models: []tools.ModelSpec{{Slug: "five-a", ContextWindow: 200000}}},
+		{
+			Endpoint: "https://m2.example/v1", Key: "sk-two", PiAPI: "anthropic-messages",
+			Models: []tools.ModelSpec{{Slug: "two-a", ContextWindow: 64000}, {Slug: "two-b", ContextWindow: 32000}},
+		},
+	}
+	if !reflect.DeepEqual(spec.Groups, wantGroups) {
+		t.Fatalf("groups = %+v, want %+v", spec.Groups, wantGroups)
+	}
+	// The primary entry lists what this binding picked, not the endpoint's whole
+	// catalog: the catalog's extra model was never part of pi's configuration.
+	wantModels := []tools.ModelSpec{{Slug: "own-default", ContextWindow: 128000}}
+	if !reflect.DeepEqual(spec.Models, wantModels) {
+		t.Fatalf("models = %+v, want %+v", spec.Models, wantModels)
+	}
+}
+
+func TestProjectSpecOmitsGroupsForOtherTools(t *testing.T) {
+	for _, tool := range []string{"codex", "claude"} {
+		t.Run(tool, func(t *testing.T) {
+			c := openTest(t)
+			own, cr := seed(t, c, "https://one.example/v1", "sk-one", "one-a", "one-b")
+			if _, err := c.PutModelWithWindow(own.ID, "one-a", 128000); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := c.PutModelWithWindow(own.ID, "one-b", 96000); err != nil {
+				t.Fatal(err)
+			}
+			// A pi binding on another endpoint: a multi-endpoint tool would
+			// register it, this one must not.
+			_, piCredential := seed(t, c, "https://two.example/v1", "sk-two", "two-a")
+			if _, err := c.AddBinding("pi", "pi-two", piCredential.ID, "two-a", []string{"two-a"}); err != nil {
+				t.Fatal(err)
+			}
+			b, err := c.AddBinding(tool, "single", cr.ID, "one-a", []string{"one-a", "one-b"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			spec, err := c.ProjectSpec(b)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if spec.Groups != nil {
+				t.Fatalf("%s must not aggregate endpoints: %+v", tool, spec.Groups)
+			}
+			want := []tools.ModelSpec{{Slug: "one-a", ContextWindow: 128000}, {Slug: "one-b", ContextWindow: 96000}}
+			if !reflect.DeepEqual(spec.Models, want) {
+				t.Fatalf("models = %+v, want the binding's list %+v", spec.Models, want)
+			}
+		})
+	}
+}
+
+func TestAggregateCounts(t *testing.T) {
+	c := openTest(t)
+	oneProvider, one := seed(t, c, "https://one.example/v1", "sk-one", "a", "b")
+	_, two := seed(t, c, "https://two.example/v1", "sk-two", "c")
+	// A key and models without a binding of their own never count.
+	seed(t, c, "https://unbound.example/v1", "sk-unbound", "d")
+	if _, err := c.AddBinding("pi", "one", one.ID, "a", []string{"a", "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.AddBinding("pi", "two", two.ID, "c", []string{"c"}); err != nil {
+		t.Fatal(err)
+	}
+	// A second binding on the same endpoint (a rotated key) is still one endpoint.
+	rotated, err := c.PutCredential(oneProvider.ID, "sk-one-rotated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.AddBinding("pi", "one-copy", rotated.ID, "a", []string{"a"}); err != nil {
+		t.Fatal(err)
+	}
+
+	endpoints, modelCount, err := c.AggregateCounts("pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if endpoints != 2 || modelCount != 3 {
+		t.Fatalf("AggregateCounts(pi) = %d endpoints, %d models; want 2, 3", endpoints, modelCount)
+	}
+	// Another tool's bindings are its own business.
+	if endpoints, modelCount, err := c.AggregateCounts("codex"); err != nil || endpoints != 0 || modelCount != 0 {
+		t.Fatalf("AggregateCounts(codex) = %d endpoints, %d models, err=%v; want 0, 0", endpoints, modelCount, err)
+	}
+
+	empty := openTest(t)
+	if endpoints, modelCount, err := empty.AggregateCounts("pi"); err != nil || endpoints != 0 || modelCount != 0 {
+		t.Fatalf("empty catalog = %d endpoints, %d models, err=%v; want 0, 0", endpoints, modelCount, err)
 	}
 }

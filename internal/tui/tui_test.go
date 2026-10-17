@@ -95,6 +95,26 @@ func TestConfigSummaryDoesNotInferDefaultsOrExposeSecrets(t *testing.T) {
 	}
 }
 
+// piDefaultProvider is the provider key charon made default in settings.json:
+// the endpoint-keyed name of the active binding's own entry.
+func piDefaultProvider(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".pi", "agent", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s struct {
+		DefaultProvider string `json:"defaultProvider"`
+	}
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.DefaultProvider == "" {
+		t.Fatal("settings.json has no defaultProvider")
+	}
+	return s.DefaultProvider
+}
+
 func TestBindingConfigSummaryRefreshIsReadOnly(t *testing.T) {
 	st := openTestCatalog(t, false)
 	tool := tools.Find("pi")
@@ -848,7 +868,7 @@ func TestModelLibraryRefreshesActivePiThinkingMap(t *testing.T) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		t.Fatal(err)
 	}
-	entries := config.Providers["charon"].Models
+	entries := config.Providers[piDefaultProvider(t)].Models
 	if len(entries) != 2 || entries[0].ID != "custom" {
 		t.Fatalf("active picker changed: %+v", entries)
 	}
@@ -2545,5 +2565,79 @@ func rewriteModelJSON(t *testing.T, path, want, set string) {
 	}
 	if err := os.WriteFile(path, out, 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// aggregationCatalog points a bare catalog at hand-written tables, so the hint
+// can be produced without opening a store and running its migrations.
+func aggregationCatalog(t *testing.T, providers, credentials, models, bindings string) *catalog.Catalog {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"providers.json":   providers,
+		"credentials.json": credentials,
+		"models.json":      models,
+		"bindings.json":    bindings,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return &catalog.Catalog{Root: dir}
+}
+
+func TestAggregationNote(t *testing.T) {
+	// The hint counts the tool's own bindings: each one is an endpoint the tool's
+	// config will register.
+	const twoProviders = `[{"id":"p1","baseUrl":"https://one.example/v1"},{"id":"p2","baseUrl":"https://two.example/v1"}]`
+	const twoCredentials = `[{"id":"k1","providerId":"p1","key":"sk-one"},{"id":"k2","providerId":"p2","key":"sk-two"}]`
+	const threeModels = `[{"id":"m1","providerId":"p1","slug":"a"},{"id":"m2","providerId":"p2","slug":"b"},{"id":"m3","providerId":"p2","slug":"c"}]`
+	const piBindings = `[{"id":"b1","name":"one","tool":"pi","credentialId":"k1","modelId":"m1","models":["m1"]},` +
+		`{"id":"b2","name":"two","tool":"pi","credentialId":"k2","modelId":"m2","models":["m2","m3"]}]`
+
+	twoEndpoints := func(t *testing.T) *catalog.Catalog {
+		return aggregationCatalog(t, twoProviders, twoCredentials, threeModels, piBindings)
+	}
+	oneEndpoint := func(t *testing.T) *catalog.Catalog {
+		return aggregationCatalog(t,
+			`[{"id":"p1","baseUrl":"https://one.example/v1"}]`,
+			`[{"id":"k1","providerId":"p1","key":"sk-one"}]`,
+			`[{"id":"m1","providerId":"p1","slug":"a"}]`,
+			`[{"id":"b1","name":"one","tool":"pi","credentialId":"k1","modelId":"m1","models":["m1"]}]`)
+	}
+
+	tests := []struct {
+		name string
+		tool *tools.Tool
+		cat  func(*testing.T) *catalog.Catalog
+		want string
+	}{
+		{name: "single-endpoint tool", tool: tools.Find("codex"), cat: twoEndpoints, want: ""},
+		{name: "no tool", tool: nil, cat: twoEndpoints, want: ""},
+		{name: "empty catalog", tool: tools.Find("pi"), cat: func(t *testing.T) *catalog.Catalog {
+			return &catalog.Catalog{Root: t.TempDir()}
+		}, want: ""},
+		{name: "one endpoint", tool: tools.Find("pi"), cat: oneEndpoint, want: ""},
+		{name: "only one endpoint has a key", tool: tools.Find("pi"), cat: func(t *testing.T) *catalog.Catalog {
+			return aggregationCatalog(t, twoProviders,
+				`[{"id":"k1","providerId":"p1","key":"sk-one"},{"id":"k2","providerId":"p2","key":""}]`,
+				threeModels, piBindings)
+		}, want: ""},
+		{name: "bindings of another tool", tool: tools.Find("pi"), cat: func(t *testing.T) *catalog.Catalog {
+			return aggregationCatalog(t, twoProviders, twoCredentials, threeModels,
+				`[{"id":"b1","name":"one","tool":"codex","credentialId":"k1","modelId":"m1","models":["m1"]},`+
+					`{"id":"b2","name":"two","tool":"codex","credentialId":"k2","modelId":"m2","models":["m2","m3"]}]`)
+		}, want: ""},
+		{name: "two endpoints", tool: tools.Find("pi"), cat: twoEndpoints, want: "/model: 2 endpoints (3 models)"},
+		{name: "unreadable catalog", tool: tools.Find("pi"), cat: func(t *testing.T) *catalog.Catalog {
+			return aggregationCatalog(t, "{", "[]", "[]", "[]")
+		}, want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := aggregationNote(tc.tool, tc.cat(t)); got != tc.want {
+				t.Fatalf("aggregationNote() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

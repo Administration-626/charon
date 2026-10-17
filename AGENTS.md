@@ -105,7 +105,7 @@ marshal/unmarshal — that reorders keys and strips comments.
 
 A binding's model list is what charon registers in the **tool's own** model picker
 (Codex `custom_models.json`, Claude `modelPicker`, OpenCode `provider.charon.models`,
-Pi `models.json` → `providers.charon.models`, Grok `[model.charon-<slug>]`), so switching model
+Pi `models.json` → `providers.charon-<label>.models`, Grok `[model.charon-<slug>]`), so switching model
 mid-session doesn't need charon. It is passed to `ApplyAuth` as
 `AuthSpec.Models`. Two rules a new tool must honor:
 
@@ -127,7 +127,7 @@ The model-discovery wire dialect is **not stored**. `models.Fetch` is called
 twice when listing models — the tool's historical dialect first, then the other —
 and the winner is not persisted.
 Pi bindings separately store an optional `piApi` request protocol, selected in the
-TUI and projected to `providers.charon.api`. An absent value means
+TUI and projected to `providers.charon-<label>.api`. An absent value means
 `openai-completions`; edits and copies within Pi must preserve explicitly saved
 types. Pi 1.0.4 does not support a separate Responses Compact API, so never offer
 it in the dropdown or write it as an API value.
@@ -146,7 +146,7 @@ it in the dropdown or write it as an API value.
 
 - `LookupThinkingPreset` returns a vendor's verified thinking-level map plus OpenAI-completions
   compat flags (thinking format, `max_tokens` field, reasoning-content tagging) for recognized
-  families. Pi tool generation merges them into `providers.charon.models` entries so each model
+  families. Pi tool generation merges them into `providers.charon-<label>.models` entries so each model
   offers exactly the levels its vendor supports (and pi sends the right request shape through a
   gateway, where its baseUrl fingerprinting cannot detect the vendor).
 - Presets are curated from WorkBuddy (`scripts/extract_workbuddy_models.py --thinking`); official

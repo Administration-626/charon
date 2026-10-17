@@ -62,7 +62,7 @@ endpoint 和凭据。
 | Codex | ~/.codex/config.toml（model_provider → base_url） | ~/.codex/config.toml（experimental_bearer_token） |
 | Claude Code | ~/.claude/settings.json（env.ANTHROPIC_BASE_URL） | settings.json 的环境变量键 |
 | OpenCode | ~/.config/opencode/opencode.jsonc（provider.*.options.baseURL） | opencode.jsonc（provider.charon.options.apiKey） |
-| Pi | ~/.pi/agent/models.json（providers.charon.baseUrl） | ~/.pi/agent/models.json（providers.charon.apiKey） |
+| Pi | ~/.pi/agent/models.json（providers.charon-<label>.baseUrl） | ~/.pi/agent/models.json（providers.charon-<label>.apiKey） |
 | Grok | ~/.grok/config.toml（[model.charon-*].base_url） | ~/.grok/config.toml（[model.charon-*].api_key） |
 
 Charon 不再支持 Oh My Pi（omp），但不会删除已有绑定或 `~/.omp/agent/` 中的文件。
@@ -73,6 +73,18 @@ Pi 的 Charon provider 使用原生 `models.json`。下次写入配置时，Char
 请检查后手动停用。迁移后请重启 Pi，以卸载已加载的旧扩展。现有 thinking、压缩偏好
 和 `auth.json` 登录凭据保持不变。每个文件单独原子替换；若两次写入之间发生 I/O
 错误，会明确提示配置可能部分生效。
+
+激活 Pi 绑定时，Charon 还会把 catalog 里其他 Pi 绑定一并注册：每个 endpoint 一条
+provider 条目，携带该绑定保存的 key、模型列表与请求协议。Pi 的 `/model` 因此列出
+所有为 Pi 配过的 endpoint 的模型，选中后请求按该绑定的协议发往对应网关。每条条目
+（包括当前绑定的那条）的 provider 键都是 `charon-<标签>`，`name` 也用同一个标签，
+Pi 显示 `provider/id` 时读到的是网关名而不是光秃秃的 `charon`。标签取主机名的首段
+（`newapi.maimaidx.icu` → `newapi`；首段太短时带上第二段，`ai.hyper.nyc.mn` →
+`ai.hyper`），因此贴在每个模型后面也不占多少宽度。两条 endpoint 会撞同一个标签时，
+各自改用完整主机名；同一主机上的多个 endpoint 用完整 URL 区分。只有 Claude 或
+Codex 绑定用到的 endpoint 不参与聚合：它们的模型和协议从未为 Pi 选过。当前 binding
+仍决定默认 endpoint、默认模型和它自己的模型列表；`charon off` 会删除全部 `charon*`
+provider。
 
 Charon 会为 Pi 注册的每个模型默认开启 thinking，并提供标准的
 `off`、`minimal`、`low`、`medium`、`high`、`xhigh` 和 `max` 档位。启动时使用的
@@ -204,7 +216,7 @@ charon completion fish | source
 绑定中保存的模型会出现在工具自身的菜单中，因此可以在当前会话内更换模型：Codex
 的 /model（读取 custom_models.json）、Claude Code
 的 /model（通过 modelPicker）、OpenCode 的 /models（读取 charon provider 的模型
-映射）、Pi 的 /model（读取 models.json 中 providers.charon 的模型列表）
+映射）、Pi 的 /model（读取 models.json 中 providers.charon-* 的模型列表）
 以及 Grok 的 /model（一组 [model.charon-<slug>]
 表）。切换绑定时，工具中的模型列表也会更新。
 只有一个模型的绑定会将工具中的模型列表替换为该模型，不会保留上一条绑定的列表。
@@ -265,7 +277,7 @@ charon edit claude gateway --models glm-4.6   # 只在模型菜单中注册 glm-
 
 每个工具都会在它自己的配置格式里写入一个专属的 charon provider 条目
 （Codex 的 [model_providers.charon]、Claude 的 env.ANTHROPIC_*、OpenCode 的一个
-@ai-sdk/openai-compatible provider、Pi 的 models.json 中一个 providers.charon 块、
+@ai-sdk/openai-compatible provider、Pi 的 models.json 中一个 providers.charon-<label> 条目、
 Grok 的每个模型一张
 [model.charon-<slug>] 表）。因此切换到其他配置后再切回时，Charon 仍可重新应用该绑定。
 

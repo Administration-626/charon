@@ -35,6 +35,19 @@ func (i Info) withDefaults(endpoint string) Info {
 	return i
 }
 
+// EndpointGroup is one additional endpoint's models, for a tool whose config
+// can hold several endpoints at once (see Tool.MultiEndpoint): the group
+// carries its own base URL, key and request protocol and is registered
+// alongside the binding's own endpoint, so the tool's model picker offers
+// every endpoint's models and routes each request to the gateway that serves
+// it, the way that endpoint's own binding would have.
+type EndpointGroup struct {
+	Endpoint string
+	Key      string
+	PiAPI    string // Pi request protocol saved with that endpoint's binding
+	Models   []ModelSpec
+}
+
 // AuthSpec is a new endpoint + API key + model to write into a tool's config.
 type AuthSpec struct {
 	Endpoint string
@@ -42,7 +55,8 @@ type AuthSpec struct {
 	Key      string
 	Model    string
 	Effort   string
-	Models   []ModelSpec // complete registered list; nil means keep what is already there
+	Models   []ModelSpec     // complete registered list; nil means keep what is already there
+	Groups   []EndpointGroup // other endpoints to register too, for MultiEndpoint tools
 }
 
 // ModelSpec is one model registered in a tool's own model picker.
@@ -55,17 +69,22 @@ type ModelSpec struct {
 
 // Tool describes one AI CLI's auth surface and how to summarize/reconfigure it.
 type Tool struct {
-	Name            string               // stable id, e.g. "codex"
-	Title           string               // display name, e.g. "Codex"
-	Provider        string               // model-list wire format: "openai" or "anthropic"
-	DefaultEndpoint string               // prefilled when adding a binding
-	ModelMenu       string               // the tool's own model-switching command (e.g. "/model") when it can be given a list of models to offer
-	Files           []string             // config files ApplyAuth may read or write, for dry-run previews
-	Owned           []OwnedFile          // what ApplyAuth owns in each file, for stashing and off
-	Created         []string             // files charon itself creates, removed by off
-	Detected        func() bool          // is the tool installed/configured?
-	Describe        func() (Info, error) // read live config into an Info
-	ApplyAuth       func(AuthSpec) error // write endpoint/key/model into live config
+	Name            string      // stable id, e.g. "codex"
+	Title           string      // display name, e.g. "Codex"
+	Provider        string      // model-list wire format: "openai" or "anthropic"
+	DefaultEndpoint string      // prefilled when adding a binding
+	ModelMenu       string      // the tool's own model-switching command (e.g. "/model") when it can be given a list of models to offer
+	Files           []string    // config files ApplyAuth may read or write, for dry-run previews
+	Owned           []OwnedFile // what ApplyAuth owns in each file, for stashing and off
+	Created         []string    // files charon itself creates, removed by off
+	// MultiEndpoint marks a tool whose config can hold several endpoints at
+	// once, each with its own key and models. ApplyAuth then registers
+	// AuthSpec.Groups next to the binding's own endpoint and the tool's model
+	// picker lists them all; the binding's endpoint stays the default.
+	MultiEndpoint bool
+	Detected      func() bool          // is the tool installed/configured?
+	Describe      func() (Info, error) // read live config into an Info
+	ApplyAuth     func(AuthSpec) error // write endpoint/key/model into live config
 }
 
 func detected(executable string, paths ...string) bool {

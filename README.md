@@ -74,7 +74,7 @@ re-renders that binding into the tool, overwriting only the keys charon owns.
 | Codex | ~/.codex/config.toml (model_provider → base_url) | ~/.codex/config.toml (experimental_bearer_token) |
 | Claude Code | ~/.claude/settings.json (env.ANTHROPIC_BASE_URL) | settings.json env key |
 | OpenCode | ~/.config/opencode/opencode.jsonc (provider.*.options.baseURL) | opencode.jsonc (provider.charon.options.apiKey) |
-| Pi | ~/.pi/agent/models.json (providers.charon.baseUrl) | ~/.pi/agent/models.json (providers.charon.apiKey) |
+| Pi | ~/.pi/agent/models.json (providers.charon-<label>.baseUrl) | ~/.pi/agent/models.json (providers.charon-<label>.apiKey) |
 | Grok | ~/.grok/config.toml ([model.charon-*].base_url) | ~/.grok/config.toml ([model.charon-*].api_key) |
 
 Oh My Pi (omp) is no longer supported. Its existing bindings and files under
@@ -89,10 +89,25 @@ old extension. Existing thinking/compaction preferences and `auth.json` logins a
 left alone. Each file is replaced atomically; an I/O failure between writes is
 reported as partial application.
 
+Activating a Pi binding also registers the catalog's other **Pi bindings**: one
+provider entry per endpoint, carrying the key, model list and request protocol
+that binding saved. Pi's `/model` therefore lists the models of every endpoint
+you configured for Pi, and each request goes to the gateway that serves it the
+way that binding would have sent it. Every entry, the active binding's included,
+is keyed `charon-<label>` and named after the same label, so Pi's `provider/id`
+line names the gateway instead of reading `charon`. The label is the first part
+of the host — `newapi` for `newapi.maimaidx.icu`, `ai.hyper` when the first part
+is too short to say anything — so it stays readable next to every model. Two
+endpoints that would share a label keep their whole host, and two that share a
+host are told apart by their full URL. Endpoints that only
+Claude or Codex bindings use stay out: their models and protocol were never
+chosen for Pi. The active binding still decides the default endpoint, the default
+model and its own model list, and `charon off` removes every `charon*` provider.
+
 Pi's add/edit form has an **Endpoint Type** dropdown: OpenAI (Chat Completions,
 the default), OpenAI (Responses), Anthropic (Messages), or Gemini (Generate Content).
 The choice is stored per binding and written to `models.json` →
-`providers.charon.api`, including after switching, editing, or duplicating a binding.
+`providers.charon-<label>.api`, including after switching, editing, or duplicating a binding.
 In the dropdown, `[✓]` marks the current choice and `>` marks the cursor; Enter
 confirms a choice, and Save stores the binding. The saved type also appears in the
 binding list.
@@ -252,7 +267,7 @@ status bar flags missing required values on submit.
 The models a binding registers land in the tool's own menu, so you can change model
 without leaving your session: Codex's /model (via custom_models.json), Claude Code's /model (via modelPicker), OpenCode's
 /models (via the charon provider's model map), Pi's /model (via the
-providers.charon model list in models.json), and Grok's /model
+providers.charon-* model lists in models.json), and Grok's /model
 (via [model.charon-<slug>] tables).
 The list travels with the binding — switch bindings and the menu switches too.
 Codex's custom catalog contains the binding's complete model list, not built-in
@@ -327,7 +342,7 @@ picker list.
 
 Each tool gets a dedicated charon provider entry written into its own config
 format (Codex [model_providers.charon], Claude env.ANTHROPIC_*, OpenCode an
-@ai-sdk/openai-compatible provider, Pi a providers.charon block in models.json,
+@ai-sdk/openai-compatible provider, Pi a providers.charon-<label> entry in models.json,
 Grok a
 [model.charon-<slug>] table per model), so Charon can reapply a binding after
 you switch to another one.

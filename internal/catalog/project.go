@@ -2,6 +2,8 @@ package catalog
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	"charon/internal/tools"
 )
@@ -80,7 +82,125 @@ func (c *Catalog) ProjectSpec(b Binding) (tools.AuthSpec, error) {
 		}
 	}
 	spec.Models = specs
+	// A tool whose config holds several endpoints at once also registers the
+	// tool's other bindings, one entry per endpoint, so its picker can switch
+	// between them without charon. Only bindings of this same tool qualify: a
+	// catalog endpoint another tool uses was never given a model list or a
+	// request protocol for this one.
+	if t := tools.Find(b.Tool); t != nil && t.MultiEndpoint {
+		groups, err := c.endpointGroups(b.Tool, b.ID)
+		if err != nil {
+			return tools.AuthSpec{}, err
+		}
+		spec.Groups = groups
+	}
 	return spec, nil
+}
+
+// endpointGroups collects the endpoints a multi-endpoint tool registers next to
+// the one its binding points at: one group per other binding of that same tool,
+// carrying the key, model list and request protocol that binding saved. Only
+// that tool's own bindings qualify — an endpoint another tool configured was
+// never given a key, a picker list or a protocol for this one. The binding being
+// rendered is left out (it is the primary entry), and so is any other binding on
+// the same endpoint. When several bindings share an endpoint, the first in file
+// order stands for it, so the rendered set does not depend on table order;
+// groups are ordered by endpoint URL for the same reason.
+func (c *Catalog) endpointGroups(tool, excludeBindingID string) ([]tools.EndpointGroup, error) {
+	bs, err := c.bindings()
+	if err != nil {
+		return nil, err
+	}
+	cs, err := c.credentials()
+	if err != nil {
+		return nil, err
+	}
+	ps, err := c.providers()
+	if err != nil {
+		return nil, err
+	}
+	ms, err := c.models()
+	if err != nil {
+		return nil, err
+	}
+	creds := make(map[string]Credential, len(cs))
+	for _, cr := range cs {
+		creds[cr.ID] = cr
+	}
+	providers := make(map[string]Provider, len(ps))
+	for _, p := range ps {
+		providers[p.ID] = p
+	}
+	models := make(map[string]Model, len(ms))
+	for _, m := range ms {
+		models[m.ID] = m
+	}
+
+	// The rendered binding's endpoint is the primary entry. Another binding of
+	// the same endpoint (a rotated key, a different default model) must not
+	// become a second entry for an endpoint that is already registered.
+	primaryEndpoint := ""
+	if idx := indexBinding(bs, excludeBindingID); idx >= 0 {
+		if cr, ok := creds[bs[idx].CredentialID]; ok {
+			primaryEndpoint = providers[cr.ProviderID].BaseURL
+		}
+	}
+
+	seen := make(map[string]bool, len(bs))
+	var groups []tools.EndpointGroup
+	for _, b := range bs {
+		if b.Tool != tool || b.ID == excludeBindingID {
+			continue
+		}
+		cr, ok := creds[b.CredentialID]
+		if !ok || cr.Key == "" {
+			continue
+		}
+		p, ok := providers[cr.ProviderID]
+		if !ok || p.BaseURL == "" || p.BaseURL == primaryEndpoint || seen[p.BaseURL] {
+			continue
+		}
+		specs := make([]tools.ModelSpec, 0, len(b.Models))
+		for _, id := range b.Models {
+			m, ok := models[id]
+			if !ok || strings.TrimSpace(m.Slug) == "" {
+				continue
+			}
+			specs = append(specs, tools.ModelSpec{
+				Slug:             m.Slug,
+				ContextWindow:    m.ContextWindow,
+				Effort:           m.Effort,
+				ThinkingLevelMap: m.ThinkingLevelMap,
+			})
+		}
+		if len(specs) == 0 {
+			continue
+		}
+		seen[p.BaseURL] = true
+		groups = append(groups, tools.EndpointGroup{
+			Endpoint: p.BaseURL,
+			Key:      cr.Key,
+			PiAPI:    b.PiAPI,
+			Models:   specs,
+		})
+	}
+	sort.Slice(groups, func(i, j int) bool { return groups[i].Endpoint < groups[j].Endpoint })
+	return groups, nil
+}
+
+// AggregateCounts reports how many endpoints and models a multi-endpoint tool
+// would register: one entry per endpoint, carrying the models that endpoint's
+// first binding saved. The TUI shows it as a hint; callers may ignore a read
+// error and leave the hint out.
+func (c *Catalog) AggregateCounts(tool string) (endpoints, models int, err error) {
+	groups, err := c.endpointGroups(tool, "")
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, g := range groups {
+		models += len(g.Models)
+	}
+	return len(groups), models, nil
 }
 
 func (c *Catalog) project(b Binding) error {

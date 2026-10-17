@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"charon/internal/edit"
@@ -12,14 +13,18 @@ import (
 // OwnedFile is one config file's worth of what charon may own in it. JSON
 // files name dot paths; TOML files name top-level keys, "table.key" entries,
 // exact table names, and whole-table prefixes (every table whose name starts
-// with one is charon's, deleted rather than restored).
+// with one is charon's, deleted rather than restored). JSON prefixes work the
+// same way on keys: the leaf names charon's entry, and every key that extends
+// it with "-" is charon's generated entry too, so off deletes both instead of
+// restoring anything.
 type OwnedFile struct {
-	Path       string
-	JSON       []string
-	TOMLTop    []string
-	TOMLKeys   []string // "table.key"
-	TOMLTables []string // exact table names
-	Prefixes   []string // table-name prefixes
+	Path         string
+	JSON         []string
+	JSONPrefixes []string // "providers.charon": the key plus every key prefixed with "charon-"
+	TOMLTop      []string
+	TOMLKeys     []string // "table.key"
+	TOMLTables   []string // exact table names
+	Prefixes     []string // table-name prefixes
 }
 
 // StashVal is one owned path's pre-charon value: Raw as the file wrote it
@@ -104,7 +109,7 @@ func (t *Tool) CaptureStash() ToolStash {
 func (t *Tool) Off(st ToolStash) error {
 	for _, of := range t.Owned {
 		fs := st.Files[of.Path]
-		if len(of.JSON) > 0 {
+		if len(of.JSON) > 0 || len(of.JSONPrefixes) > 0 {
 			restored := map[string]bool{}
 			var restore []string
 			for _, p := range of.JSON {
@@ -137,6 +142,23 @@ func (t *Tool) Off(st ToolStash) error {
 			if len(dels) > 0 {
 				if err := edit.DelJSON(of.Path, dels...); err != nil {
 					return err
+				}
+			}
+			// Prefix-owned keys are charon's generated entries (a tool that
+			// registers several endpoints writes one per endpoint). They are
+			// deleted, never restored; a key that was just restored keeps its
+			// pre-charon value.
+			for _, prefix := range of.JSONPrefixes {
+				var extra []string
+				for _, p := range jsonKeysUnder(of.Path, prefix) {
+					if !restored[p] {
+						extra = append(extra, p)
+					}
+				}
+				if len(extra) > 0 {
+					if err := edit.DelJSON(of.Path, extra...); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -268,4 +290,33 @@ func orderJSONByPrev(paths []string, vals map[string]StashVal) []string {
 		}
 	}
 	return out
+}
+
+// jsonKeysUnder lists the full dot paths prefix owns in path: the leaf itself
+// plus every key that extends it with "-". The names come from the file's
+// parent object, so only entries that are really there are returned; they are
+// sorted to keep the delete deterministic. An unreadable parent or one that
+// is not a JSON object yields nothing.
+func jsonKeysUnder(path, prefix string) []string {
+	i := strings.LastIndex(prefix, ".")
+	if i < 0 {
+		return nil
+	}
+	parent, leaf := prefix[:i], prefix[i+1:]
+	raw, ok := edit.GetJSONRaw(path, parent)
+	if !ok {
+		return nil
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal([]byte(raw), &obj) != nil {
+		return nil
+	}
+	keys := make([]string, 0, len(obj))
+	for key := range obj {
+		if key == leaf || strings.HasPrefix(key, leaf+"-") {
+			keys = append(keys, parent+"."+key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
 }
