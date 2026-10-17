@@ -359,7 +359,7 @@ func TestModelLibraryIsLocalEntryAndEditor(t *testing.T) {
 		t.Fatalf("saved local model = %+v", models)
 	}
 	rows := m.list.Items()
-	if len(rows) == 0 || rows[0].(item).title != "glm-4.7" {
+	if len(rows) == 0 || rows[0].(item).title != "glm-4.7 — "+rows[0].(item).desc {
 		t.Fatalf("model library rows = %+v", rows)
 	}
 	if !strings.Contains(m.list.Title, "local") {

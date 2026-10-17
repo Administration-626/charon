@@ -375,9 +375,10 @@ func (m *model) loadModels(selectID string, fallbackIndex ...int) {
 		if stored.ContextWindowSource == catalog.WindowManual || stored.ContextWindowSource == catalog.WindowBuiltin {
 			source = string(stored.ContextWindowSource)
 		}
+		detail := fmt.Sprintf("%s · %s · %s", providers[stored.ProviderID], window, source)
 		items = append(items, item{
-			title: stored.Slug,
-			desc:  fmt.Sprintf("%s · %s · %s", providers[stored.ProviderID], window, source),
+			title: stored.Slug + " — " + detail,
+			desc:  detail,
 			value: stored.ID,
 		})
 	}
@@ -403,7 +404,7 @@ func (m *model) loadModels(selectID string, fallbackIndex ...int) {
 	m.list.Select(selectedIndex)
 	m.list.Title = "Model Library — local"
 	m.setFooterKeys(keyOpen, keyEditContext, keyEffort, keyDelete, keyBack)
-	m.setDelegate(themedDelegate())
+	m.setDelegate(themedCompactDelegate())
 }
 
 func (m *model) editModelWindowByID(id string) error {
@@ -554,14 +555,16 @@ func (m *model) loadProfiles(selectName string) {
 		if b.Name == target {
 			selectedIndex = i + offset
 		}
-		items = append(items, item{title: title, desc: m.profileDetail(b.Name), value: b.Name, active: isActive})
+		// Compact one-line rows: endpoint · model ride in the title; desc stays
+		// populated (drift expansion, tests) while the compact delegate hides it.
+		items = append(items, item{title: title + " — " + m.profileDetail(b.Name), desc: m.profileDetail(b.Name), value: b.Name, active: isActive})
 	}
 
 	m.list.SetItems(items)
 	m.list.Select(selectedIndex)
-	m.list.Title = m.tool.Title + " bindings (✓ last confirmed)"
+	m.list.Title = m.tool.Title + " bindings (✓ active)"
 	m.setFooterKeys(keySwitch, keyAdd, keyReapply, keyEdit, keyBackup, keyCopy, keyDelete, keyRefresh, keyBack)
-	m.setDelegate(themedDelegate())
+	m.setDelegate(themedCompactDelegate())
 	m.resize()
 	if len(saved) == 0 && m.status == "" && m.tool.ApplyAuth != nil {
 		m.setStatus(statusInfo, `No bindings yet — press enter on "Add new binding" or press 'a' to create one.`)
@@ -588,10 +591,18 @@ func infoDrifts(info tools.Info, savedURL, savedSlug string) bool {
 	return liveModel != "" && liveModel != savedSlug
 }
 
-// sameEndpoint compares endpoints ignoring a trailing slash, so https://x/v1
-// and https://x/v1/ do not read as drift.
+// sameEndpoint compares endpoints ignoring a trailing slash and a trailing
+// /v1: some tools normalize the base URL on write (Claude drops /v1 because it
+// requests /v1/messages itself), so charon's own output would otherwise read
+// back as drift.
 func sameEndpoint(a, b string) bool {
-	return strings.TrimRight(a, "/") == strings.TrimRight(b, "/")
+	return trimEndpoint(a) == trimEndpoint(b)
+}
+
+func trimEndpoint(s string) string {
+	s = strings.TrimRight(strings.TrimSpace(s), "/")
+	s = strings.TrimSuffix(s, "/v1")
+	return strings.TrimRight(s, "/")
 }
 
 // profileDetail is the second-line summary of a binding: its endpoint and default
