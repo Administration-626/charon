@@ -267,6 +267,13 @@ func (m model) View() string {
 // configSummary shows only observed configuration, not catalog predictions or
 // the state of a running tool session. No credentials are included.
 func configSummary(info tools.Info) string {
+	endpoint, auth := info.Endpoint, info.AuthMode
+	if endpoint == "" {
+		endpoint = "unknown"
+	}
+	if auth == "" {
+		auth = "unknown"
+	}
 	model, effort := info.Model, info.Effort
 	if model == "" {
 		model = "unknown"
@@ -274,8 +281,8 @@ func configSummary(info tools.Info) string {
 	if effort == "" {
 		effort = "unknown"
 	}
-	return fmt.Sprintf("On-disk config (Ctrl+R refresh)\nDefault model: %s\nContext window: %s tokens\nMax output (maxTokens): %s tokens\nReasoning effort: %s\nUnknown = not recorded/read; running sessions may differ.",
-		model, formatTokens(info.ContextWindow), formatTokens(info.MaxTokens), effort)
+	return fmt.Sprintf("On-disk config (Ctrl+R refresh)\nEndpoint: %s · auth: %s\nDefault model: %s\nContext window: %s tokens\nMax output (maxTokens): %s tokens\nReasoning effort: %s\nUnknown = not recorded/read; running sessions may differ.",
+		endpoint, auth, model, formatTokens(info.ContextWindow), formatTokens(info.MaxTokens), effort)
 }
 
 func (m model) renderConfigSummary() string {

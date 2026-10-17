@@ -543,6 +543,32 @@ func (m *model) loadProfiles(selectName string) {
 	}
 }
 
+// nonEmpty is s, or fallback when s is blank.
+func nonEmpty(s, fallback string) string {
+	if strings.TrimSpace(s) == "" {
+		return fallback
+	}
+	return s
+}
+
+// infoDrifts reports whether a tool's on-disk config disagrees with the saved
+// binding values (endpoint or default model). Whitespace around the endpoint is
+// ignored; a missing live model reads as drift too, since charon always saves
+// one.
+func infoDrifts(info tools.Info, savedURL, savedSlug string) bool {
+	liveURL, liveModel := strings.TrimSpace(info.Endpoint), strings.TrimSpace(info.Model)
+	if liveURL != "" && !sameEndpoint(liveURL, savedURL) {
+		return true
+	}
+	return liveModel != "" && liveModel != savedSlug
+}
+
+// sameEndpoint compares endpoints ignoring a trailing slash, so https://x/v1
+// and https://x/v1/ do not read as drift.
+func sameEndpoint(a, b string) bool {
+	return strings.TrimRight(a, "/") == strings.TrimRight(b, "/")
+}
+
 // profileDetail is the second-line summary of a binding: its endpoint and default
 // model, plus how many extra models its picker offers. For the active binding the
 // live model and effort are overlaid for display only — they are not written back.
@@ -564,7 +590,6 @@ func (m *model) profileDetail(name string) string {
 	if slugs, err := m.cat.ModelSlugs(b.Models); err == nil && len(slugs) > 1 {
 		extra = len(slugs) - 1
 	}
-	effort := ""
 	if url == "" {
 		url = "default endpoint"
 	}
@@ -578,14 +603,14 @@ func (m *model) profileDetail(name string) string {
 	if b.Tool == "pi" {
 		detail = piAPILabel(b.PiAPI) + " · " + detail
 	}
+	// For the active binding, surface drift between what charon saved and what
+	// is on disk right now (say, the user edited the config by hand): the row
+	// spells out both sides. When they agree, one rendering is enough — the
+	// config summary below the list already shows the live endpoint and model.
 	if active, ok, err := m.cat.Active(m.tool.Name); err == nil && ok && active.Name == name && m.tool.Describe != nil {
-		if info, err := m.tool.Describe(); err == nil {
-			detail = "saved: " + detail + " · live: " + info.Endpoint + " · " + info.Model
-			effort = info.Effort
+		if info, err := m.tool.Describe(); err == nil && infoDrifts(info, url, slug) {
+			detail = "saved: " + detail + " · live: " + nonEmpty(info.Endpoint, "default") + " · " + nonEmpty(info.Model, "unknown")
 		}
-	}
-	if effort != "" {
-		detail += " · effort: " + effort
 	}
 	return detail
 }
