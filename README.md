@@ -155,8 +155,6 @@ charon                       # interactive arrow-key menu
 charon status                # show live config and last confirmed binding (--json)
 charon ls <tool>             # list saved bindings (--json)
 charon models <tool>         # list models offered by an API (--key [--endpoint])
-charon models --local        # list saved models from every endpoint as model(endpoint)
-                            # (--endpoint URL|host[,URL|host...] narrows it; --json)
 charon add <tool>            # add + activate a binding (--name --key and at least one model id)
 charon edit <tool> <b>       # change a binding's endpoint/key/model/models (--name to rename)
 charon rename <tool> <o> <n> # rename a saved binding
@@ -307,12 +305,6 @@ charon models codex --endpoint https://openrouter.ai/api/v1 --key sk-...
 charon add    codex --name openrouter --endpoint https://openrouter.ai/api/v1 \
                     --key sk-... --model openai/gpt-5.5
 ```
-
-`charon models --local` lists every model saved in charon's catalog without
-touching the network, aggregated across endpoints as model(endpoint). A slug
-saved under two endpoints gets one row per endpoint. Narrow the listing with
-`--endpoint` (a full URL or bare host, comma-separated for several), or add
-`--json` for machine-readable rows.
 
 --models registers a list in the tool's own picker, so you can switch between them
 from inside the tool. The first id becomes the default when --model is omitted, and

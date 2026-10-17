@@ -90,8 +90,6 @@ Usage:
 	  charon status              show live config and last confirmed binding (--json)
   charon ls <tool>           list saved bindings for a tool (--json)
   charon models <tool>       list models from an API (--key, --endpoint; --local)
-  charon models --local      list saved models from every endpoint as model(endpoint)
-                            (--endpoint URL|host[,URL|host...] narrows it; --json)
   charon add <tool>          add+activate a binding (--name --key plus a model id)
   charon edit <tool> <b>     change a binding's endpoint/key/model/models/name
   charon set-context <tool> <b> <model> <tokens|unknown>
