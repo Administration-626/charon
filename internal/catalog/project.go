@@ -40,22 +40,22 @@ func (c *Catalog) ProjectIfActive(id string) (bool, error) {
 	return true, nil
 }
 
-func (c *Catalog) project(b Binding) error {
-	t := tools.Find(b.Tool)
-	if t == nil {
-		return fmt.Errorf("unknown tool %q", b.Tool)
-	}
+// ProjectSpec renders binding b into the AuthSpec its tool would receive,
+// without writing anything: endpoint and key come from the credential's
+// provider, the default model and the picker list from the models the
+// binding references. Dry-run previews run this through a sandboxed copy.
+func (c *Catalog) ProjectSpec(b Binding) (tools.AuthSpec, error) {
 	cr, err := c.Credential(b.CredentialID)
 	if err != nil {
-		return err
+		return tools.AuthSpec{}, err
 	}
 	p, err := c.Provider(cr.ProviderID)
 	if err != nil {
-		return err
+		return tools.AuthSpec{}, err
 	}
 	slug, err := c.ModelSlug(b.ModelID)
 	if err != nil {
-		return err
+		return tools.AuthSpec{}, err
 	}
 	spec := tools.AuthSpec{Endpoint: p.BaseURL, Key: cr.Key, Model: slug, PiAPI: b.PiAPI}
 	officialOpenAI := tools.IsOfficialOpenAIEndpoint(p.BaseURL)
@@ -63,7 +63,7 @@ func (c *Catalog) project(b Binding) error {
 	for _, id := range b.Models {
 		m, err := c.Model(id)
 		if err != nil {
-			return err
+			return tools.AuthSpec{}, err
 		}
 		window := m.ContextWindow
 		// Codex's own model catalog applies only at OpenAI's endpoint. A gateway
@@ -80,6 +80,18 @@ func (c *Catalog) project(b Binding) error {
 		}
 	}
 	spec.Models = specs
+	return spec, nil
+}
+
+func (c *Catalog) project(b Binding) error {
+	t := tools.Find(b.Tool)
+	if t == nil {
+		return fmt.Errorf("unknown tool %q", b.Tool)
+	}
+	spec, err := c.ProjectSpec(b)
+	if err != nil {
+		return err
+	}
 	return t.ApplyAuth(spec)
 }
 

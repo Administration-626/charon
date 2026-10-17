@@ -199,6 +199,7 @@ func newCodex() *Tool {
 		Provider:        "openai",
 		ModelMenu:       "/model",
 		DefaultEndpoint: "https://api.openai.com/v1",
+		Files:           []string{configPath, catalogPath},
 		ApplyAuth: func(a AuthSpec) error {
 			// Read-only: the current model and catalog pointer decide what to pin.
 			cfg, err := loadTOMLMap(configPath)
@@ -218,8 +219,15 @@ func newCodex() *Tool {
 					break
 				}
 			}
+			// The catalog pointer counts as ours wherever this home is: an
+			// absolute compare would disagree between a real run and a dry-run
+			// under a copied home.
+			ours := func(v any) bool {
+				s, _ := v.(string)
+				return s == catalogPath || strings.HasSuffix(s, filepath.Join(".codex", "custom_models.json"))
+			}
 			useCatalog := !IsOfficialOpenAIEndpoint(a.Endpoint) || codexContextWindow(modelSlug, configuredWindow) != 0 || len(a.Models) > 1 ||
-				(len(a.Models) == 0 && cfg["model_catalog_json"] == catalogPath)
+				(len(a.Models) == 0 && ours(cfg["model_catalog_json"]))
 			window := 0
 			if modelSlug != "" && useCatalog {
 				a.Model = modelSlug

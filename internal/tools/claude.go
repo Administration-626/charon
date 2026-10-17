@@ -24,6 +24,7 @@ func newClaude() *Tool {
 		Provider:        "anthropic",
 		ModelMenu:       "/model",
 		DefaultEndpoint: "https://api.anthropic.com",
+		Files:           []string{settingsPath},
 		ApplyAuth: func(a AuthSpec) error {
 			// Preserve the already-registered list when a caller does not supply one.
 			existingModels := claudeExistingModels(settingsPath)

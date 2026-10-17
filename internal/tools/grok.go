@@ -113,6 +113,7 @@ func newGrok() *Tool {
 		Provider:        "openai",
 		ModelMenu:       "/model",
 		DefaultEndpoint: "https://api.x.ai/v1",
+		Files:           []string{configPath},
 		ApplyAuth: func(a AuthSpec) error {
 			cfg, err := loadTOMLMap(configPath)
 			if err != nil {

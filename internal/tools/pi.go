@@ -246,6 +246,7 @@ func newPi() *Tool {
 		Provider:        "openai",
 		ModelMenu:       "/model",
 		DefaultEndpoint: "https://api.openai.com/v1",
+		Files:           []string{modelsPath, settingsPath, extensionPath},
 		ApplyAuth: func(a AuthSpec) error {
 			// Read and validate every input before the first write.
 			api, err := ResolvePiAPI(a.PiAPI)

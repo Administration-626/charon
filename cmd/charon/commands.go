@@ -21,6 +21,7 @@ import (
 	"charon/internal/artifact"
 	"charon/internal/catalog"
 	"charon/internal/models"
+	"charon/internal/preview"
 	"charon/internal/secret"
 	"charon/internal/tools"
 )
@@ -239,30 +240,49 @@ func viewOf(cat *catalog.Catalog, b catalog.Binding) (shown, error) {
 }
 
 func cmdSwitch(cat *catalog.Catalog, args []string) error {
-	return cmdApplyBinding(cat, args, false)
+	return cmdApply(cat, args, false)
 }
 
 func cmdReapply(cat *catalog.Catalog, args []string) error {
-	return cmdApplyBinding(cat, args, true)
+	return cmdApply(cat, args, true)
 }
 
-func cmdApplyBinding(cat *catalog.Catalog, args []string, reapply bool) error {
-	if len(args) < 2 {
-		if reapply {
-			return fmt.Errorf("usage: charon reapply <tool> <binding>")
+// cmdApply handles switch and reapply: two positionals (tool, binding),
+// flags anywhere after them.
+func cmdApply(cat *catalog.Catalog, args []string, reapply bool) error {
+	var pos, rest []string
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-") && len(pos) < 2 {
+			pos = append(pos, a)
+			continue
 		}
-		return fmt.Errorf("usage: charon switch <tool> <binding>")
+		rest = append(rest, a)
 	}
-	t, err := requireTool(args[0])
+	if len(pos) < 2 {
+		if reapply {
+			return fmt.Errorf("usage: charon reapply <tool> <binding> [--dry-run]")
+		}
+		return fmt.Errorf("usage: charon switch <tool> <binding> [--dry-run]")
+	}
+	fs := flag.NewFlagSet("switch", flag.ContinueOnError)
+	dry := fs.Bool("dry-run", false, "show what would change, writing nothing")
+	short := fs.Bool("n", false, "shorthand for --dry-run")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	t, err := requireTool(pos[0])
 	if err != nil {
 		return err
 	}
-	b, found, err := cat.BindingByName(t.Name, args[1])
+	b, found, err := cat.BindingByName(t.Name, pos[1])
 	if err != nil {
 		return err
 	}
 	if !found {
-		return fmt.Errorf("no %s binding named %q", t.Title, args[1])
+		return fmt.Errorf("no %s binding named %q", t.Title, pos[1])
+	}
+	if *dry || *short {
+		return cmdDryRun(cat, t, b, reapply)
 	}
 	if reapply {
 		_, err = cat.Reapply(b.ID)
@@ -273,9 +293,45 @@ func cmdApplyBinding(cat *catalog.Catalog, args []string, reapply bool) error {
 		return err
 	}
 	if reapply {
-		fmt.Printf("Reapplied %s → %s\n", t.Title, args[1])
+		fmt.Printf("Reapplied %s → %s\n", t.Title, pos[1])
 	} else {
-		fmt.Printf("Switched %s → %s\n", t.Title, args[1])
+		fmt.Printf("Switched %s → %s\n", t.Title, pos[1])
+	}
+	return nil
+}
+
+// cmdDryRun renders binding b into copies of the tool's config under a
+// temporary home and prints the diff; nothing real is written.
+func cmdDryRun(cat *catalog.Catalog, t *tools.Tool, b catalog.Binding, reapply bool) error {
+	spec, err := cat.ProjectSpec(b)
+	if err != nil {
+		return err
+	}
+	diffs, applyErr := preview.Diff(t, spec)
+	verb := "switch"
+	if reapply {
+		verb = "reapply"
+	}
+	fmt.Printf("Dry run (%s %s → %s) — nothing is written\n", verb, t.Title, b.Name)
+	// A switch to the binding that is already active is a no-op; say so,
+	// because the diff below is what a reapply would render.
+	if active, _, err := cat.Active(t.Name); err == nil && active.ID == b.ID && !reapply {
+		fmt.Println("(this binding is already active: the switch itself would change nothing; reapply re-renders it like this)")
+	}
+	home, _ := os.UserHomeDir()
+	for _, d := range diffs {
+		p := d.Path
+		if home != "" && strings.HasPrefix(p, home) {
+			p = "~" + strings.TrimPrefix(p, home)
+		}
+		fmt.Printf("\n%s\n", p)
+		fmt.Print(d.Render())
+	}
+	if len(diffs) == 0 && applyErr == nil {
+		fmt.Println("(no changes)")
+	}
+	if applyErr != nil {
+		return fmt.Errorf("the %s would fail: %w", verb, applyErr)
 	}
 	return nil
 }

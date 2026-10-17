@@ -774,3 +774,102 @@ func TestRunEditModelsFlagReplacesPickerList(t *testing.T) {
 		t.Errorf("modelPicker ids = %q, want the curated-down list", got)
 	}
 }
+
+// captureStdout runs fn with os.Stdout piped and returns what it printed.
+func captureStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout := os.Stdout
+	os.Stdout = writer
+	stop := make(chan struct{})
+	var out []byte
+	go func() {
+		out, _ = io.ReadAll(reader)
+		close(stop)
+	}()
+	fnErr := fn()
+	_ = writer.Close()
+	os.Stdout = stdout
+	<-stop
+	_ = reader.Close()
+	return string(out), fnErr
+}
+
+func TestSwitchDryRunPreviewsWithoutWriting(t *testing.T) {
+	home := sandbox(t)
+	seedCodex(t, home)
+	config := filepath.Join(home, ".codex", "config.toml")
+	handwritten := "# my config\nmodel = \"gpt-5\"   # daily\n\n[model_providers.mine]\nname = \"mine\"\n"
+	writeTestFile(t, config, handwritten)
+
+	if err := run([]string{"add", "codex", "--name", "work", "--key", "sk-test", "--endpoint", "https://example.com/v1", "--model", "gpt-5.5"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	// add activates; put the live config back to the hand-written state it
+	// had before, so the dry run has something to show.
+	writeTestFile(t, config, handwritten)
+
+	out, err := captureStdout(t, func() error {
+		return run([]string{"switch", "codex", "work", "--dry-run"})
+	})
+	if err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	for _, want := range []string{
+		"Dry run (switch Codex → work)",
+		"nothing is written",
+		"# my config",
+		"-model = \"gpt-5\"   # daily",
+		"+model_provider = \"charon\"",
+		"[model_providers.mine]",
+		"custom_models.json",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry-run output missing %q:\n%s", want, out)
+		}
+	}
+
+	got, err := os.ReadFile(config)
+	if err != nil || string(got) != handwritten {
+		t.Errorf("dry run modified the live config:\n%s", got)
+	}
+	// The catalog file (created by add's activation) is untouched too.
+	catalogPath := filepath.Join(home, ".codex", "custom_models.json")
+	catalogBefore, _ := os.ReadFile(catalogPath)
+
+	// A dry run of a switch that is a no-op (already active) says so.
+	_, err = captureStdout(t, func() error {
+		return run([]string{"switch", "codex", "work", "-n"})
+	})
+	if err != nil {
+		t.Fatalf("no-op dry run: %v", err)
+	}
+
+	// The real switch still works after a dry run: switch to another binding.
+	if err := run([]string{"add", "codex", "--name", "other", "--key", "sk-2", "--endpoint", "https://example.com/v1", "--model", "gpt-5"}); err != nil {
+		t.Fatalf("add other: %v", err)
+	}
+	if err := run([]string{"switch", "codex", "work"}); err != nil {
+		t.Fatalf("switch after dry run: %v", err)
+	}
+	got, err = os.ReadFile(config)
+	if err != nil || !strings.Contains(string(got), "model_provider = \"charon\"") {
+		t.Errorf("real switch did not apply:\n%s", got)
+	}
+
+	// -n shorthand on reapply previews too.
+	out, err = captureStdout(t, func() error {
+		return run([]string{"reapply", "codex", "work", "-n"})
+	})
+	if err != nil || !strings.Contains(out, "Dry run (reapply Codex → work)") {
+		t.Errorf("reapply -n output wrong (err %v):\n%s", err, out)
+	}
+
+	catalogAfter, _ := os.ReadFile(catalogPath)
+	if !bytes.Equal(catalogBefore, catalogAfter) {
+		t.Errorf("dry runs modified the catalog file")
+	}
+}

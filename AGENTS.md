@@ -49,6 +49,8 @@ internal/edit/      format-preserving JSON/JSONC + TOML editors (adapted from
                     magpie's internal/edit, MIT): set/del key paths and whole
                     tables by name, comments/order/indentation kept; edits are
                     validated before any write
+internal/preview/   dry-run previews: apply a binding against copies of the
+                    tool's config under a temporary home, diff, write nothing
 internal/tools/     per-tool adapters
   tool.go           Tool struct, AuthSpec, registry (All/Find)
   edit.go           JSON/TOML read helpers (loadJSONMap/loadTOMLMap)
@@ -59,7 +61,7 @@ internal/secret/    masking
 internal/tui/       bubbletea interactive menu
 ```
 
-Layering (imports point left): `secret` ← `artifact` ← `edit` ← `tools` ← `catalog` ← `cmd`/`tui`.
+Layering (imports point left): `secret` ← `artifact` ← `edit` ← `tools` ← `catalog`/`preview` ← `cmd`/`tui`.
 Binding names are validated in `internal/catalog` (`validateName`); a name is a label,
 never a path segment, so do not join one into a filesystem path.
 

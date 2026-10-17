@@ -36,6 +36,7 @@ func newOpenCode() *Tool {
 		Provider:        "openai",
 		ModelMenu:       "/models",
 		DefaultEndpoint: "https://api.openai.com/v1",
+		Files:           []string{configPath},
 		ApplyAuth: func(a AuthSpec) error {
 			// Read-only: the previously-registered model list, tolerating the
 			// JSONC comments the config carries.

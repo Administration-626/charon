@@ -53,6 +53,9 @@ re-renders that binding into the tool, overwriting only the keys charon owns.
   and control characters are rejected.
 - Safe by default. Writes are atomic. Deleting the binding a tool is
   currently using is refused — switch to another one first.
+- Dry-run preview. `charon switch <tool> <b> --dry-run` renders the binding
+  into copies of the tool's config under a temporary home and prints a unified
+  diff of what would change — comments included, nothing written.
 - Non-destructive. Charon only ever touches its own charon provider entry
   in each tool's config, never your hand-authored providers.
 

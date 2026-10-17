@@ -60,6 +60,7 @@ type Tool struct {
 	Provider        string               // model-list wire format: "openai" or "anthropic"
 	DefaultEndpoint string               // prefilled when adding a binding
 	ModelMenu       string               // the tool's own model-switching command (e.g. "/model") when it can be given a list of models to offer
+	Files           []string             // config files ApplyAuth may read or write, for dry-run previews
 	Detected        func() bool          // is the tool installed/configured?
 	Describe        func() (Info, error) // read live config into an Info
 	ApplyAuth       func(AuthSpec) error // write endpoint/key/model into live config
