@@ -15,7 +15,6 @@ func openTest(t *testing.T) *Catalog {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("CHARON_MODELS_DEV", "off") // builtin behavior, no network
 	c, err := Open()
 	if err != nil {
 		t.Fatalf("open: %v", err)

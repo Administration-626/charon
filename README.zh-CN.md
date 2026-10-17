@@ -36,9 +36,7 @@ endpoint 和凭据。
 - 在工具内切换模型。勾选你常用的那几个模型，Charon 会把它们注册进工具自身的
   选择器（Claude Code 的 /model、OpenCode 的 /models、Pi 的 /model、
   Grok 的 /model），可以在会话中更换模型，无需返回 Charon。
-- 按模型设置上下文窗口。Charon 优先使用手动值，其次使用 API 返回值、
-  [models.dev](https://models.dev) 目录（缓存在 `~/.cache`，每周刷新；
-  `CHARON_MODELS_DEV=off` 可禁用，填文件路径可覆盖）和内置估计值，
+- 按模型设置上下文窗口。Charon 优先使用手动值，其次使用 API 返回值和内置值，
   再将窗口写入工具支持的配置。第三方网关上的 Claude 1M 变体会在 Claude Code 中使用
   `[1m]` 后缀；Codex 中的网关模型会写入明确的窗口，避免落到约 258k 的默认预算。
 - 按模型设置 reasoning effort。用 `charon set-effort codex <绑定> <模型> <级别>`

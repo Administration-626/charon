@@ -68,7 +68,7 @@ func (c *Catalog) ProjectSpec(b Binding) (tools.AuthSpec, error) {
 		window := m.ContextWindow
 		// Codex's own model catalog applies only at OpenAI's endpoint. A gateway
 		// can reuse a GPT-shaped id while Codex falls back to about 258K.
-		if b.Tool == "codex" && officialOpenAI && len(b.Models) == 1 && m.ContextWindowSource != WindowManual && m.ContextWindowSource != "" {
+		if b.Tool == "codex" && officialOpenAI && len(b.Models) == 1 && m.ContextWindowSource == WindowBuiltin {
 			window = 0
 		}
 		specs = append(specs, tools.ModelSpec{Slug: m.Slug, ContextWindow: window, Effort: m.Effort, ThinkingLevelMap: m.ThinkingLevelMap})

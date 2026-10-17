@@ -37,10 +37,8 @@ re-renders that binding into the tool, overwriting only the keys charon owns.
   Charon registers them in the tool's own picker (Claude Code's /model, OpenCode's
   /models, Pi's /model, Grok's /model), so changing
   model mid-session never means going back through Charon.
-- Per-model context windows. Charon uses manual values, then API values, then
-  the [models.dev](https://models.dev) catalog (cached under `~/.cache`, refreshed
-  weekly, `CHARON_MODELS_DEV=off` to disable or a file path to override), then
-  built-in estimates. It writes these into supported tool settings. Claude Code gets the `[1m]`
+- Per-model context windows. Charon uses manual values, then API values, then built-in
+  estimates. It writes these into supported tool settings. Claude Code gets the `[1m]`
   variant for 1M Claude models on gateways; Codex pins gateway models explicitly so
   GPT-shaped aliases do not fall back to about 258k. Codex also
   receives a model-catalog entry so its compaction logic recognizes the custom model.

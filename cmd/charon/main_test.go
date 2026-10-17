@@ -70,8 +70,7 @@ func sandbox(t *testing.T) string {
 	t.Setenv("HOME", home)
 	t.Setenv("USER", "tester")
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv("CHARON_MODELS_DEV", "off") // no network in tests
-	t.Setenv("PATH", t.TempDir())        // prevents Claude detection from querying the real Keychain
+	t.Setenv("PATH", t.TempDir()) // prevents Claude detection from querying the real Keychain
 	claudeDir := filepath.Join(home, ".claude")
 	if err := os.MkdirAll(claudeDir, 0o700); err != nil {
 		t.Fatal(err)
