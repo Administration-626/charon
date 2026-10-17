@@ -373,10 +373,9 @@ func (m *model) loadModels(selectID string, fallbackIndex ...int) {
 		if stored.ContextWindowSource == catalog.WindowManual || stored.ContextWindowSource == catalog.WindowBuiltin {
 			source = string(stored.ContextWindowSource)
 		}
-		detail := fmt.Sprintf("%s · %s · %s", providers[stored.ProviderID], window, source)
 		items = append(items, item{
-			title: stored.Slug + " — " + detail,
-			desc:  detail,
+			title: stored.Slug,
+			desc:  fmt.Sprintf("%s · %s · %s", providers[stored.ProviderID], window, source),
 			value: stored.ID,
 		})
 	}
@@ -402,7 +401,7 @@ func (m *model) loadModels(selectID string, fallbackIndex ...int) {
 	m.list.Select(selectedIndex)
 	m.list.Title = "Model Library — local"
 	m.setFooterKeys(keyOpen, keyEditContext, keyEffort, keyDelete, keyBack)
-	m.setDelegate(themedCompactDelegate())
+	m.setDelegate(themedTightDelegate())
 }
 
 func (m *model) editModelWindowByID(id string) error {
@@ -553,17 +552,15 @@ func (m *model) loadProfiles(selectName string) {
 		if b.Name == target {
 			selectedIndex = i + offset
 		}
-		// Compact one-line rows: endpoint · model ride in the title; desc stays
-		// populated (drift expansion, tests) while the compact delegate hides it.
 		detail := m.profileDetail(b.Name)
-		items = append(items, item{title: title + " — " + detail, desc: detail, value: b.Name, active: isActive})
+		items = append(items, item{title: title, desc: detail, value: b.Name, active: isActive})
 	}
 
 	m.list.SetItems(items)
 	m.list.Select(selectedIndex)
 	m.list.Title = m.tool.Title + " bindings (✓ active)"
 	m.setFooterKeys(keySwitch, keyAdd, keyReapply, keyEdit, keyBackup, keyCopy, keyDelete, keyRefresh, keyBack)
-	m.setDelegate(themedCompactDelegate())
+	m.setDelegate(themedTightDelegate())
 	m.resize()
 	if len(saved) == 0 && m.status == "" && m.tool.ApplyAuth != nil {
 		m.setStatus(statusInfo, `No bindings yet — press enter on "Add new binding" or press 'a' to create one.`)

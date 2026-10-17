@@ -128,3 +128,12 @@ func themedCompactDelegate() charonDelegate {
 	d.ShowDescription = false
 	return charonDelegate{DefaultDelegate: d}
 }
+
+// themedTightDelegate keeps the two-line row (name on its own bold line,
+// detail muted below) but drops the gap between rows — dense without
+// flattening name and attributes onto one unreadable line.
+func themedTightDelegate() charonDelegate {
+	d := baseDelegate()
+	d.SetSpacing(0)
+	return charonDelegate{DefaultDelegate: d}
+}
