@@ -338,9 +338,7 @@ func (m *model) loadTools() {
 			}
 			desc = strings.Join(segs, " · ")
 		}
-		// Compact one-line rows: the status rides in the title (desc stays
-		// populated for tests and filtering; the compact delegate hides it).
-		items = append(items, item{title: t.Title + " — " + desc, desc: desc, value: t.Name})
+		items = append(items, item{title: t.Title, desc: desc, value: t.Name})
 		if m.tool != nil && t.Name == m.tool.Name {
 			selectedIndex = i
 		}
@@ -351,7 +349,7 @@ func (m *model) loadTools() {
 	m.list.Select(selectedIndex)
 	m.list.Title = "Charon — select a tool"
 	m.setFooterKeys(keyOpen, keyQuit)
-	m.setDelegate(themedCompactDelegate()) // one-line rows: name and status together
+	m.setDelegate(themedDelegate()) // two-line rows show each tool's status
 }
 
 func (m *model) loadModels(selectID string, fallbackIndex ...int) {
