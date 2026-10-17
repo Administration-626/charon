@@ -555,7 +555,8 @@ func (m *model) loadProfiles(selectName string) {
 		}
 		// Compact one-line rows: endpoint · model ride in the title; desc stays
 		// populated (drift expansion, tests) while the compact delegate hides it.
-		items = append(items, item{title: title + " — " + m.profileDetail(b.Name), desc: m.profileDetail(b.Name), value: b.Name, active: isActive})
+		detail := m.profileDetail(b.Name)
+		items = append(items, item{title: title + " — " + detail, desc: detail, value: b.Name, active: isActive})
 	}
 
 	m.list.SetItems(items)
@@ -779,30 +780,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.onEditKey()
 			}
 			if m.view == viewModels {
-				if it, ok := m.list.SelectedItem().(item); ok && !isSentinel(it.value) {
-					m.view = viewModelWindow
-					if err := m.editModelWindowByID(it.value); err != nil {
-						m.setStatus(statusErr, err.Error())
-						m.view = viewModels
-						m.loadModels(it.value)
-						return m, nil
-					}
-					return m, textinput.Blink
-				}
+				return m.editContextFromList()
 			}
 		case "w":
 			// Same as "e" here: w is context everywhere else, keep it so on this screen.
 			if m.view == viewModels {
-				if it, ok := m.list.SelectedItem().(item); ok && !isSentinel(it.value) {
-					m.view = viewModelWindow
-					if err := m.editModelWindowByID(it.value); err != nil {
-						m.setStatus(statusErr, err.Error())
-						m.view = viewModels
-						m.loadModels(it.value)
-						return m, nil
-					}
-					return m, textinput.Blink
-				}
+				return m.editContextFromList()
 			}
 		case "c":
 			if m.view == viewProfiles {
@@ -850,6 +833,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmd, tick)
 	}
 	return m, cmd
+}
+
+// editContextFromList opens the context-window editor for the highlighted
+// model-library row (the "e"/"w" action on the models screen).
+func (m model) editContextFromList() (tea.Model, tea.Cmd) {
+	it, ok := m.list.SelectedItem().(item)
+	if !ok || isSentinel(it.value) {
+		return m, nil
+	}
+	m.view = viewModelWindow
+	if err := m.editModelWindowByID(it.value); err != nil {
+		m.setStatus(statusErr, err.Error())
+		m.view = viewModels
+		m.loadModels(it.value)
+		return m, nil
+	}
+	return m, textinput.Blink
 }
 
 // onEditKey opens the edit form for the highlighted binding ("e").
