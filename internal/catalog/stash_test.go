@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"charon/internal/models"
 )
 
 // switchAndOff activates a binding on tool (capturing the stash on the way),
@@ -154,4 +156,44 @@ func homeOf(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return home
+}
+
+func TestPutModelPrefersModelsDevOverBuiltin(t *testing.T) {
+	c := openTest(t)
+	t.Setenv("CHARON_MODELS_DEV", "off")
+	p, err := c.PutProvider("https://gw.example/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// With models.dev off, a builtin-known slug takes the builtin window.
+	m, err := c.PutModel(p.ID, "gpt-5.6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.ContextWindowSource != WindowBuiltin || m.ContextWindow == 0 {
+		t.Fatalf("builtin fill missing: %+v", m)
+	}
+
+	// With a fixture catalog, a slug only it knows gets its window and source.
+	fixture := filepath.Join(t.TempDir(), "models-dev.json")
+	os.WriteFile(fixture, []byte(`{"ven":{"models":{"ven-x":{"limit":{"context":777000,"output":4096}}}}}`), 0o644)
+	t.Setenv("CHARON_MODELS_DEV", fixture)
+	models.ResetModelsDev()
+	m2, err := c.PutModel(p.ID, "ven-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m2.ContextWindow != 777000 || m2.ContextWindowSource != WindowModelsDev {
+		t.Fatalf("models.dev fill missing: %+v", m2)
+	}
+
+	// A manual window still wins and survives later updates.
+	mw, err := c.PutModelWithWindow(p.ID, "ven-x", 123456)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mw.ContextWindow != 123456 || mw.ContextWindowSource != WindowManual {
+		t.Fatalf("manual window must win: %+v", mw)
+	}
 }

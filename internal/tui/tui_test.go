@@ -22,7 +22,8 @@ func openTestCatalog(t *testing.T, detectCodex bool) *catalog.Catalog {
 	t.Setenv("HOME", home)
 	t.Setenv("USER", "tester")
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv("PATH", t.TempDir()) // keeps Claude detection from querying the real Keychain
+	t.Setenv("CHARON_MODELS_DEV", "off") // no network in tests
+	t.Setenv("PATH", t.TempDir())        // keeps Claude detection from querying the real Keychain
 	settings := filepath.Join(home, ".claude", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(settings), 0o700); err != nil {
 		t.Fatal(err)

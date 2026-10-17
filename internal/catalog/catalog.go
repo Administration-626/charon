@@ -61,10 +61,12 @@ type Model struct {
 // later API refresh; an API value may replace another API value or an unknown one.
 type WindowSource string
 
-// Context-window sources. Manual values survive later catalog updates.
+// Context-window sources. Manual values survive later catalog updates;
+// models.dev rows carry real vendor metadata and refill like builtin ones.
 const (
-	WindowManual  WindowSource = "manual"
-	WindowBuiltin WindowSource = "builtin"
+	WindowManual    WindowSource = "manual"
+	WindowModelsDev WindowSource = "modelsdev"
+	WindowBuiltin   WindowSource = "builtin"
 )
 
 // Binding is one saved choice for one tool: which credential, which model is the
@@ -395,6 +397,11 @@ func (c *Catalog) putModel(providerID, slug string, contextWindow *int, source W
 				return ms[i], writeTable(c.table("models.json"), ms)
 			}
 			if m.ContextWindow == 0 && m.ContextWindowSource == "" {
+				if w, ok := models.DevWindow(slug); ok {
+					ms[i].ContextWindow = w
+					ms[i].ContextWindowSource = WindowModelsDev
+					return ms[i], writeTable(c.table("models.json"), ms)
+				}
 				if bw := models.DefaultContextWindow(slug); bw > 0 {
 					ms[i].ContextWindow = bw
 					ms[i].ContextWindowSource = WindowBuiltin
@@ -408,6 +415,9 @@ func (c *Catalog) putModel(providerID, slug string, contextWindow *int, source W
 	if contextWindow != nil {
 		m.ContextWindow = *contextWindow
 		m.ContextWindowSource = source
+	} else if w, ok := models.DevWindow(slug); ok {
+		m.ContextWindow = w
+		m.ContextWindowSource = WindowModelsDev
 	} else if bw := models.DefaultContextWindow(slug); bw > 0 {
 		m.ContextWindow = bw
 		m.ContextWindowSource = WindowBuiltin

@@ -22,7 +22,8 @@ func sandboxHome(t *testing.T) string {
 	t.Setenv("HOME", dir)
 	t.Setenv("USER", "tester")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("PATH", t.TempDir()) // prevents Claude detection from querying the real Keychain
+	t.Setenv("CHARON_MODELS_DEV", "off") // no network in tests
+	t.Setenv("PATH", t.TempDir())        // prevents Claude detection from querying the real Keychain
 	return dir
 }
 
