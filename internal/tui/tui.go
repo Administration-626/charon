@@ -92,6 +92,7 @@ var (
 	keyBackup    = key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "clone"))
 	keyCopy      = key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "copy"))
 	keyDelete    = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete"))
+	keyAdd       = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add"))
 	keyBack      = key.NewBinding(key.WithKeys("esc", "q"), key.WithHelp("esc", "back"))
 	keyQuit      = key.NewBinding(key.WithKeys("q", "esc"), key.WithHelp("q/esc", "quit"))
 	keyOpen      = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open"))
@@ -306,14 +307,19 @@ func (m *model) loadTools() {
 		desc := fmt.Sprintf("last confirmed: %s · live: not detected", active)
 		if t.Detected != nil && t.Detected() {
 			info, _ := t.Describe()
-			desc = fmt.Sprintf("last confirmed: %s · live: %s · %s · %s", active, info.AuthMode, info.Endpoint, info.Model)
+			segs := []string{"last confirmed: " + active, "live: " + info.AuthMode}
+			for _, s := range []string{info.Endpoint, info.Model} {
+				if s = strings.TrimSpace(s); s != "" {
+					segs = append(segs, s)
+				}
+			}
+			desc = strings.Join(segs, " · ")
 		}
 		items = append(items, item{title: t.Title, desc: desc, value: t.Name})
 		if m.tool != nil && t.Name == m.tool.Name {
 			selectedIndex = i
 		}
 	}
-	m.list.SetItems(items)
 	items = append(items, item{value: sepSentinel},
 		item{title: "Model Library", desc: "local models and context windows", value: libSentinel})
 	m.list.SetItems(items)
@@ -371,7 +377,7 @@ func (m *model) loadModels(selectID string, fallbackIndex ...int) {
 	}
 	m.list.Select(selectedIndex)
 	m.list.Title = "Model Library — local"
-	m.setFooterKeys(keyOpen, keyEdit, keyEffort, keyDelete, keyBack)
+	m.setFooterKeys(keyOpen, keyEditContext, keyEffort, keyDelete, keyBack)
 	m.setDelegate(themedDelegate())
 }
 
@@ -529,7 +535,7 @@ func (m *model) loadProfiles(selectName string) {
 	m.list.SetItems(items)
 	m.list.Select(selectedIndex)
 	m.list.Title = m.tool.Title + " bindings (✓ last confirmed)"
-	m.setFooterKeys(keySwitch, keyReapply, keyEdit, keyBackup, keyCopy, keyDelete, keyBack)
+	m.setFooterKeys(keySwitch, keyAdd, keyReapply, keyEdit, keyBackup, keyCopy, keyDelete, keyRefresh, keyBack)
 	m.setDelegate(themedDelegate())
 	m.resize()
 	if len(saved) == 0 && m.status == "" && m.tool.ApplyAuth != nil {
@@ -706,6 +712,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == viewProfiles && m.tool.ApplyAuth != nil {
 				return m.onEditKey()
 			}
+			if m.view == viewModels {
+				if it, ok := m.list.SelectedItem().(item); ok && !isSentinel(it.value) {
+					m.view = viewModelWindow
+					if err := m.editModelWindowByID(it.value); err != nil {
+						m.setStatus(statusErr, err.Error())
+						m.view = viewModels
+						m.loadModels(it.value)
+						return m, nil
+					}
+					return m, textinput.Blink
+				}
+			}
+		case "w":
+			// Same as "e" here: w is context everywhere else, keep it so on this screen.
 			if m.view == viewModels {
 				if it, ok := m.list.SelectedItem().(item); ok && !isSentinel(it.value) {
 					m.view = viewModelWindow
