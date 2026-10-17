@@ -108,7 +108,7 @@ var (
 	// keyEsc names only esc: on a text input "q" has to stay a letter.
 	keyEsc          = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back"))
 	keyClearFilter  = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter"))
-	keyMove         = key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "move"))
+	keyMove         = key.NewBinding(key.WithKeys("up", "down", "j", "k"), key.WithHelp("↑/↓/j/k", "move"))
 	keyNextField    = key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next field"))
 	keySelectAction = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select"))
 	keySaveAction   = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save"))
@@ -168,12 +168,35 @@ type model struct {
 	width             int
 	height            int
 	version           string
+	statusAt          time.Time // when the current footer message was set
 }
 
-// setStatus records a footer message at the given severity.
+// statusTickMsg carries the statusAt stamp it was scheduled from, so a stale
+// tick from an older message never wipes a newer one.
+type statusTickMsg struct{ at time.Time }
+
+// statusTTL is how long a footer message lingers before clearing itself, so a
+// "✓ Switched …" never becomes permanent furniture. Screen changes clear it
+// sooner anyway; this catches the stay-put case.
+const statusTTL = 6 * time.Second
+
+// setStatus records a footer message at the given severity and schedules its expiry.
 func (m *model) setStatus(level statusLevel, msg string) {
 	m.status = msg
 	m.statusLvl = level
+	m.statusAt = time.Now()
+}
+
+// statusTick renews the auto-clear command: every status change restarts the
+// clock, and the model drops the message only when the tick matches the latest.
+func (m model) statusTick() tea.Cmd {
+	if m.status == "" {
+		return nil
+	}
+	at := m.statusAt
+	return tea.Tick(statusTTL, func(time.Time) tea.Msg {
+		return statusTickMsg{at: at}
+	})
 }
 
 // clearStatus wipes the footer message.
@@ -640,6 +663,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pending = nil
 		return m.applyFetched(result)
 
+	case statusTickMsg:
+		if m.status != "" && m.statusAt.Equal(msg.at) {
+			m.status = ""
+			m.statusLvl = statusInfo
+		}
+		return m, nil
+
 	case spinner.TickMsg:
 		if m.view != viewFetching {
 			return m, nil // ignore stray ticks once we've left the loading screen
@@ -804,6 +834,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.list, cmd = m.list.Update(msg)
 	if m.view == viewProfiles {
 		m.skipSeparators(before)
+	}
+	if tick := m.statusTick(); tick != nil {
+		return m, tea.Batch(cmd, tick)
 	}
 	return m, cmd
 }

@@ -1516,7 +1516,7 @@ func TestChromePinnedToTheBottom(t *testing.T) {
 	}{
 		{"tools", viewTools, nil, "enter open • q/esc quit"},
 		{"bindings", viewProfiles, func(m *model) { m.loadProfiles("") }, "enter switch • a add • r reapply • e edit • c clone • x copy • d delete • ctrl+r refresh"},
-		{"form", viewEditForm, func(m *model) { m.loadEditForm() }, "↑/↓ move • tab next field • enter select • esc cancel"},
+		{"form", viewEditForm, func(m *model) { m.loadEditForm() }, "↑/↓/j/k move • tab next field • enter select • esc cancel"},
 		{"input step", viewAddEndpoint, nil, "enter continue • esc back"},
 		{"picker", viewPickModel, func(m *model) { m.showModels([]string{"glm-4.6", "kimi-k2"}) }, "enter finish • esc back"},
 		{"fetching", viewFetching, nil, ""},
