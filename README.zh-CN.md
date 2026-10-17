@@ -178,7 +178,7 @@ charon completion fish | source
 在菜单里进入某个工具，选择 ＋ Add new binding…（或按 a）。单页表单会显示所有字段：
 
 - Name：绑定名（支持 Unicode 文字）。
-- API base URL：留空即采用该 provider 的默认值；Charon 不会预填真实地址。
+- Endpoint：留空即采用该 provider 的默认值；Charon 不会预填真实地址。
 - API key：输入内容会隐藏。
 - Model：字段下方提供两个操作按钮：
   - [ Fetch & Pick Online Models ]：请求 GET /v1/models（OpenAI 兼容 API 使用
@@ -275,7 +275,7 @@ charon 并在菜单中选择。
 ## 工作原理
 
 - 存储：~/.config/charon/（遵循 $XDG_CONFIG_HOME）。数据保存在五个 JSON 文件中：
-  - providers.json：服务配置的 id 和 base URL，可供多个工具共用。
+  - providers.json：服务配置的 id 和 baseUrl，可供多个工具共用。
   - credentials.json：服务配置对应的 API key，权限为 0600。
   - models.json：服务配置对应的模型 slug。
   - bindings.json：工具的绑定名称、凭据、默认模型，以及要在工具菜单中提供的模型 ID。

@@ -158,7 +158,7 @@ func TestWizardStep(t *testing.T) {
 		wantTotal int
 		wantLabel string
 	}{
-		{viewAddEndpoint, 1, 4, "API base URL"},
+		{viewAddEndpoint, 1, 4, "endpoint"},
 		{viewAddKey, 2, 4, "API key"},
 		{viewFetching, 3, 4, "choose a model"},
 		{viewPickModel, 3, 4, "choose a model"},

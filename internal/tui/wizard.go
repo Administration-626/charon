@@ -109,7 +109,7 @@ func (m model) pickerNote() string {
 func wizardStep(v view) (n, total int, label string) {
 	switch v {
 	case viewAddEndpoint:
-		return 1, 4, "API base URL"
+		return 1, 4, "endpoint"
 	case viewAddKey:
 		return 2, 4, "API key"
 	case viewFetching, viewPickModel:
@@ -294,7 +294,7 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 
 	endpoint := strings.TrimRight(strings.TrimSpace(m.formInputs[focusURL].Value()), "/")
 	if endpoint == "" {
-		m.setStatus(statusErr, "API Base URL is required")
+		m.setStatus(statusErr, "Endpoint is required")
 		return m, nil
 	}
 

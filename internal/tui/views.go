@@ -32,18 +32,18 @@ func (m model) endpointHint(endpoint string) string {
 	if m.tool != nil && m.tool.Name == "pi" {
 		switch m.wiz.piAPI {
 		case "google-generative-ai":
-			return hintStyle.Render("Gemini: use the provider's base URL; type model IDs manually.")
+			return hintStyle.Render("Gemini: use the provider's documented endpoint; type model IDs manually.")
 		case "anthropic-messages":
 			return ""
 		}
 	}
 	if tools.EndpointHasClaudeV1(m.tool, endpoint) {
-		return warnStyle.Render("Warning: this URL includes /v1; Claude Code requests /v1/messages. Confirm the gateway base URL.")
+		return warnStyle.Render("Warning: this URL includes /v1; Claude Code requests /v1/messages. Confirm the gateway endpoint.")
 	}
 	if !tools.EndpointNeedsV1Hint(m.tool, endpoint) {
 		return ""
 	}
-	return warnStyle.Render("Warning: no /v1; discovery adds /v1/models. Confirm the gateway base URL.")
+	return warnStyle.Render("Warning: no /v1; discovery adds /v1/models. Confirm the gateway endpoint.")
 }
 
 // modelActionRow renders one of the tree-indented buttons under the Model Slug field,
@@ -159,7 +159,7 @@ func (m model) View() string {
 		}
 		header := "\n" + titleStyle.Render(title) + "\n\n"
 
-		labels := []string{"Name         ", "API Base URL ", "API Key/Token"}
+		labels := []string{"Name         ", "Endpoint     ", "API Key/Token"}
 		var formLines []string
 
 		for i := 0; i < formInputCount; i++ {
@@ -304,9 +304,9 @@ func (m model) prompt() string {
 	switch m.view {
 	case viewModelEndpoint:
 		if m.editingModel.ID != "" {
-			return "Edit endpoint URL for " + m.editingModel.Slug + ":"
+			return "Edit endpoint for " + m.editingModel.Slug + ":"
 		}
-		return "Model Library — endpoint URL:"
+		return "Model Library — endpoint:"
 	case viewModelSlug:
 		return "Model Library — model slug:"
 	case viewModelWindow:
@@ -328,7 +328,7 @@ func (m model) prompt() string {
 		case fieldName:
 			return "Edit name:"
 		case fieldURL:
-			return "Edit API base URL:"
+			return "Edit endpoint:"
 		case fieldToken:
 			return "Edit API key (hidden):"
 		}
@@ -336,9 +336,9 @@ func (m model) prompt() string {
 	switch m.view {
 	case viewAddEndpoint:
 		if m.tool.DefaultEndpoint != "" {
-			return "API base URL — leave blank for the default (" + m.tool.DefaultEndpoint + "):"
+			return "endpoint — leave blank for the default (" + m.tool.DefaultEndpoint + "):"
 		}
-		return "API base URL:"
+		return "endpoint:"
 	case viewAddKey:
 		return "API key — input is hidden as you type:"
 	case viewAddName:

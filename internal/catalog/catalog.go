@@ -186,7 +186,7 @@ func (c *Catalog) PutProvider(baseURL string) (Provider, error) {
 	defer c.unlock()
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
-		return Provider{}, fmt.Errorf("provider base URL is required")
+		return Provider{}, fmt.Errorf("provider endpoint is required")
 	}
 	ps, err := c.providers()
 	if err != nil {

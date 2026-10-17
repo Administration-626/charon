@@ -94,7 +94,7 @@ confirms a choice, and Save stores the binding. The saved type also appears in t
 binding list.
 Bindings without a type default to Chat Completions; explicitly saved types are
 unchanged. Pi 1.0.4 has no separate Responses Compact protocol, so it is not offered
-in the dropdown. This does not change Pi's compaction settings. Use the base URL
+in the dropdown. This does not change Pi's compaction settings. Use the endpoint
 documented by your provider; for native Gemini, enter model IDs manually because
 model discovery only probes OpenAI/Anthropic.
 
@@ -212,7 +212,7 @@ In the menu, drill into a tool and choose ＋ Add new binding… (or press a).
 A single-page form collects everything on one screen:
 
 - Name — a binding name (any script; Unicode is fine).
-- API base URL — leave blank to accept the provider default; a real value is
+- Endpoint — leave blank to accept the provider default; a real value is
   never prefilled.
 - API key — masked input.
 - Model — two action buttons underneath give you full control:
@@ -336,7 +336,7 @@ and choose a binding from the menu.
 
 - Storage: ~/.config/charon/ ($XDG_CONFIG_HOME respected). Five JSON files,
   no database:
-  - providers.json — a site: id, base URL. Reused across tools.
+  - providers.json — a site: id, baseUrl. Reused across tools.
   - credentials.json — a key for one site. Mode 0600.
   - models.json — a model slug for one site.
   - bindings.json — one tool's saved choice: name, credential, default model,

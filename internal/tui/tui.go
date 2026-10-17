@@ -1156,7 +1156,7 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 			m.modelEditEndpoint = ""
 			m.view = viewModelEndpoint
 			m.clearStatus()
-			m.startInput("endpoint URL, e.g. https://openrouter.ai/api/v1", false)
+			m.startInput("endpoint, e.g. https://openrouter.ai/api/v1", false)
 			return m, textinput.Blink
 		}
 		m.view = viewModelWindow

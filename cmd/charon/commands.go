@@ -362,7 +362,7 @@ func cmdModels(cat *catalog.Catalog, args []string) error {
 		return err
 	}
 	fs := flag.NewFlagSet("models", flag.ContinueOnError)
-	endpoint := fs.String("endpoint", "", "API base URL")
+	endpoint := fs.String("endpoint", "", "endpoint")
 	key := fs.String("key", "", "API key")
 	local := fs.Bool("local", false, "list models saved in charon's catalog")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -576,7 +576,7 @@ func cmdAdd(cat *catalog.Catalog, args []string) error {
 		return err
 	}
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
-	endpoint := fs.String("endpoint", "", "API base URL")
+	endpoint := fs.String("endpoint", "", "endpoint")
 	key := fs.String("key", "", "API key")
 	model := fs.String("model", "", "model id")
 	modelList := fs.String("models", "", "comma-separated model ids to offer in the tool's own picker")
@@ -646,7 +646,7 @@ func cmdEdit(cat *catalog.Catalog, args []string) error {
 	// Flags default to the current values, so an unset flag leaves that field unchanged.
 	// --models is not defaulted: whether the user passed it decides if the picker is rewritten.
 	fs := flag.NewFlagSet("edit", flag.ContinueOnError)
-	endpoint := fs.String("endpoint", view.endpoint, "API base URL")
+	endpoint := fs.String("endpoint", view.endpoint, "endpoint")
 	key := fs.String("key", cr.Key, "API key")
 	model := fs.String("model", view.slug, "model id")
 	modelList := fs.String("models", "", "comma-separated model ids to offer in the tool's own picker")
@@ -704,7 +704,7 @@ func cmdEdit(cat *catalog.Catalog, args []string) error {
 
 func warnEndpointV1(t *tools.Tool, endpoint string) {
 	if tools.EndpointHasClaudeV1(t, endpoint) {
-		fmt.Fprintln(os.Stderr, "warning: endpoint includes /v1; Claude Code requests /v1/messages, so confirm the gateway's documented base URL")
+		fmt.Fprintln(os.Stderr, "warning: endpoint includes /v1; Claude Code requests /v1/messages, so confirm the gateway's documented endpoint")
 		return
 	}
 	if tools.EndpointNeedsV1Hint(t, endpoint) {

@@ -448,7 +448,7 @@ func (m model) updatePickModel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.finishPicker()
 	case tea.KeyCtrlR:
 		if m.wiz.endpoint == "" || m.wiz.key == "" {
-			m.setStatus(statusInfo, "set URL and token first, then refresh")
+			m.setStatus(statusInfo, "set endpoint and key first, then refresh")
 			return m, nil
 		}
 		cmd := m.beginFetch()
