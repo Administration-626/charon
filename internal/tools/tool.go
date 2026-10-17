@@ -6,6 +6,10 @@ import (
 	"os/exec"
 )
 
+// managedProvider is the only provider entry charon owns in a tool's config;
+// all others are the user's and are never touched.
+const managedProvider = "charon"
+
 // Info is a display-friendly summary of a tool's live configuration.
 type Info struct {
 	Endpoint string // base URL / host in use

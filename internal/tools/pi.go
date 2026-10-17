@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"charon/internal/edit"
 	"charon/internal/models"
 )
 
@@ -301,28 +302,26 @@ func newPi() *Tool {
 				}
 				entries = piBuildModels(specs, api)
 			}
-			original := snapshotProviders(providers)
-			providers[managedProvider] = map[string]any{
-				"name":    managedProvider,
-				"baseUrl": a.Endpoint,
-				"apiKey":  piEscapeValue(a.Key),
-				"api":     api,
-				"models":  entries,
+			// The edit names only the paths charon owns (its provider entry and
+			// the defaults); user providers, comments and ordering stay as they are.
+			msets := []edit.KV{
+				{Path: "providers." + managedProvider + ".name", Value: managedProvider},
+				{Path: "providers." + managedProvider + ".baseUrl", Value: a.Endpoint},
+				{Path: "providers." + managedProvider + ".apiKey", Value: piEscapeValue(a.Key)},
+				{Path: "providers." + managedProvider + ".api", Value: api},
+				{Path: "providers." + managedProvider + ".models", Value: entries},
 			}
-			if err := ensureOnlyCharonChanged(original, providers); err != nil {
-				return err
-			}
+			ssets := []edit.KV{{Path: "defaultProvider", Value: managedProvider}}
 			if modelSlug != "" {
-				s["defaultModel"] = modelSlug
+				ssets = append(ssets, edit.KV{Path: "defaultModel", Value: modelSlug})
 			}
-			s["defaultProvider"] = "charon"
 
 			// ponytail: writes are atomic per file, not a multi-file transaction.
 			// Preflight catches input errors; report partial application on I/O failure.
-			if err := writeJSONMap(modelsPath, config, 0o600); err != nil {
+			if err := edit.SetJSON(modelsPath, msets...); err != nil {
 				return fmt.Errorf("write models.json: %w", err)
 			}
-			if err := writeJSONMap(settingsPath, s, 0o600); err != nil {
+			if err := edit.SetJSON(settingsPath, ssets...); err != nil {
 				return fmt.Errorf("write settings.json (models.json already updated): %w", err)
 			}
 			if legacy != nil {

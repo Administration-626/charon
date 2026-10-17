@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"charon/internal/edit"
 )
 
 func TestJSONMapRoundTripPreservesKeys(t *testing.T) {
@@ -12,13 +14,7 @@ func TestJSONMapRoundTripPreservesKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := loadJSONMap(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	env := subMap(m, "env")
-	env["ANTHROPIC_API_KEY"] = "sk-x"
-	if err := writeJSONMap(path, m, 0o600); err != nil {
+	if err := edit.SetJSON(path, edit.KV{Path: "env.ANTHROPIC_API_KEY", Value: "sk-x"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -48,14 +44,10 @@ func TestTOMLMapRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	_ = os.WriteFile(path, []byte("model = \"gpt-5.5\"\n[features]\njs_repl = false\n"), 0o644)
 
-	m, err := loadTOMLMap(path)
-	if err != nil {
+	if err := edit.SetTOMLTop(path, edit.KV{Path: "model_provider", Value: "custom"}); err != nil {
 		t.Fatal(err)
 	}
-	m["model_provider"] = "custom"
-	providers := subMap(m, "model_providers")
-	providers["custom"] = map[string]any{"base_url": "http://x"}
-	if err := writeTOMLMap(path, m, 0o644); err != nil {
+	if err := edit.SetTOMLTable(path, "model_providers.custom", edit.KV{Path: "base_url", Value: "http://x"}); err != nil {
 		t.Fatal(err)
 	}
 

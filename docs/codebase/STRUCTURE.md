@@ -7,6 +7,7 @@
 | `cmd/charon/` | CLI 入口、子命令分发、shell 补全 | `cmd/charon/main.go`、`commands.go`、`completions.go` |
 | `internal/catalog/` | provider、credential、model、binding、active 指针和投影 | `internal/catalog/*.go` |
 | `internal/tools/` | Codex、Claude、OpenCode、Pi、Grok 的配置适配器 | `internal/tools/tool.go`、各工具文件 |
+| `internal/edit/` | 保格式 JSON/JSONC/TOML 编辑器（改自 magpie，MIT）：只改指定的键和表，注释、键序、缩进原样保留 | `internal/edit/json.go`、`internal/edit/toml.go` |
 | `internal/models/` | 远端模型列表获取和上下文窗口规则 | `internal/models/fetch.go`、`builtin.go` |
 | `internal/artifact/` | 临时文件、同步、权限、rename 原子写入 | `internal/artifact/artifact.go` |
 | `internal/secret/` | 密钥遮罩和平台密钥链读取 | `internal/secret/` |

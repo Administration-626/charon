@@ -421,7 +421,7 @@ func TestModelLibraryEditsEffort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "model_reasoning_effort = 'high'") {
+	if !strings.Contains(string(data), "model_reasoning_effort = \"high\"") {
 		t.Fatalf("Codex config does not carry effort:\n%s", data)
 	}
 }
@@ -1866,18 +1866,7 @@ func TestEnterOnActiveBindingShowsAlreadyActive(t *testing.T) {
 		t.Errorf("status = %q, want %q", alreadyActive.status, "secondary is already active")
 	}
 
-	settings := filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
-	data, err := os.ReadFile(settings)
-	if err != nil {
-		t.Fatal(err)
-	}
-	changed := strings.Replace(string(data), `"model": "claude-sonnet-4-5"`, `"model": "manual-model"`, 1)
-	if changed == string(data) {
-		t.Fatal("saved model missing from Claude settings")
-	}
-	if err := os.WriteFile(settings, []byte(changed), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	rewriteModelJSON(t, filepath.Join(os.Getenv("HOME"), ".claude", "settings.json"), "claude-sonnet-4-5", "manual-model")
 	if detail := alreadyActive.profileDetail("secondary"); !strings.Contains(detail, "saved:") || !strings.Contains(detail, "live:") || !strings.Contains(detail, "manual-model") {
 		t.Fatalf("binding detail does not distinguish saved and live config: %q", detail)
 	}
@@ -1898,12 +1887,13 @@ func TestEnterOnActiveBindingShowsAlreadyActive(t *testing.T) {
 	if reapplied.statusLvl != statusOK || reapplied.status != "Reapplied secondary" {
 		t.Fatalf("reapply status = %q (%v)", reapplied.status, reapplied.statusLvl)
 	}
-	data, err = os.ReadFile(settings)
-	if err != nil {
-		t.Fatal(err)
+	redata, rerr := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".claude", "settings.json"))
+	if rerr != nil {
+		t.Fatal(rerr)
 	}
-	if !strings.Contains(string(data), `"model": "claude-sonnet-4-5"`) {
-		t.Fatal("TUI reapply did not restore the saved default model")
+	var after map[string]any
+	if err := json.Unmarshal(redata, &after); err != nil || after["model"] != "claude-sonnet-4-5" {
+		t.Fatalf("TUI reapply did not restore the saved default model: %v (err %v)", after["model"], err)
 	}
 }
 
@@ -2042,4 +2032,29 @@ func TestModelLibraryCursorRetention(t *testing.T) {
 	}
 
 	_ = m1
+}
+
+// rewriteModelJSON sets settings' top-level model, JSON-aware, so the test
+// does not depend on the file's formatting.
+func rewriteModelJSON(t *testing.T, path, want, set string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s map[string]any
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatalf("settings.json not valid JSON: %v", err)
+	}
+	if s["model"] != want {
+		t.Fatalf("saved model missing from settings: model = %v, want %v", s["model"], want)
+	}
+	s["model"] = set
+	out, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		t.Fatal(err)
+	}
 }

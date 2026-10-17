@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"charon/internal/edit"
 )
 
 // grokModelPrefix marks every [model.*] table charon owns in ~/.grok/config.toml.
@@ -43,19 +45,6 @@ func grokExistingModels(models map[string]any) []string {
 	return ids
 }
 
-// grokSnapshotUserModels records every model table charon does not own.
-func grokSnapshotUserModels(models map[string]any) map[string]string {
-	snap := map[string]string{}
-	for name, v := range models {
-		if grokOwnedModel(name) {
-			continue
-		}
-		b, _ := json.Marshal(v)
-		snap[name] = string(b)
-	}
-	return snap
-}
-
 // grokTable returns m[key] when it is a TOML table, creating it when absent.
 // A key that exists but is not a table is left untouched and reported, so a
 // stray scalar cannot be overwritten by the model registry.
@@ -73,19 +62,19 @@ func grokTable(m map[string]any, key string) (map[string]any, error) {
 	return table, nil
 }
 
-func grokModelEntry(slug, endpoint, key string, window int) map[string]any {
-	entry := map[string]any{
-		"model":    slug,
-		"name":     slug,
-		"base_url": endpoint,
+func grokModelKVs(slug, endpoint, key string, window int) []edit.KV {
+	kvs := []edit.KV{
+		{Path: "model", Value: slug},
+		{Path: "name", Value: slug},
+		{Path: "base_url", Value: endpoint},
 	}
 	if key != "" {
-		entry["api_key"] = key
+		kvs = append(kvs, edit.KV{Path: "api_key", Value: key})
 	}
 	if window > 0 {
-		entry["context_window"] = window
+		kvs = append(kvs, edit.KV{Path: "context_window", Value: window})
 	}
-	return entry
+	return kvs
 }
 
 // grokAccount names a browser or OIDC login from auth.json without returning the
@@ -129,11 +118,12 @@ func newGrok() *Tool {
 			if err != nil {
 				return err
 			}
+			// Guard on the way in (read-only): [model] and [models] must be tables
+			// when they exist, so a stray scalar is reported, not overwritten.
 			modelTable, err := grokTable(cfg, "model")
 			if err != nil {
 				return err
 			}
-			original := grokSnapshotUserModels(modelTable)
 
 			specs := a.Models
 			if specs == nil {
@@ -147,14 +137,12 @@ func newGrok() *Tool {
 				modelSlug = strings.TrimSpace(specs[0].Slug)
 			}
 
-			// Replace the owned tables outright so a shorter list cannot keep the
-			// previous endpoint's models. User-authored [model.*] tables stay.
+			// Replace the owned [model.charon-*] tables outright so a shorter list
+			// cannot keep the previous endpoint's models. The edit touches only
+			// those tables; user [model.*] tables, comments and ordering stay as
+			// they are (edit.SetTOMLTables replaces by name prefix).
 			if modelSlug != "" || len(specs) > 0 {
-				for name := range modelTable {
-					if grokOwnedModel(name) {
-						delete(modelTable, name)
-					}
-				}
+				var tables []edit.Table
 				seen := map[string]bool{}
 				for _, spec := range specs {
 					id := strings.TrimSpace(spec.Slug)
@@ -162,21 +150,21 @@ func newGrok() *Tool {
 						continue
 					}
 					seen[id] = true
-					modelTable[grokMenuName(id)] = grokModelEntry(id, a.Endpoint, a.Key, spec.ContextWindow)
+					tables = append(tables, edit.Table{
+						Name: edit.SpellTOMLTableName("model", grokMenuName(id)),
+						KVs:  grokModelKVs(id, a.Endpoint, a.Key, spec.ContextWindow),
+					})
 				}
-			}
-			if err := ensureOnlyCharonChanged(original, modelTable); err != nil {
-				return err
-			}
-
-			if modelSlug != "" {
-				defaults, err := grokTable(cfg, "models")
-				if err != nil {
+				if err := edit.SetTOMLTables(configPath, []string{"model." + grokModelPrefix}, tables); err != nil {
 					return err
 				}
-				defaults["default"] = grokMenuName(modelSlug)
 			}
-			return writeTOMLMap(configPath, cfg, 0o600)
+			if modelSlug != "" {
+				if err := edit.SetTOMLKey(configPath, "models", "default", grokMenuName(modelSlug)); err != nil {
+					return err
+				}
+			}
+			return nil
 		},
 		Detected: func() bool {
 			return detected("grok", configPath, authPath)
@@ -226,7 +214,9 @@ func newGrok() *Tool {
 }
 
 func grokSpecsFromIDs(ids []string) []ModelSpec {
-	if ids == nil {
+	// An empty list reads as "no list" (nil): a caller that gave only a
+	// model must still fall through to the single-model default.
+	if len(ids) == 0 {
 		return nil
 	}
 	specs := make([]ModelSpec, 0, len(ids))

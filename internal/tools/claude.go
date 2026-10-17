@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"charon/internal/edit"
 	"charon/internal/secret"
 )
 
@@ -26,26 +27,16 @@ func newClaude() *Tool {
 		ApplyAuth: func(a AuthSpec) error {
 			// Preserve the already-registered list when a caller does not supply one.
 			existingModels := claudeExistingModels(settingsPath)
-			s, err := loadJSONMap(settingsPath)
-			if err != nil {
-				return err
-			}
-			env := subMap(s, "env")
-			// Clear every auth key so we never send conflicting headers or a stale base URL.
-			delete(env, "ANTHROPIC_API_KEY")
-			delete(env, "ANTHROPIC_AUTH_TOKEN")
-			delete(env, "ANTHROPIC_BASE_URL")
-			delete(env, "ANTHROPIC_MODEL")
-			delete(env, "ANTHROPIC_CUSTOM_MODEL_OPTION")
-			// A gateway alias can use this override. Claude Code ignores it for
-			// recognized claude-* ids unless compaction is disabled.
-			delete(env, "CLAUDE_CODE_MAX_CONTEXT_TOKENS")
-
+			var sets []edit.KV
+			var dels []string
+			// Clear every auth key so we never send conflicting headers or a stale
+			// base URL. ApplyJSON deletes first, then sets, so the branch's sets win.
+			dels = append(dels,
+				"env.ANTHROPIC_API_KEY", "env.ANTHROPIC_AUTH_TOKEN", "env.ANTHROPIC_BASE_URL",
+				"env.ANTHROPIC_MODEL", "env.ANTHROPIC_CUSTOM_MODEL_OPTION", "env.CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+			)
 			custom := a.Endpoint != "" && !isOfficialEndpoint(a.Endpoint, "api.anthropic.com")
 			if custom {
-				// Gateways want Bearer auth at a custom base URL.
-				env["ANTHROPIC_BASE_URL"] = normalizeClaudeBaseURL(a.Endpoint)
-				env["ANTHROPIC_AUTH_TOKEN"] = a.Key
 				specs := a.Models
 				if specs == nil {
 					specs = claudeSpecsFromIDs(existingModels)
@@ -65,18 +56,25 @@ func newClaude() *Tool {
 						break
 					}
 				}
+				// Gateways want Bearer auth at a custom base URL.
+				sets = append(sets,
+					edit.KV{Path: "env.ANTHROPIC_BASE_URL", Value: normalizeClaudeBaseURL(a.Endpoint)},
+					edit.KV{Path: "env.ANTHROPIC_AUTH_TOKEN", Value: a.Key},
+				)
 				if window > 0 {
-					env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = strconv.Itoa(window)
+					sets = append(sets, edit.KV{Path: "env.CLAUDE_CODE_MAX_CONTEXT_TOKENS", Value: strconv.Itoa(window)})
 				}
 				// Gateway models aren't in Claude Code's catalog; the top-level "model"
 				// selector validates against it and rejects them, so route via ANTHROPIC_MODEL.
-				delete(s, "model")
+				dels = append(dels, "model")
 				if a.Model != "" {
-					env["ANTHROPIC_MODEL"] = modelID
-					// Gateway model discovery only surfaces ids prefixed "claude"/"anthropic" in
-					// /model, which most gateway model ids aren't. ANTHROPIC_CUSTOM_MODEL_OPTION
-					// adds this one model to the picker regardless of its id shape.
-					env["ANTHROPIC_CUSTOM_MODEL_OPTION"] = modelID
+					sets = append(sets,
+						edit.KV{Path: "env.ANTHROPIC_MODEL", Value: modelID},
+						// Gateway model discovery only surfaces ids prefixed "claude"/"anthropic" in
+						// /model, which most gateway model ids aren't. ANTHROPIC_CUSTOM_MODEL_OPTION
+						// adds this one model to the picker regardless of its id shape.
+						edit.KV{Path: "env.ANTHROPIC_CUSTOM_MODEL_OPTION", Value: modelID},
+					)
 				}
 				// A gateway serves models from many vendors under one endpoint, so curate the
 				// whole fetched list into /model via modelPicker — the same "register every
@@ -84,24 +82,23 @@ func newClaude() *Tool {
 				// Without it /model holds one row (ANTHROPIC_CUSTOM_MODEL_OPTION above) and
 				// switching model means going back through charon.
 				if picker := claudeModelPickerSpecs(specs, modelID); picker != nil {
-					s["modelPicker"] = picker
+					sets = append(sets, edit.KV{Path: "modelPicker", Value: picker})
 				} else {
-					delete(s, "modelPicker")
+					dels = append(dels, "modelPicker")
 				}
 			} else {
 				// Anthropic's own API uses x-api-key. Leave ANTHROPIC_BASE_URL unset: pointing it
 				// at the default endpoint makes Claude Code treat it as a gateway and break connectors.
-				env["ANTHROPIC_API_KEY"] = a.Key
-				// Pre-approve the key (and un-disable it) so a prior "No" can't leave it ignored.
-				approveClaudeAPIKey(s, a.Key)
+				sets = append(sets, edit.KV{Path: "env.ANTHROPIC_API_KEY", Value: a.Key})
+				sets = append(sets, approveClaudeKeyKVs(settingsPath, a.Key)...)
 				// Stock models are in the catalog, so the top-level selector is preferred. Any
 				// gateway's modelPicker must go first, or the official account inherits its list.
-				delete(s, "modelPicker")
+				dels = append(dels, "modelPicker")
 				if a.Model != "" {
-					s["model"] = a.Model
+					sets = append(sets, edit.KV{Path: "model", Value: a.Model})
 				}
 			}
-			return writeJSONMap(settingsPath, s, 0o600)
+			return edit.ApplyJSON(settingsPath, sets, dels)
 		},
 		Detected: func() bool {
 			if detected("claude", settingsPath) {
@@ -156,7 +153,9 @@ func newClaude() *Tool {
 }
 
 func claudeSpecsFromIDs(ids []string) []ModelSpec {
-	if ids == nil {
+	// An empty list reads as "no list" (nil): a caller that gave only a
+	// model must still fall through to the single-model default.
+	if len(ids) == 0 {
 		return nil
 	}
 	specs := make([]ModelSpec, 0, len(ids))
@@ -289,35 +288,32 @@ func claudeKeyID(key string) string {
 	return key[len(key)-claudeKeyIDLen:]
 }
 
-// approveClaudeAPIKey marks key approved and un-disabled in customApiKeyResponses,
-// so Claude Code stops prompting and a prior rejection can't keep it switched off.
-func approveClaudeAPIKey(s map[string]any, key string) {
+// approveClaudeKeyKVs is the key-approval edit as KVs: the key's id appended
+// to customApiKeyResponses.approved and taken out of disabled, so Claude
+// Code stops prompting and a prior rejection can't keep it switched off.
+func approveClaudeKeyKVs(settingsPath, key string) []edit.KV {
 	if key == "" {
-		return
-	}
-	id := claudeKeyID(key)
-	resp := subMap(s, "customApiKeyResponses")
-
-	resp["approved"] = addString(toStringSlice(resp["approved"]), id)
-	resp["disabled"] = removeString(toStringSlice(resp["disabled"]), id)
-}
-
-// toStringSlice coerces a JSON-decoded []any (or []string) into a []string.
-func toStringSlice(v any) []string {
-	switch t := v.(type) {
-	case []string:
-		return t
-	case []any:
-		out := make([]string, 0, len(t))
-		for _, e := range t {
-			if s, ok := e.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	default:
 		return nil
 	}
+	id := claudeKeyID(key)
+	return []edit.KV{
+		{Path: "customApiKeyResponses.approved", Value: addString(claudeStringList(settingsPath, "customApiKeyResponses.approved"), id)},
+		{Path: "customApiKeyResponses.disabled", Value: removeString(claudeStringList(settingsPath, "customApiKeyResponses.disabled"), id)},
+	}
+}
+
+// claudeStringList reads a JSON array of strings at a key path, tolerating
+// JSONC comments in the file.
+func claudeStringList(settingsPath, path string) []string {
+	raw, ok := edit.GetJSONRaw(settingsPath, path)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var list []string
+	if json.Unmarshal([]byte(raw), &list) != nil {
+		return nil
+	}
+	return list
 }
 
 func addString(list []string, s string) []string {

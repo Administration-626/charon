@@ -3,11 +3,8 @@ package tools
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 
 	toml "github.com/pelletier/go-toml/v2"
-
-	"charon/internal/artifact"
 )
 
 // loadJSONMap reads path as a JSON object, returning an empty map if absent.
@@ -29,18 +26,6 @@ func loadJSONMap(path string) (map[string]any, error) {
 	return m, nil
 }
 
-// writeJSONMap writes m to path (0600) as indented JSON, atomically.
-func writeJSONMap(path string, m map[string]any, perm os.FileMode) error {
-	data, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	return artifact.AtomicWrite(path, append(data, '\n'), perm)
-}
-
 // loadTOMLMap reads path as a TOML table, returning an empty map if absent.
 func loadTOMLMap(path string) (map[string]any, error) {
 	m := map[string]any{}
@@ -55,18 +40,6 @@ func loadTOMLMap(path string) (map[string]any, error) {
 		return nil, err
 	}
 	return m, nil
-}
-
-// writeTOMLMap writes m to path (0644) as TOML, atomically.
-func writeTOMLMap(path string, m map[string]any, perm os.FileMode) error {
-	data, err := toml.Marshal(m)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	return artifact.AtomicWrite(path, data, perm)
 }
 
 // subMap returns m[key] as a map, creating it if missing.

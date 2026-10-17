@@ -2,12 +2,12 @@ package tools
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"charon/internal/edit"
 )
 
 // opencodeConfigPath returns the existing config (opencode.jsonc, else legacy
@@ -37,35 +37,24 @@ func newOpenCode() *Tool {
 		ModelMenu:       "/models",
 		DefaultEndpoint: "https://api.openai.com/v1",
 		ApplyAuth: func(a AuthSpec) error {
-			// Register a "charon" provider: OpenCode needs options.apiKey and a
-			// non-empty models map for the models to show in /models.
-			cfg, err := loadJSONMap(configPath)
-			if err != nil {
-				var syntax *json.SyntaxError
-				if errors.As(err, &syntax) {
-					return fmt.Errorf("%s has JSONC comments or a syntax error at byte %d that the standard JSON parser rejects; remove the comments (or rename the file to opencode.json) and retry: %w", configPath, syntax.Offset, err)
-				}
-				return err
-			}
-			if cfg["$schema"] == nil {
-				cfg["$schema"] = "https://opencode.ai/config.json"
-			}
-			provider := subMap(cfg, "provider")
-			original := snapshotProviders(provider) // guard: write may only touch "charon"
-
-			// Preserve the previously-registered model list (e.g. from an earlier fetch)
-			// when this call doesn't bring its own — otherwise an edit that doesn't touch
-			// the model field (rename, key rotation, CLI --model) would collapse OpenCode's
-			// /models picker down to just the single current model.
+			// Read-only: the previously-registered model list, tolerating the
+			// JSONC comments the config carries.
 			var existingModels []string
-			if prev, ok := provider["charon"].(map[string]any); ok {
-				if models, ok := prev["models"].(map[string]any); ok {
+			if raw, ok := edit.GetJSONRaw(configPath, "provider.charon.models"); ok {
+				var models map[string]any
+				if json.Unmarshal([]byte(raw), &models) == nil {
 					for id := range models {
 						existingModels = append(existingModels, id)
 					}
 				}
 			}
+			var sets []edit.KV
+			if _, ok := edit.GetJSONRaw(configPath, "$schema"); !ok {
+				sets = append(sets, edit.KV{Path: "$schema", Value: "https://opencode.ai/config.json"})
+			}
 
+			// Register a "charon" provider: OpenCode needs options.apiKey and a
+			// non-empty models map for the models to show in /models.
 			options := map[string]any{"baseURL": a.Endpoint}
 			if a.Key != "" {
 				options["apiKey"] = a.Key
@@ -99,15 +88,13 @@ func newOpenCode() *Tool {
 					modelMap[cleanID] = entry
 				}
 				entry["models"] = modelMap
-				cfg["model"] = "charon/" + modelSlug
+				sets = append(sets, edit.KV{Path: "model", Value: "charon/" + modelSlug})
 			}
-			provider["charon"] = entry
-
-			// Fail loudly rather than risk clobbering a user-authored provider.
-			if err := ensureOnlyCharonChanged(original, provider); err != nil {
-				return err
-			}
-			return writeJSONMap(configPath, cfg, 0o600)
+			// The edit names only the paths charon owns ($schema, model, and its own
+			// provider entry); user-authored providers, comments and ordering stay
+			// as they are.
+			sets = append(sets, edit.KV{Path: "provider.charon", Value: entry})
+			return edit.SetJSON(configPath, sets...)
 		},
 		Detected: func() bool {
 			return detected("opencode", configPath, authPath)
@@ -262,7 +249,9 @@ func newOpenCode() *Tool {
 }
 
 func opencodeSpecsFromIDs(ids []string) []ModelSpec {
-	if ids == nil {
+	// An empty list reads as "no list" (nil): a caller that gave only a
+	// model must still fall through to the single-model default.
+	if len(ids) == 0 {
 		return nil
 	}
 	specs := make([]ModelSpec, 0, len(ids))

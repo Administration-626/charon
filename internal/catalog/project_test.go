@@ -226,7 +226,7 @@ func TestProjectCodexPinsGatewayGPTWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), fmt.Sprintf("model_context_window = %d", models.DefaultContextCeiling)) || !strings.Contains(string(data), "model_catalog_json") || !strings.Contains(string(data), "model_reasoning_effort = 'xhigh'") {
+	if !strings.Contains(string(data), fmt.Sprintf("model_context_window = %d", models.DefaultContextCeiling)) || !strings.Contains(string(data), "model_catalog_json") || !strings.Contains(string(data), "model_reasoning_effort = \"xhigh\"") {
 		t.Fatalf("gateway GPT model lost its catalog window or effort:\n%s", data)
 	}
 }

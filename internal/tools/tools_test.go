@@ -3,13 +3,13 @@ package tools
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	toml "github.com/pelletier/go-toml/v2"
+	jsonclib "github.com/tidwall/jsonc"
 
 	"charon/internal/models"
 )
@@ -266,7 +266,7 @@ func TestCodexPinsCustomContextWindow(t *testing.T) {
 	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-rotated"}); err != nil {
 		t.Fatal(err)
 	}
-	if data, err := os.ReadFile(filepath.Join(home, ".codex", "config.toml")); err != nil || !strings.Contains(string(data), "model = 'qwen-2.5-coder'") || !strings.Contains(string(data), "model_catalog_json") {
+	if data, err := os.ReadFile(filepath.Join(home, ".codex", "config.toml")); err != nil || !strings.Contains(string(data), "model = \"qwen-2.5-coder\"") || !strings.Contains(string(data), "model_catalog_json") {
 		t.Errorf("key-only apply should preserve model catalog: err=%v", err)
 	}
 
@@ -879,24 +879,40 @@ func TestOpenCodeDescribeAndApply(t *testing.T) {
 	}
 }
 
-func TestOpenCodeRejectsCommentedJsonc(t *testing.T) {
+func TestOpenCodePreservesCommentedJsonc(t *testing.T) {
 	home := sandboxHome(t)
 	jsonc := filepath.Join(home, ".config", "opencode", "opencode.jsonc")
-	// Legal JSONC with a comment; the standard JSON parser must reject it with
-	// a hint instead of a bare syntax error.
-	writeFile(t, jsonc, "{\n  // comment\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\n")
+	// Legal JSONC with comments and a user provider; charon edits it in place,
+	// comments and key order intact.
+	writeFile(t, jsonc, "{\n  // main provider\n  \"provider\": {\n    \"myllm\": { \"name\": \"mine\" }\n  }\n}\n")
 
 	c := Find("opencode")
-	err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-abc", Model: "gpt-x"})
-	if err == nil {
-		t.Fatal("ApplyAuth must fail on commented JSONC")
+	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-abc", Model: "gpt-x"}); err != nil {
+		t.Fatal(err)
 	}
-	var syntax *json.SyntaxError
-	if !errors.As(err, &syntax) {
-		t.Fatalf("error should wrap json.SyntaxError, got: %v", err)
+	data, _ := os.ReadFile(jsonc)
+	out := string(data)
+	if !strings.Contains(out, "// main provider") {
+		t.Errorf("comment lost:\n%s", out)
 	}
-	if !strings.Contains(err.Error(), "JSONC comments") {
-		t.Errorf("error should name the JSONC cause, got: %v", err)
+	if !strings.Contains(out, "\"myllm\": { \"name\": \"mine\" }") {
+		t.Errorf("user provider reformatted:\n%s", out)
+	}
+	var cfg struct {
+		Provider map[string]json.RawMessage `json:"provider"`
+		Model    string                     `json:"model"`
+	}
+	if err := json.Unmarshal(jsonclib.ToJSON(data), &cfg); err != nil {
+		t.Fatalf("result must stay valid JSON: %v\n%s", err, out)
+	}
+	if _, ok := cfg.Provider["myllm"]; !ok {
+		t.Error("user provider removed")
+	}
+	if _, ok := cfg.Provider["charon"]; !ok {
+		t.Error("charon provider not added")
+	}
+	if cfg.Model != "charon/gpt-x" {
+		t.Errorf("model = %q", cfg.Model)
 	}
 }
 
@@ -931,32 +947,6 @@ func TestOpenCodeEditsExistingJsoncInPlace(t *testing.T) {
 	}
 	if _, ok := cfg.Provider["charon"]; !ok {
 		t.Error("charon provider not added to opencode.jsonc")
-	}
-}
-
-func TestEnsureOnlyCharonChanged(t *testing.T) {
-	provider := map[string]any{
-		"myllm":  map[string]any{"name": "mine"},
-		"charon": map[string]any{"name": "charon"},
-	}
-	original := snapshotProviders(provider) // captures myllm only
-
-	// Updating only charon is allowed.
-	provider["charon"] = map[string]any{"name": "charon", "options": map[string]any{"baseURL": "x"}}
-	if err := ensureOnlyCharonChanged(original, provider); err != nil {
-		t.Errorf("changing only charon must be allowed, got %v", err)
-	}
-
-	// Editing the user's provider is refused.
-	edited := map[string]any{"myllm": map[string]any{"name": "hijacked"}}
-	if err := ensureOnlyCharonChanged(original, edited); err == nil {
-		t.Error("editing an original provider must be refused")
-	}
-
-	// Deleting the user's provider is refused.
-	deleted := map[string]any{"charon": map[string]any{"name": "charon"}}
-	if err := ensureOnlyCharonChanged(original, deleted); err == nil {
-		t.Error("deleting an original provider must be refused")
 	}
 }
 
@@ -1351,4 +1341,82 @@ func configContents(t *testing.T, home string) string {
 		t.Fatal(err)
 	}
 	return b.String()
+}
+
+func TestClaudeApplyPreservesCommentsAndOrder(t *testing.T) {
+	home := sandboxHome(t)
+	settings := filepath.Join(home, ".claude", "settings.json")
+	writeFile(t, settings, "{\n  // my tweaks\n  \"permissions\": {\"allow\": [\"Bash*\"]},\n  \"theme\": \"dark\",\n  \"env\": {\n    \"FOO\": \"bar\"\n  }\n}\n")
+
+	c := Find("claude")
+	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-x", Model: "m-1"}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(settings)
+	out := string(data)
+	if !strings.Contains(out, "// my tweaks") {
+		t.Errorf("comment lost:\n%s", out)
+	}
+	if !strings.Contains(out, "\"FOO\": \"bar\"") || !strings.Contains(out, "\"theme\": \"dark\"") || !strings.Contains(out, "\"Bash*\"") {
+		t.Errorf("user settings lost:\n%s", out)
+	}
+	if strings.Index(out, "\"permissions\"") > strings.Index(out, "\"theme\"") {
+		t.Errorf("key order not preserved:\n%s", out)
+	}
+	if !strings.Contains(out, "\"ANTHROPIC_BASE_URL\": \"https://gw\"") { // normalizeClaudeBaseURL trims "/v1"
+		t.Errorf("gateway base URL missing:\n%s", out)
+	}
+}
+
+func TestCodexApplyPreservesCommentsAndOrder(t *testing.T) {
+	home := sandboxHome(t)
+	config := filepath.Join(home, ".codex", "config.toml")
+	writeFile(t, config, "# my codex setup\nmodel = \"gpt-5\"   # daily driver\n\n# trust\n[projects.\"~/work\".trust_level]\ntrusted = true\n\n[model_providers.mine]\nname = \"mine\"\n")
+
+	c := Find("codex")
+	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-x", Model: "qwen-2.5-coder"}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(config)
+	out := string(data)
+	if !strings.Contains(out, "# my codex setup") || !strings.Contains(out, "# daily driver") || !strings.Contains(out, "# trust") {
+		t.Errorf("comments lost:\n%s", out)
+	}
+	if !strings.Contains(out, "model = \"qwen-2.5-coder\"   # daily driver") {
+		t.Errorf("model not replaced with its comment kept:\n%s", out)
+	}
+	if !strings.Contains(out, "[projects.\"~/work\".trust_level]") || !strings.Contains(out, "trusted = true") {
+		t.Errorf("user table lost:\n%s", out)
+	}
+	if !strings.Contains(out, "[model_providers.mine]") || !strings.Contains(out, "name = \"mine\"") {
+		t.Errorf("user provider table lost:\n%s", out)
+	}
+	if !strings.Contains(out, "[model_providers.charon]") {
+		t.Errorf("charon table missing:\n%s", out)
+	}
+	if strings.Index(out, "model = ") > strings.Index(out, "[projects.") {
+		t.Errorf("top-level keys moved after tables:\n%s", out)
+	}
+}
+
+func TestGrokApplyPreservesCommentsAndUserTables(t *testing.T) {
+	home := sandboxHome(t)
+	config := filepath.Join(home, ".grok", "config.toml")
+	writeFile(t, config, "# grok config\n\n[ui]  # keep\nyolo = true\n\n[model.mine]\nname = \"mine\"\n")
+
+	c := Find("grok")
+	if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw/v1", Key: "sk-x", Model: "glm-4.6"}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(config)
+	out := string(data)
+	if !strings.Contains(out, "# grok config") || !strings.Contains(out, "# keep") {
+		t.Errorf("comments lost:\n%s", out)
+	}
+	if !strings.Contains(out, "[model.mine]") || !strings.Contains(out, "name = \"mine\"") {
+		t.Errorf("user model table lost:\n%s", out)
+	}
+	if !strings.Contains(out, "[model.\"charon-glm-4.6\"]") {
+		t.Errorf("dotted slug must be quoted in the header:\n%s", out)
+	}
 }

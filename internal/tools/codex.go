@@ -11,6 +11,7 @@ import (
 	toml "github.com/pelletier/go-toml/v2"
 
 	"charon/internal/artifact"
+	"charon/internal/edit"
 	"charon/internal/models"
 )
 
@@ -199,8 +200,7 @@ func newCodex() *Tool {
 		ModelMenu:       "/model",
 		DefaultEndpoint: "https://api.openai.com/v1",
 		ApplyAuth: func(a AuthSpec) error {
-			// Register a self-contained OpenAI-compatible provider (key embedded inline)
-			// and point Codex at it; auth.json (ChatGPT OAuth) is left untouched.
+			// Read-only: the current model and catalog pointer decide what to pin.
 			cfg, err := loadTOMLMap(configPath)
 			if err != nil {
 				return err
@@ -211,10 +211,6 @@ func newCodex() *Tool {
 					modelSlug = strings.TrimSpace(current)
 				}
 			}
-			if modelSlug != "" {
-				cfg["model"] = modelSlug
-			}
-			delete(cfg, "model_context_window")
 			var configuredWindow int
 			for _, spec := range a.Models {
 				if spec.Slug == modelSlug {
@@ -224,36 +220,48 @@ func newCodex() *Tool {
 			}
 			useCatalog := !IsOfficialOpenAIEndpoint(a.Endpoint) || codexContextWindow(modelSlug, configuredWindow) != 0 || len(a.Models) > 1 ||
 				(len(a.Models) == 0 && cfg["model_catalog_json"] == catalogPath)
+			window := 0
 			if modelSlug != "" && useCatalog {
 				a.Model = modelSlug
-				window, err := codexCatalog(catalogPath, a)
+				window, err = codexCatalog(catalogPath, a)
 				if err != nil {
 					return err
 				}
+			}
+			var sets []edit.KV
+			if modelSlug != "" {
+				sets = append(sets, edit.KV{Path: "model", Value: modelSlug})
+			}
+			sets = append(sets, edit.KV{Path: "model_provider", Value: "charon"})
+			if modelSlug != "" && useCatalog {
+				sets = append(sets, edit.KV{Path: "model_catalog_json", Value: catalogPath})
 				if window > 0 {
-					cfg["model_context_window"] = window
+					sets = append(sets, edit.KV{Path: "model_context_window", Value: window})
 				}
-				cfg["model_catalog_json"] = catalogPath
-			} else {
-				delete(cfg, "model_catalog_json")
+			}
+			var dels []string
+			if modelSlug == "" || !useCatalog {
+				dels = append(dels, "model_catalog_json")
+			}
+			if modelSlug == "" || !useCatalog || window <= 0 {
+				dels = append(dels, "model_context_window")
 			}
 			if a.Effort != "" {
-				cfg["model_reasoning_effort"] = a.Effort
+				sets = append(sets, edit.KV{Path: "model_reasoning_effort", Value: a.Effort})
 			}
-			cfg["model_provider"] = "charon"
-			providers := subMap(cfg, "model_providers")
-			original := snapshotProviders(providers) // guard: write may only touch "charon"
-			providers["charon"] = map[string]any{
-				"name":     "charon",
-				"base_url": a.Endpoint,
+			// The provider table first, so a crash between the two writes leaves
+			// the old provider selected with the new table in place (harmless)
+			// rather than "charon" pointing at a missing table.
+			if err := edit.SetTOMLTable(configPath, "model_providers.charon",
+				edit.KV{Path: "name", Value: "charon"},
+				edit.KV{Path: "base_url", Value: a.Endpoint},
 				// "responses" is the only wire API since Codex dropped "chat" (openai/codex #7782).
-				"wire_api":                  "responses",
-				"experimental_bearer_token": a.Key,
-			}
-			if err := ensureOnlyCharonChanged(original, providers); err != nil {
+				edit.KV{Path: "wire_api", Value: "responses"},
+				edit.KV{Path: "experimental_bearer_token", Value: a.Key},
+			); err != nil {
 				return err
 			}
-			return writeTOMLMap(configPath, cfg, 0o600)
+			return edit.PatchTOMLTop(configPath, sets, dels)
 		},
 		Detected: func() bool {
 			return detected("codex", configPath, authPath)

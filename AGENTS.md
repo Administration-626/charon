@@ -45,10 +45,13 @@ cmd/charon/         CLI entrypoint (thin; no business logic)
   main.go           main, subcommand dispatch, usage
   commands.go       one cmd* func per subcommand + requireTool
 internal/artifact/  atomic writes
+internal/edit/      format-preserving JSON/JSONC + TOML editors (adapted from
+                    magpie's internal/edit, MIT): set/del key paths and whole
+                    tables by name, comments/order/indentation kept; edits are
+                    validated before any write
 internal/tools/     per-tool adapters
   tool.go           Tool struct, AuthSpec, registry (All/Find)
-  providers.go      guards for the shared "charon" provider entry (codex/opencode)
-  edit.go           JSON/TOML load-merge-write helpers (preserve unknown keys)
+  edit.go           JSON/TOML read helpers (loadJSONMap/loadTOMLMap)
   codex.go / claude.go / opencode.go / pi.go / grok.go   one file per tool
 internal/catalog/   the store: providers, credentials, models, bindings, active pointer
 internal/models/    fetch model lists from a provider API (openai/anthropic wire)
@@ -56,7 +59,7 @@ internal/secret/    masking
 internal/tui/       bubbletea interactive menu
 ```
 
-Layering (imports point left): `secret` ← `artifact` ← `tools` ← `catalog` ← `cmd`/`tui`.
+Layering (imports point left): `secret` ← `artifact` ← `edit` ← `tools` ← `catalog` ← `cmd`/`tui`.
 Binding names are validated in `internal/catalog` (`validateName`); a name is a label,
 never a path segment, so do not join one into a filesystem path.
 
@@ -85,10 +88,13 @@ logins are not imported.
 3. Add a `TestXxxDescribeAndApply` in `tools_test.go` using a sandboxed `$HOME`.
    Everything else (catalog, CLI, TUI) is generic and needs no changes.
 
-`ApplyAuth` must **merge** into existing config (use the `edit.go` helpers) so
-unrelated user settings survive; it must not rewrite the file wholesale. It must
-refuse to modify a user-authored provider (`ensureOnlyCharonChanged`, managed
-provider name `"charon"`).
+`ApplyAuth` writes through `internal/edit` (`SetJSON`/`ApplyJSON` for JSON
+and JSONC, `SetTOMLTable`/`SetTOMLKey`/`SetTOMLTop`/`PatchTOMLTop`/`SetTOMLTables`
+for TOML), which changes only the named key paths and tables: comments, key
+order, indentation and every user-authored entry survive as they are, and the
+edited bytes are validated before anything reaches the disk. Reads may still use
+the `edit.go` load helpers. Never round-trip a tool's config through
+marshal/unmarshal — that reorders keys and strips comments.
 
 ### Model lists (`AuthSpec.Models`)
 

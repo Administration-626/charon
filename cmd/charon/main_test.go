@@ -178,11 +178,19 @@ func TestStatusAndReapplyDistinguishSavedBindingFromLiveModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	changed := strings.Replace(string(data), `"model": "claude-sonnet-4-5"`, `"model": "manual-model"`, 1)
-	if changed == string(data) {
-		t.Fatal("saved model missing from Claude settings")
+	var s map[string]any
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatalf("settings.json not valid JSON: %v", err)
 	}
-	if err := os.WriteFile(settings, []byte(changed), 0o600); err != nil {
+	if s["model"] != "claude-sonnet-4-5" {
+		t.Fatalf("saved model missing from Claude settings: %v", s["model"])
+	}
+	s["model"] = "manual-model"
+	edited, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settings, edited, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := run([]string{"switch", "claude", "work"}); err != nil {
@@ -214,8 +222,9 @@ func TestStatusAndReapplyDistinguishSavedBindingFromLiveModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"model": "claude-sonnet-4-5"`) {
-		t.Fatal("reapply did not restore the saved default model")
+	var after map[string]any
+	if err := json.Unmarshal(data, &after); err != nil || after["model"] != "claude-sonnet-4-5" {
+		t.Fatalf("reapply did not restore the saved default model: %v (err %v)", after["model"], err)
 	}
 }
 
@@ -570,7 +579,7 @@ func TestRunSetEffortWritesCodexConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "model_reasoning_effort = 'high'") {
+	if !strings.Contains(string(data), "model_reasoning_effort = \"high\"") {
 		t.Fatalf("active Codex config does not carry effort:\n%s", data)
 	}
 	if err := run([]string{"set-effort", "codex", "gw", "glm-5.3-flash", "nope"}); err == nil {
