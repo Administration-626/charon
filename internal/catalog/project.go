@@ -86,7 +86,7 @@ func (c *Catalog) ProjectSpec(b Binding) (tools.AuthSpec, error) {
 	// tool's other bindings, one entry per endpoint, so its picker can switch
 	// between them without charon. Only bindings of this same tool qualify: a
 	// catalog endpoint another tool uses was never given a model list or a
-	// request protocol for this one.
+	// request protocol for this one, and a hidden binding stays out on purpose.
 	if t := tools.Find(b.Tool); t != nil && t.MultiEndpoint {
 		groups, err := c.endpointGroups(b.Tool, b.ID)
 		if err != nil {
@@ -98,14 +98,15 @@ func (c *Catalog) ProjectSpec(b Binding) (tools.AuthSpec, error) {
 }
 
 // endpointGroups collects the endpoints a multi-endpoint tool registers next to
-// the one its binding points at: one group per other binding of that same tool,
-// carrying the key, model list and request protocol that binding saved. Only
-// that tool's own bindings qualify — an endpoint another tool configured was
-// never given a key, a picker list or a protocol for this one. The binding being
-// rendered is left out (it is the primary entry), and so is any other binding on
-// the same endpoint. When several bindings share an endpoint, the first in file
-// order stands for it, so the rendered set does not depend on table order;
-// groups are ordered by endpoint URL for the same reason.
+// the one its binding points at: one group per other visible binding of that
+// same tool, carrying the key, model list and request protocol that binding
+// saved. Only that tool's own bindings qualify — an endpoint another tool
+// configured was never given a key, a picker list or a protocol for this one —
+// and hidden bindings are skipped. The binding being rendered is left out (it is
+// the primary entry), and so is any other binding on the same endpoint. When
+// several bindings share an endpoint, the first visible one in file order stands
+// for it, so the rendered set does not depend on table order; groups are ordered
+// by endpoint URL for the same reason.
 func (c *Catalog) endpointGroups(tool, excludeBindingID string) ([]tools.EndpointGroup, error) {
 	bs, err := c.bindings()
 	if err != nil {
@@ -149,7 +150,10 @@ func (c *Catalog) endpointGroups(tool, excludeBindingID string) ([]tools.Endpoin
 	seen := make(map[string]bool, len(bs))
 	var groups []tools.EndpointGroup
 	for _, b := range bs {
-		if b.Tool != tool || b.ID == excludeBindingID {
+		// Hidden bindings are skipped before the per-endpoint bookkeeping, so a
+		// hidden first binding cannot shadow the visible one for the same
+		// endpoint.
+		if b.Tool != tool || b.ID == excludeBindingID || b.Hidden {
 			continue
 		}
 		cr, ok := creds[b.CredentialID]
@@ -189,9 +193,10 @@ func (c *Catalog) endpointGroups(tool, excludeBindingID string) ([]tools.Endpoin
 }
 
 // AggregateCounts reports how many endpoints and models a multi-endpoint tool
-// would register: one entry per endpoint, carrying the models that endpoint's
-// first binding saved. The TUI shows it as a hint; callers may ignore a read
-// error and leave the hint out.
+// would register: one entry per visible endpoint, carrying the models that
+// endpoint's first visible binding saved. Hidden bindings are left out, so the
+// number matches what the picker will hold. The TUI shows it as a hint; callers
+// may ignore a read error and leave the hint out.
 func (c *Catalog) AggregateCounts(tool string) (endpoints, models int, err error) {
 	groups, err := c.endpointGroups(tool, "")
 	if err != nil {
@@ -249,6 +254,16 @@ func (c *Catalog) activate(id string, reapply bool) (Binding, error) {
 	same := active[b.Tool] == id
 	if same && !reapply {
 		return b, nil
+	}
+	if b.Hidden {
+		// Switching to a hidden binding is an explicit request to use it, so it
+		// rejoins the tool's list rather than staying out of a config it now
+		// defaults to.
+		b.Hidden = false
+		bs[idx] = b
+		if err := writeTable(c.table("bindings.json"), bs); err != nil {
+			return Binding{}, err
+		}
 	}
 	c.captureStash(b.Tool)
 	if err := c.project(b); err != nil {

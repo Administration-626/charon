@@ -37,6 +37,12 @@ only other tools use are left out, and the active binding still sets the default
 endpoint, the default model and its own list; `charon off` removes every
 `charon*` provider.
 
+A binding marked hidden (`h` on the bindings screen, `~` in the row) stays in the
+catalog but is skipped when the list is assembled, so its endpoint and key never
+reach `models.json`; the stale provider entry is removed by the usual prefix
+cleanup. The active binding cannot be hidden, and activating a hidden one clears
+the flag.
+
 ### `--json` output
 `charon status --json` and `charon ls <tool> --json` emit structured records
 (secrets masked, never raw).

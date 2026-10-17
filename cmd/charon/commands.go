@@ -148,6 +148,7 @@ func statusTokenLimit(n int) string {
 type bindingRow struct {
 	Name     string `json:"name"`
 	Active   bool   `json:"active"`
+	Hidden   bool   `json:"hidden,omitempty"`
 	Endpoint string `json:"endpoint,omitempty"`
 	Model    string `json:"model,omitempty"`
 	Extra    int    `json:"extra"`
@@ -178,7 +179,7 @@ func cmdList(cat *catalog.Catalog, args []string) error {
 	}
 	var rows []bindingRow
 	for _, b := range bs {
-		r := bindingRow{Name: b.Name, Active: b.ID == active.ID}
+		r := bindingRow{Name: b.Name, Active: b.ID == active.ID, Hidden: b.Hidden}
 		if view, err := viewOf(cat, b); err == nil {
 			r.Endpoint = view.endpoint
 			r.Model = view.slug
@@ -192,10 +193,15 @@ func cmdList(cat *catalog.Catalog, args []string) error {
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(w, "\tNAME\tENDPOINT\tMODEL\tEXTRA")
+	hidden := 0
 	for _, r := range rows {
 		marker := "  "
 		if r.Active {
 			marker = "* "
+		}
+		if r.Hidden {
+			marker = "~ "
+			hidden++
 		}
 		model := r.Model
 		if model == "" {
@@ -203,7 +209,15 @@ func cmdList(cat *catalog.Catalog, args []string) error {
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\n", marker, r.Name, r.Endpoint, model, r.Extra)
 	}
-	return w.Flush()
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	if hidden > 0 {
+		// Hiding is charon-side bookkeeping: the binding and its key stay here,
+		// the tool's config simply does not get the endpoint.
+		fmt.Println("\n~ kept in charon, left out of the tool's config")
+	}
+	return nil
 }
 
 // viewOf is the display shape of a binding: its provider's URL, default slug,

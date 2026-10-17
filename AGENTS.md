@@ -132,6 +132,18 @@ TUI and projected to `providers.charon-<label>.api`. An absent value means
 types. Pi 1.0.4 does not support a separate Responses Compact API, so never offer
 it in the dropdown or write it as an API value.
 
+### Hidden bindings (`Binding.Hidden`)
+
+`h` on the bindings screen keeps a binding in the catalog but leaves its endpoint
+out of the tool's config. `Catalog.SetBindingHidden` owns the flag and
+`Catalog.endpointGroups` honors it, so the endpoint disappears from a
+multi-endpoint tool's list on the next apply and its stale provider entry is
+removed by the usual prefix cleanup. Two invariants: the active binding is never
+hidden (its defaults would point at an entry that is not written), and activating
+a hidden binding clears the flag. Editing preserves it; duplicating carries it
+when the destination also holds several endpoints. A tool without
+`MultiEndpoint` has no list to hide from, and the setter refuses.
+
 ### Built-in context windows (`internal/models/builtin.go`)
 
 - Model context window sizes resolve in order of precedence:

@@ -29,6 +29,7 @@ import (
 
 	"charon/internal/artifact"
 	"charon/internal/models"
+	"charon/internal/tools"
 )
 
 // Provider is one API site. It carries no wire dialect: a single endpoint can speak
@@ -78,6 +79,12 @@ type Binding struct {
 	ModelID      string   `json:"modelId"`
 	Models       []string `json:"models"`
 	PiAPI        string   `json:"piApi,omitempty"` // Pi request protocol, not model discovery
+	// Hidden keeps the binding configured but out of the tool's shared endpoint
+	// list: its key, models and protocol stay here, the next apply leaves the
+	// endpoint out of the tool's config. Only a tool that can hold several
+	// endpoints at once has a list to be left out of, and the binding the tool
+	// currently renders is never hidden.
+	Hidden bool `json:"hidden,omitempty"`
 }
 
 // Catalog is the on-disk store, rooted at ~/.config/charon.
@@ -465,6 +472,7 @@ func (c *Catalog) UpdateBinding(id, name, credentialID, defaultSlug string, mode
 		return Binding{}, err
 	}
 	b.ID = id
+	b.Hidden = bs[idx].Hidden // editing the endpoint, key or models does not unhide
 	bs[idx] = b
 	if err := writeTable(c.table("bindings.json"), bs); err != nil {
 		return Binding{}, err
@@ -593,6 +601,45 @@ func (c *Catalog) RemoveBinding(id string) error {
 		return c.writeActive(active)
 	}
 	return nil
+}
+
+// SetBindingHidden keeps a binding out of its tool's shared endpoint list
+// without deleting it: the key, models and protocol stay in the catalog, and
+// the next apply writes the tool's config without this endpoint. Only a tool
+// that holds several endpoints at once has a list to stay out of, and the
+// binding the tool currently renders cannot be hidden: the tool's defaults
+// would point at an entry that is no longer written.
+func (c *Catalog) SetBindingHidden(id string, hidden bool) error {
+	if err := c.lock(); err != nil {
+		return err
+	}
+	defer c.unlock()
+	bs, err := c.bindings()
+	if err != nil {
+		return err
+	}
+	idx := indexBinding(bs, id)
+	if idx < 0 {
+		return fmt.Errorf("binding %q: %w", id, ErrNotFound)
+	}
+	b := bs[idx]
+	if t := tools.Find(b.Tool); t == nil || !t.MultiEndpoint {
+		return fmt.Errorf("%s holds one endpoint, so %q has no list to be hidden from", b.Tool, b.Name)
+	}
+	if b.Hidden == hidden {
+		return nil
+	}
+	if hidden {
+		active, err := c.readActive()
+		if err != nil {
+			return err
+		}
+		if active[b.Tool] == id {
+			return fmt.Errorf("%q is the active %s binding: switch to another binding first", b.Name, b.Tool)
+		}
+	}
+	bs[idx].Hidden = hidden
+	return writeTable(c.table("bindings.json"), bs)
 }
 
 func (c *Catalog) setActiveForTool(tool, id string) error {

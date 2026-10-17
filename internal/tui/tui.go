@@ -109,6 +109,7 @@ var (
 	// keyDuplicateRow covers both former shortcuts: cloning within a tool and
 	// copying to another one are the same action with a different destination.
 	keyDuplicateRow = key.NewBinding(key.WithKeys("c", "x"), key.WithHelp("c", "duplicate"))
+	keyHide         = key.NewBinding(key.WithKeys("h"), key.WithHelp("h", "hide"))
 	keyDelete       = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete"))
 	keyAdd          = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add"))
 	keyBack         = key.NewBinding(key.WithKeys("esc", "q"), key.WithHelp("esc", "back"))
@@ -629,6 +630,10 @@ func (m *model) loadProfiles(selectName string) {
 		if isActive {
 			title = "✓ " + title
 		}
+		if b.Hidden {
+			// Kept in charon, left out of the tool's endpoint list.
+			title = "~ " + title
+		}
 		cells, drift := m.bindingRow(b.Name)
 		cells[0] = title
 		items = append(items, item{cells: cells, value: b.Name, active: isActive})
@@ -651,7 +656,16 @@ func (m *model) loadProfiles(selectName string) {
 	m.list.SetItems(items)
 	m.list.Select(selectedIndex)
 	m.list.Title = m.tool.Title + " bindings (✓ active)"
-	m.setFooterKeys(keySwitch, keyAdd, keyReapply, keyEdit, keyDuplicateRow, keyDelete, keyRefresh, keyBack)
+	if m.tool.MultiEndpoint {
+		m.list.Title = m.tool.Title + " bindings (✓ active · ~ hidden)"
+	}
+	keys := []key.Binding{keySwitch, keyAdd, keyReapply, keyEdit, keyDuplicateRow}
+	if m.tool.MultiEndpoint {
+		// Only a tool that holds several endpoints has a list to hide from.
+		keys = append(keys, keyHide)
+	}
+	keys = append(keys, keyDelete, keyRefresh, keyBack)
+	m.setFooterKeys(keys...)
 	m.setDelegate(themedTableDelegate())
 	m.resize()
 	if len(saved) == 0 && m.status == "" && m.tool.ApplyAuth != nil {
@@ -916,6 +930,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+		case "h":
+			if m.view == viewProfiles {
+				return m.onHideKey()
+			}
 		case "d":
 			if searching {
 				break // the letter belongs to the query
@@ -1035,6 +1053,48 @@ func (m model) onEditKey() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// onHideKey toggles whether the highlighted binding belongs to the tool's
+// shared endpoint list ("h"). Hiding keeps the binding here — name, key, models,
+// protocol — and rewrites the active binding's config so the endpoint drops out
+// of the tool's picker. The active binding itself cannot be hidden: its defaults
+// would point at an entry that is no longer written.
+func (m model) onHideKey() (tea.Model, tea.Cmd) {
+	it, ok := m.selectedBinding()
+	if !ok {
+		return m, nil
+	}
+	b, found, err := m.cat.BindingByName(m.tool.Name, it.value)
+	if err != nil || !found {
+		m.setStatus(statusErr, "no binding named "+it.value)
+		return m, nil
+	}
+	hide := !b.Hidden
+	if err := m.cat.SetBindingHidden(b.ID, hide); err != nil {
+		m.setStatus(statusErr, err.Error())
+		return m, nil
+	}
+	status := "Showed " + it.value
+	if hide {
+		status = "Hid " + it.value
+	}
+	// The list lives in the active binding's config, so re-render it for the
+	// change to reach the tool. Without an active binding there is nothing
+	// written to update; the next switch picks the flag up.
+	if active, found, err := m.cat.Active(m.tool.Name); err == nil && found {
+		if _, err := m.cat.Reapply(active.ID); err != nil {
+			m.setStatus(statusErr, status+" in charon, but rewriting the tool config failed: "+err.Error())
+			m.loadProfiles(it.value)
+			return m, nil
+		}
+		if note := aggregationNote(m.tool, m.cat); note != "" {
+			status += " · " + note
+		}
+	}
+	m.setStatus(statusOK, status)
+	m.loadProfiles(it.value)
+	return m, nil
+}
+
 // onDeleteKey arms the confirm-delete prompt for the highlighted binding ("d").
 // The active binding is not deletable; switch away first.
 func (m model) onDeleteKey() (tea.Model, tea.Cmd) {
@@ -1097,8 +1157,11 @@ func (m model) duplicateBinding(srcName, dstToolName, newName string) error {
 		return err
 	}
 	if dst.Name == m.tool.Name {
-		_, err = m.cat.AddBinding(dst.Name, newName, b.CredentialID, slug, slugs, b.PiAPI)
-		return err
+		dup, err := m.cat.AddBinding(dst.Name, newName, b.CredentialID, slug, slugs, b.PiAPI)
+		if err != nil {
+			return err
+		}
+		return m.hideDuplicate(dup.ID, dst, b.Hidden)
 	}
 	cr, err := m.cat.Credential(b.CredentialID)
 	if err != nil {
@@ -1112,8 +1175,21 @@ func (m model) duplicateBinding(srcName, dstToolName, newName string) error {
 	if dst.Name == "pi" && b.Tool == "pi" {
 		piAPI = b.PiAPI
 	}
-	_, err = catalog.StoreBinding(m.cat, dst, nil, newName, p.BaseURL, cr.Key, slug, slugs, true, nil, piAPI)
-	return err
+	dup, err := catalog.StoreBinding(m.cat, dst, nil, newName, p.BaseURL, cr.Key, slug, slugs, true, nil, piAPI)
+	if err != nil {
+		return err
+	}
+	return m.hideDuplicate(dup.ID, dst, b.Hidden)
+}
+
+// hideDuplicate carries the source's hidden flag onto a copy, so duplicating a
+// hidden binding does not quietly put the endpoint back in the tool's list. A
+// destination tool without an endpoint list has nothing to hide from.
+func (m model) hideDuplicate(id string, dst *tools.Tool, hidden bool) error {
+	if !hidden || dst == nil || !dst.MultiEndpoint {
+		return nil
+	}
+	return m.cat.SetBindingHidden(id, true)
 }
 
 // nextDuplicateName returns the first free "<src>-copy" (then "<src>-copy-2", …).
