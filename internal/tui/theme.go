@@ -69,27 +69,37 @@ func (d charonDelegate) Render(w io.Writer, m list.Model, index int, listItem li
 		d.DefaultDelegate.Render(w, m, index, listItem)
 		return
 	}
-	if it.value == sepSentinel {
+	switch {
+	case it.value == sepSentinel:
 		rule := lipgloss.NewStyle().Foreground(colorMuted).Padding(0, 0, 0, 1).
 			Render(strings.Repeat("─", dividerWidth))
 		_, _ = io.WriteString(w, rule)
-		return
+	case it.value == hdrSentinel:
+		renderTableHeader(w, m, it)
+	case strings.HasPrefix(it.value, driftSentinel):
+		// Drift annotation: the saved/live comparison under the active row. It is
+		// truncated to the list width because a wrapped line would push the
+		// table's columns out of register on the rows below.
+		_, _ = io.WriteString(w, tableNoteStyle.Render(fitCell(it.title, m.Width()-3)))
+	case it.cells != nil:
+		d.renderTableRow(w, m, index, it)
+	default:
+		// A row with no description (e.g. "Add new binding…") must render as a single
+		// line even under a two-line delegate — otherwise the selected style's teal
+		// background still paints an empty second line, bleeding color under the text.
+		// d is a value receiver, so this only affects this one row's render call.
+		if it.desc == "" {
+			d.ShowDescription = false
+		}
+		// The already-picked binding keeps a primary-colored title even once the
+		// cursor moves elsewhere, so "what's active" and "what's under the cursor"
+		// stay two distinct, simultaneously visible signals. d is a value receiver,
+		// so this style swap only affects this one row's render call.
+		if it.active && index != m.Index() {
+			d.Styles.NormalTitle = d.Styles.NormalTitle.Foreground(colorBrand).Bold(true)
+		}
+		d.DefaultDelegate.Render(w, m, index, listItem)
 	}
-	// A row with no description (e.g. "Add new binding…") must render as a single
-	// line even under a two-line delegate — otherwise the selected style's teal
-	// background still paints an empty second line, bleeding color under the text.
-	// d is a value receiver, so this only affects this one row's render call.
-	if it.desc == "" {
-		d.ShowDescription = false
-	}
-	// The already-picked binding keeps a primary-colored title even once the
-	// cursor moves elsewhere, so "what's active" and "what's under the cursor"
-	// stay two distinct, simultaneously visible signals. d is a value receiver,
-	// so this style swap only affects this one row's render call.
-	if it.active && index != m.Index() {
-		d.Styles.NormalTitle = d.Styles.NormalTitle.Foreground(colorBrand).Bold(true)
-	}
-	d.DefaultDelegate.Render(w, m, index, listItem)
 }
 
 // baseDelegate is the shared list styling, with a one-line row gap: default
@@ -129,11 +139,12 @@ func themedCompactDelegate() charonDelegate {
 	return charonDelegate{DefaultDelegate: d}
 }
 
-// themedTightDelegate keeps the two-line row (name on its own bold line,
-// detail muted below) but drops the gap between rows — dense without
-// flattening name and attributes onto one unreadable line.
-func themedTightDelegate() charonDelegate {
+// themedTableDelegate renders one line per row, no row gap: the bindings and
+// model-library screens pre-split each row into columns (item.cells), and
+// action rows without cells fall back to a plain single line.
+func themedTableDelegate() charonDelegate {
 	d := baseDelegate()
 	d.SetSpacing(0)
+	d.ShowDescription = false
 	return charonDelegate{DefaultDelegate: d}
 }

@@ -64,20 +64,37 @@ const (
 )
 
 const (
-	addSentinel = "\x00add" // the "add new" list row
-	sepSentinel = "\x00sep" // a blank divider row (inert; cursor skips it)
-	libSentinel = "\x00lib" // the model-library row on the tools screen
+	addSentinel   = "\x00add"   // the "add new" list row
+	sepSentinel   = "\x00sep"   // a blank divider row (inert; cursor skips it)
+	libSentinel   = "\x00lib"   // the model-library row on the tools screen
+	hdrSentinel   = "\x00hdr"   // the table's column-label row (inert)
+	driftSentinel = "\x00drift" // prefix of a drift annotation row (inert)
+	noneSentinel  = "\x00none"  // the "No models yet" placeholder row (inert)
 )
 
-// isSentinel reports whether v is a synthetic action row rather than a binding.
+// isSentinel reports whether v is a synthetic row rather than a binding. Every
+// sentinel starts with NUL, which validateName rejects in binding names, so
+// the prefix alone separates data rows from chrome.
 func isSentinel(v string) bool {
-	return v == addSentinel || v == sepSentinel || v == libSentinel
+	return strings.HasPrefix(v, "\x00")
+}
+
+// inertSentinel reports whether v is a synthetic row the cursor may not rest
+// on and no key acts on: the divider, the table's column labels, the "No
+// models yet" placeholder, and drift annotations. The add and model-library
+// rows are sentinels too, but the cursor may park on them.
+func inertSentinel(v string) bool {
+	if v == addSentinel || v == libSentinel {
+		return false
+	}
+	return strings.HasPrefix(v, "\x00")
 }
 
 type item struct {
 	title, desc string
 	value       string
-	active      bool // the already-picked binding — stays primary-colored even off-cursor
+	active      bool     // the already-picked binding — stays primary-colored even off-cursor
+	cells       []string // table columns; nil renders the row the classic way
 }
 
 func (i item) Title() string       { return i.title }
@@ -365,9 +382,9 @@ func (m *model) loadModels(selectID string, fallbackIndex ...int) {
 		if selectID != "" && (stored.ID == selectID || stored.Slug == selectID) {
 			selectedIndex = i
 		}
-		window := "context unknown"
+		window := "unknown"
 		if stored.ContextWindow > 0 {
-			window = fmt.Sprintf("context %d", stored.ContextWindow)
+			window = formatTokens(stored.ContextWindow)
 		}
 		source := "unknown"
 		if stored.ContextWindowSource == catalog.WindowManual || stored.ContextWindowSource == catalog.WindowBuiltin {
@@ -375,20 +392,28 @@ func (m *model) loadModels(selectID string, fallbackIndex ...int) {
 		}
 		items = append(items, item{
 			title: stored.Slug,
-			desc:  fmt.Sprintf("%s · %s · %s", providers[stored.ProviderID], window, source),
+			cells: []string{stored.Slug, providers[stored.ProviderID], window, source},
 			value: stored.ID,
 		})
 	}
 	if len(models) == 0 {
-		items = append(items, item{title: "No models yet", desc: "add one without fetching a remote list", value: sepSentinel})
+		items = append(items, item{title: "No models yet", value: noneSentinel})
+	} else {
+		// The column labels lead the table; the cursor skips them (see skipSeparators).
+		items = append([]list.Item{item{cells: modelTableHeader, value: hdrSentinel}}, items...)
 	}
-	items = append(items, item{title: "＋ Add model…", desc: "endpoint, slug, context window", value: addSentinel})
-	m.list.SetItems(items)
+	items = append(items, item{title: "＋ Add model…", value: addSentinel})
 
+	if selectedIndex >= 0 && len(models) > 0 {
+		selectedIndex++ // the header row leads the table
+	}
 	if selectedIndex < 0 {
-		if len(fallbackIndex) > 0 {
+		switch {
+		case len(fallbackIndex) > 0:
 			selectedIndex = fallbackIndex[0]
-		} else {
+		case len(models) > 0:
+			selectedIndex = 1 // first data row, under the column labels
+		default:
 			selectedIndex = 0
 		}
 	}
@@ -398,10 +423,11 @@ func (m *model) loadModels(selectID string, fallbackIndex ...int) {
 	if selectedIndex < 0 {
 		selectedIndex = 0
 	}
+	m.list.SetItems(items)
 	m.list.Select(selectedIndex)
 	m.list.Title = "Model Library — local"
 	m.setFooterKeys(keyOpen, keyEditContext, keyEffort, keyDelete, keyBack)
-	m.setDelegate(themedTightDelegate())
+	m.setDelegate(themedTableDelegate())
 }
 
 func (m *model) editModelWindowByID(id string) error {
@@ -528,39 +554,44 @@ func (m *model) loadProfiles(selectName string) {
 	}
 
 	if m.tool.ApplyAuth != nil {
-		items = append(items, item{title: "＋ Add new binding…", desc: "Save an endpoint, key, and model (or press 'a')", value: addSentinel})
+		items = append(items, item{title: "＋ Add new binding…", value: addSentinel})
 		if len(saved) > 0 {
 			items = append(items, item{value: sepSentinel})
+			// The column labels lead the table; the cursor skips them (see skipSeparators).
+			items = append(items, item{cells: bindingTableHeader, value: hdrSentinel})
 		}
 	}
 
-	selectedIndex := 0
-	offset := 0
-	if m.tool.ApplyAuth != nil {
-		offset = 1
-		if len(saved) > 0 {
-			offset = 2
-		}
-	}
-
-	for i, b := range saved {
+	for _, b := range saved {
 		title := b.Name
 		isActive := b.Name == active
 		if isActive {
 			title = "✓ " + title
 		}
-		if b.Name == target {
-			selectedIndex = i + offset
+		cells, drift := m.bindingRow(b.Name)
+		cells[0] = title
+		items = append(items, item{cells: cells, value: b.Name, active: isActive})
+		if drift != "" {
+			// The comparison sits on its own inert row under the binding, so every
+			// table row stays exactly one line and pagination stays honest.
+			items = append(items, item{title: drift, value: driftSentinel + b.Name})
 		}
-		detail := m.profileDetail(b.Name)
-		items = append(items, item{title: title, desc: detail, value: b.Name, active: isActive})
 	}
 
+	selectedIndex := 0
+	if target != "" {
+		for i, raw := range items {
+			if it, ok := raw.(item); ok && it.value == target {
+				selectedIndex = i
+				break
+			}
+		}
+	}
 	m.list.SetItems(items)
 	m.list.Select(selectedIndex)
 	m.list.Title = m.tool.Title + " bindings (✓ active)"
 	m.setFooterKeys(keySwitch, keyAdd, keyReapply, keyEdit, keyBackup, keyCopy, keyDelete, keyRefresh, keyBack)
-	m.setDelegate(themedTightDelegate())
+	m.setDelegate(themedTableDelegate())
 	m.resize()
 	if len(saved) == 0 && m.status == "" && m.tool.ApplyAuth != nil {
 		m.setStatus(statusInfo, `No bindings yet — press enter on "Add new binding" or press 'a' to create one.`)
@@ -601,13 +632,21 @@ func trimEndpoint(s string) string {
 	return strings.TrimRight(s, "/")
 }
 
-// profileDetail is the second-line summary of a binding: its endpoint and default
-// model, plus how many extra models its picker offers. For the active binding the
-// live model and effort are overlaid for display only — they are not written back.
-func (m *model) profileDetail(name string) string {
+// bindingRow splits a binding into the bindings-table columns: name, endpoint,
+// default model, and how many extra models its picker offers. The request
+// protocol a Pi binding stores is deliberately not a column — a wrong protocol
+// surfaces as an access failure inside the tool's own harness, and the row
+// stays scannable without it (the edit form is where the protocol is chosen).
+//
+// For the active binding, drift is returned separately: when the on-disk
+// config disagrees with the saved values (say, the user edited the config by
+// hand), the caller shows the saved/live comparison under the row. When they
+// agree, nothing is returned — the config summary below the list already
+// shows the live endpoint and model.
+func (m *model) bindingRow(name string) (cells []string, drift string) {
 	b, found, err := m.cat.BindingByName(m.tool.Name, name)
 	if err != nil || !found {
-		return ""
+		return []string{name, "unknown", "unknown", ""}, ""
 	}
 	url, slug := "", ""
 	extra := 0
@@ -628,23 +667,17 @@ func (m *model) profileDetail(name string) string {
 	if slug == "" {
 		slug = "no model"
 	}
-	detail := url + " · " + slug
+	more := ""
 	if extra > 0 {
-		detail += fmt.Sprintf(" +%d", extra)
+		more = fmt.Sprintf("+%d", extra)
 	}
-	if b.Tool == "pi" {
-		detail = piAPILabel(b.PiAPI) + " · " + detail
-	}
-	// For the active binding, surface drift between what charon saved and what
-	// is on disk right now (say, the user edited the config by hand): the row
-	// spells out both sides. When they agree, one rendering is enough — the
-	// config summary below the list already shows the live endpoint and model.
 	if active, ok, err := m.cat.Active(m.tool.Name); err == nil && ok && active.Name == name && m.tool.Describe != nil {
 		if info, err := m.tool.Describe(); err == nil && infoDrifts(info, url, slug) {
-			detail = "saved: " + detail + " · live: " + nonEmpty(info.Endpoint, "default") + " · " + nonEmpty(info.Model, "unknown")
+			drift = "saved: " + url + " · " + slug +
+				" · live: " + nonEmpty(info.Endpoint, "default") + " · " + nonEmpty(info.Model, "unknown")
 		}
 	}
-	return detail
+	return []string{name, url, slug, more}, drift
 }
 
 func (m model) Init() tea.Cmd { return nil }
@@ -829,7 +862,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	before := m.list.Index()
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
-	if m.view == viewProfiles {
+	if m.view == viewProfiles || m.view == viewModels {
 		m.skipSeparators(before)
 	}
 	if tick := m.statusTick(); tick != nil {
@@ -1012,16 +1045,21 @@ func nextDuplicateName(existing []string, src string) string {
 	}
 }
 
-// skipSeparators nudges the cursor off an inert divider row after a move, continuing
-// in the direction of travel so the blank gap never traps the selection.
+// skipSeparators nudges the cursor off inert rows — the divider, the table's
+// column labels, and drift annotations — after a move, continuing in the
+// direction of travel so the gap never traps the selection.
 func (m *model) skipSeparators(before int) {
-	if it, ok := m.list.SelectedItem().(item); !ok || it.value != sepSentinel {
-		return
-	}
-	if m.list.Index() >= before {
-		m.list.CursorDown()
-	} else {
-		m.list.CursorUp()
+	down := m.list.Index() >= before
+	for range m.list.Items() {
+		it, ok := m.list.SelectedItem().(item)
+		if !ok || !inertSentinel(it.value) {
+			return
+		}
+		if down {
+			m.list.CursorDown()
+		} else {
+			m.list.CursorUp()
+		}
 	}
 }
 
@@ -1078,8 +1116,8 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if it.value == sepSentinel {
-		return m, nil // the blank divider is inert
+	if inertSentinel(it.value) {
+		return m, nil // divider, column labels, and drift annotations are inert
 	}
 	switch m.view {
 	case viewTools:

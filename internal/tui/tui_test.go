@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"charon/internal/catalog"
 	"charon/internal/models"
@@ -258,6 +259,170 @@ func TestSkipSeparators(t *testing.T) {
 	if got := m.list.Index(); got != 0 {
 		t.Errorf("up: index = %d, want 0 (divider skipped)", got)
 	}
+
+	// The table's column labels and drift annotations are inert the same way.
+	l2 := list.New([]list.Item{
+		item{title: "saved: x · live: y", value: driftSentinel + "p1"},
+		item{title: "p1", value: "p1"},
+		item{cells: bindingTableHeader, value: hdrSentinel},
+		item{title: "p2", value: "p2"},
+	}, themedTableDelegate(), 40, 20)
+	m2 := &model{list: l2, view: viewProfiles}
+	m2.list.Select(1)
+	before = m2.list.Index()
+	m2.list.CursorDown() // onto the column labels (idx 2)
+	m2.skipSeparators(before)
+	if got := m2.list.Index(); got != 3 {
+		t.Errorf("down onto labels: index = %d, want 3 (labels skipped)", got)
+	}
+	before = m2.list.Index()
+	m2.list.CursorUp() // back onto the column labels
+	m2.skipSeparators(before)
+	if got := m2.list.Index(); got != 1 {
+		t.Errorf("up onto labels: index = %d, want 1 (labels skipped)", got)
+	}
+}
+
+// TestModelsTableSkipsLabelsAndAlignsColumns covers the model-library screen:
+// the cursor opens on the first data row under the column labels, moving up
+// skips the labels onto the add row, and every row shares the header's
+// columns.
+func TestModelsTableSkipsLabelsAndAlignsColumns(t *testing.T) {
+	st := openTestCatalog(t, false)
+	p, err := st.PutProvider("https://gateway.example.com/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutModel(p.ID, "glm-4.7"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutModel(p.ID, "kimi-k2"); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newModel(st, "test")
+	m.view = viewModels
+	m.width, m.height = 100, 24
+	m.resize()
+	m.loadModels("")
+
+	if it, ok := m.list.SelectedItem().(item); !ok || it.title != "glm-4.7" {
+		t.Fatalf("cursor opened on %+v, want the first model row", it)
+	}
+	before := m.list.Index()
+	m.list.CursorUp() // onto the column labels
+	m.skipSeparators(before)
+	if it, ok := m.list.SelectedItem().(item); !ok || it.value != addSentinel {
+		t.Fatalf("cursor above the first row = %+v, want the add row", it)
+	}
+
+	lines := renderTableLines(&m)
+	if len(lines) != 4 {
+		t.Fatalf("rendered %d rows, want 4 (labels, two models, add): %q", len(lines), lines)
+	}
+	header := lines[0]
+	endpointCol := displayColumn(header, strings.Index(header, "endpoint"))
+	contextCol := displayColumn(header, strings.Index(header, "context"))
+	for i := 1; i <= 2; i++ {
+		if got := displayColumn(lines[i], strings.Index(lines[i], "https://gateway.example.com/v1")); got != endpointCol {
+			t.Errorf("row %d endpoint starts at column %d, want %d: %q", i, got, endpointCol, lines[i])
+		}
+	}
+	if got := displayColumn(lines[1], strings.Index(lines[1], "204,800")); got != contextCol {
+		t.Errorf("row 1 context starts at column %d, want %d: %q", got, contextCol, lines[1])
+	}
+}
+
+// TestBindingsTableAlignsColumns renders the bindings screen through the table
+// delegate and checks that every row lays its cells out on the same columns as
+// the header labels — the whole point of the table form — and that each row is
+// exactly one line, which is what keeps pagination honest.
+func TestBindingsTableAlignsColumns(t *testing.T) {
+	st := openTestCatalog(t, false)
+	p, err := st.PutProvider("https://gateway.example.com/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr, err := st.PutCredential(p.ID, "sk-gateway-123456789")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutModel(p.ID, "glm-4.7"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutModel(p.ID, "kimi-k2"); err != nil {
+		t.Fatal(err)
+	}
+	work, err := st.AddBinding("claude", "work", cr.ID, "glm-4.7", []string{"glm-4.7", "kimi-k2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddBinding("claude", "backup", cr.ID, "kimi-k2", []string{"kimi-k2"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Activate(work.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newModel(st, "test")
+	m.tool, m.view = tools.Find("claude"), viewProfiles
+	m.width, m.height = 100, 30
+	m.loadProfiles("work")
+
+	lines := renderTableLines(&m)
+	if len(lines) != 5 {
+		t.Fatalf("rendered %d rows, want 5 (add, divider, header, two bindings): %q", len(lines), lines)
+	}
+	for i, line := range lines {
+		if strings.Contains(line, "\n") {
+			t.Fatalf("row %d is not a single line: %q", i, line)
+		}
+	}
+	// Bindings render name-sorted: backup first, then the active work binding.
+	header := lines[2]
+	endpointCol := displayColumn(header, strings.Index(header, "endpoint"))
+	modelCol := displayColumn(header, strings.Index(header, "model"))
+	if endpointCol < 0 || modelCol <= endpointCol {
+		t.Fatalf("header row = %q, want endpoint left of model", header)
+	}
+	for _, i := range []int{3, 4} {
+		at := strings.Index(lines[i], "https://gateway.example.com/v1")
+		if got := displayColumn(lines[i], at); got != endpointCol {
+			t.Errorf("row %d endpoint starts at column %d, want %d: %q", i, got, endpointCol, lines[i])
+		}
+	}
+	if got := displayColumn(lines[3], strings.Index(lines[3], "kimi-k2")); got != modelCol {
+		t.Errorf("backup row model starts at column %d, want %d: %q", got, modelCol, lines[3])
+	}
+	if got := displayColumn(lines[4], strings.Index(lines[4], "glm-4.7")); got != modelCol {
+		t.Errorf("work row model starts at column %d, want %d: %q", got, modelCol, lines[4])
+	}
+	if !strings.Contains(lines[4], "+1") {
+		t.Errorf("work row should count its extra picker model: %q", lines[4])
+	}
+}
+
+// displayColumn converts a byte offset in s to its display column. Every
+// character in a table row is one column wide (the ✓ marker included), so the
+// rune count is the column.
+func displayColumn(s string, byteOffset int) int {
+	if byteOffset < 0 || byteOffset > len(s) {
+		return -1
+	}
+	return utf8.RuneCountInString(s[:byteOffset])
+}
+
+// renderTableLines renders every item of the model's list through the table
+// delegate, one string per row.
+func renderTableLines(m *model) []string {
+	d := themedTableDelegate()
+	var lines []string
+	for i, raw := range m.list.Items() {
+		var buf strings.Builder
+		d.Render(&buf, m.list, i, raw)
+		lines = append(lines, buf.String())
+	}
+	return lines
 }
 
 func TestQuitKeyDisabledInPicker(t *testing.T) {
@@ -359,14 +524,19 @@ func TestModelLibraryIsLocalEntryAndEditor(t *testing.T) {
 		t.Fatalf("saved local model = %+v", models)
 	}
 	rows := m.list.Items()
-	if len(rows) == 0 || rows[0].(item).title != "glm-4.7" {
-		t.Fatalf("model library rows = %+v", rows)
+	if len(rows) < 2 || rows[0].(item).value != hdrSentinel {
+		t.Fatalf("model library rows = %+v, want the column labels first", rows)
+	}
+	data := rows[1].(item)
+	if data.title != "glm-4.7" || len(data.cells) != 4 {
+		t.Fatalf("model library row = %+v", data)
 	}
 	if !strings.Contains(m.list.Title, "local") {
 		t.Fatalf("model library title = %q", m.list.Title)
 	}
-	if desc := rows[0].(item).desc; !strings.Contains(desc, "200000") || !strings.Contains(desc, "manual") {
-		t.Fatalf("model library description = %q, want window and source", desc)
+	joined := strings.Join(data.cells, " ")
+	if !strings.Contains(joined, "200,000") || !strings.Contains(joined, "manual") {
+		t.Fatalf("model library cells = %q, want window and source", data.cells)
 	}
 }
 
@@ -1867,8 +2037,23 @@ func TestEnterOnActiveBindingShowsAlreadyActive(t *testing.T) {
 	}
 
 	rewriteModelJSON(t, filepath.Join(os.Getenv("HOME"), ".claude", "settings.json"), "claude-sonnet-4-5", "manual-model")
-	if detail := alreadyActive.profileDetail("secondary"); !strings.Contains(detail, "saved:") || !strings.Contains(detail, "live:") || !strings.Contains(detail, "manual-model") {
-		t.Fatalf("binding detail does not distinguish saved and live config: %q", detail)
+	if _, drift := alreadyActive.bindingRow("secondary"); !strings.Contains(drift, "saved:") || !strings.Contains(drift, "live:") || !strings.Contains(drift, "manual-model") {
+		t.Fatalf("binding row does not distinguish saved and live config: %q", drift)
+	}
+	alreadyActive.loadProfiles("secondary")
+	sawDriftRow, driftValue := false, ""
+	for _, raw := range alreadyActive.list.Items() {
+		it, ok := raw.(item)
+		if !ok || !strings.HasPrefix(it.value, driftSentinel) {
+			continue
+		}
+		sawDriftRow, driftValue = true, it.value
+	}
+	if !sawDriftRow {
+		t.Fatal("drift did not render its own annotation row under the binding")
+	}
+	if !inertSentinel(driftValue) {
+		t.Errorf("drift row %q must be inert so the cursor cannot rest on it", driftValue)
 	}
 	alreadyActive.loadTools()
 	seenLive := false
@@ -1984,13 +2169,13 @@ func TestModelLibraryCursorRetention(t *testing.T) {
 	m.view = viewModels
 	m.loadModels("")
 
-	// Initially at index 0 (mod-1)
-	if m.list.Index() != 0 {
-		t.Errorf("initial index = %d, want 0", m.list.Index())
+	// Initially at index 1 (the column labels lead the table, mod-1 follows)
+	if m.list.Index() != 1 {
+		t.Errorf("initial index = %d, want 1", m.list.Index())
 	}
 
-	// Select index 1 (mod-2)
-	m.list.Select(1)
+	// Select index 2 (mod-2)
+	m.list.Select(2)
 	if it, ok := m.list.SelectedItem().(item); !ok || it.value != m2.ID {
 		t.Fatalf("selected = %+v, want %s", it, m2.ID)
 	}
@@ -2002,12 +2187,12 @@ func TestModelLibraryCursorRetention(t *testing.T) {
 		t.Fatalf("delete failed: %s", afterDel.status)
 	}
 
-	// Cursor should remain at index 1 (which is now mod-3, NOT reset to 0!)
-	if afterDel.list.Index() != 1 {
-		t.Errorf("cursor after delete = %d, want 1", afterDel.list.Index())
+	// Cursor should remain at index 2 (which is now mod-3, NOT reset to 0!)
+	if afterDel.list.Index() != 2 {
+		t.Errorf("cursor after delete = %d, want 2", afterDel.list.Index())
 	}
 	if it, ok := afterDel.list.SelectedItem().(item); !ok || it.value != m3.ID {
-		t.Errorf("item at index 1 after delete = %+v, want %s (mod-3)", it, m3.ID)
+		t.Errorf("item at index 2 after delete = %+v, want %s (mod-3)", it, m3.ID)
 	}
 
 	// Edit context window of mod-3
@@ -2023,9 +2208,9 @@ func TestModelLibraryCursorRetention(t *testing.T) {
 		t.Fatalf("view = %v, want viewModels", afterSaved.view)
 	}
 
-	// Cursor should land on mod-3 (index 1), NOT reset to 0!
-	if afterSaved.list.Index() != 1 {
-		t.Errorf("cursor after editing window = %d, want 1", afterSaved.list.Index())
+	// Cursor should land on mod-3 (index 2), NOT reset to 0!
+	if afterSaved.list.Index() != 2 {
+		t.Errorf("cursor after editing window = %d, want 2", afterSaved.list.Index())
 	}
 	if it, ok := afterSaved.list.SelectedItem().(item); !ok || it.value != m3.ID {
 		t.Errorf("item after editing window = %+v, want %s (mod-3)", it, m3.ID)

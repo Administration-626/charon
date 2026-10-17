@@ -142,14 +142,17 @@ func TestPiEndpointTypeSaveEditAndCopy(t *testing.T) {
 	if err != nil || !found || b.PiAPI != "anthropic-messages" || m.statusLvl != statusOK {
 		t.Fatalf("save protocol = %q, err=%v, status=%s", b.PiAPI, err, m.status)
 	}
-	m.clearStatus() // The saved type must remain visible without the save notification.
-	if !strings.Contains(m.View(), "Anthropic (Messages)") {
-		t.Fatal("binding list did not show the saved endpoint type")
+	m.clearStatus() // The saved type stays visible in the edit form, not the list.
+	if strings.Contains(m.View(), "Anthropic (Messages)") {
+		t.Fatal("binding list must not show the endpoint type")
 	}
 	next, _ = m.onEditKey()
 	m = next.(model)
 	if m.wiz.piAPI != b.PiAPI {
 		t.Fatal("edit did not load saved API")
+	}
+	if !strings.Contains(m.View(), "Anthropic (Messages)") {
+		t.Fatal("edit form did not show the saved endpoint type")
 	}
 	m.wiz.piAPI = "google-generative-ai"
 	next, _ = m.submitForm()
@@ -159,8 +162,10 @@ func TestPiEndpointTypeSaveEditAndCopy(t *testing.T) {
 		t.Fatalf("edit protocol = %q, err=%v", b.PiAPI, err)
 	}
 	m.clearStatus()
-	if !strings.Contains(m.View(), "Gemini (Generate Content)") || strings.Contains(m.profileDetail("work"), "Anthropic") {
-		t.Fatal("binding list did not refresh the saved endpoint type")
+	// A wrong protocol surfaces as an access failure inside pi's own harness,
+	// so the binding list never carries the endpoint type as chrome.
+	if strings.Contains(m.View(), "Gemini (Generate Content)") || strings.Contains(m.View(), "Anthropic") {
+		t.Fatal("binding list must not show the endpoint type")
 	}
 	path := filepath.Join(os.Getenv("HOME"), ".pi", "agent", "models.json")
 	before, err := os.ReadFile(path)
