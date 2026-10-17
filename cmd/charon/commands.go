@@ -354,22 +354,52 @@ func cmdDryRun(cat *catalog.Catalog, t *tools.Tool, b catalog.Binding, reapply b
 }
 
 func cmdModels(cat *catalog.Catalog, args []string) error {
-	if len(args) < 1 {
-		return fmt.Errorf("usage: charon models <tool> --key <key> [--endpoint <url>]")
-	}
-	t, err := requireTool(args[0])
-	if err != nil {
-		return err
-	}
+	toolName, rest := splitModelArgs(args)
 	fs := flag.NewFlagSet("models", flag.ContinueOnError)
-	endpoint := fs.String("endpoint", "", "endpoint")
+	endpoint := fs.String("endpoint", "", "endpoint (with --local: narrow the listing to these endpoints)")
 	key := fs.String("key", "", "API key")
-	local := fs.Bool("local", false, "list models saved in charon's catalog")
-	if err := fs.Parse(args[1:]); err != nil {
+	local := fs.Bool("local", false, "list models saved in charon's catalog instead of probing an API")
+	asJSON := fs.Bool("json", false, "machine-readable JSON output (with --local)")
+	if err := fs.Parse(rest); err != nil {
 		return err
+	}
+	// The tool may also sit after the flags ("models --local claude"): the flag
+	// parser stops at the first positional, so pick it up and re-parse the rest.
+	if toolName == "" {
+		if trailing := fs.Args(); len(trailing) > 0 {
+			for i, a := range trailing {
+				if !strings.HasPrefix(a, "-") {
+					toolName = a
+					if err := fs.Parse(trailing[i+1:]); err != nil {
+						return err
+					}
+					break
+				}
+			}
+		}
 	}
 	if *local {
-		return listLocalModels(cat, t)
+		if *key != "" {
+			return fmt.Errorf("--key probes a live API; drop it or drop --local")
+		}
+		var t *tools.Tool
+		if toolName != "" {
+			var err error
+			if t, err = requireTool(toolName); err != nil {
+				return err
+			}
+		}
+		return listLocalModels(cat, t, splitEndpoints(*endpoint), *asJSON)
+	}
+	if *asJSON {
+		return fmt.Errorf("--json lists saved models; combine it with --local")
+	}
+	if toolName == "" {
+		return fmt.Errorf("usage: charon models <tool> --key <key> [--endpoint <url>]")
+	}
+	t, err := requireTool(toolName)
+	if err != nil {
+		return err
 	}
 	if err := tools.ValidateKey(*key); err != nil {
 		return err
@@ -393,31 +423,193 @@ func cmdModels(cat *catalog.Catalog, args []string) error {
 	return nil
 }
 
-func listLocalModels(cat *catalog.Catalog, t *tools.Tool) error {
-	bindings, err := cat.Bindings(t.Name)
+// localModelRow is one saved model together with the endpoint that offers it.
+type localModelRow struct {
+	Model         string `json:"model"`
+	Endpoint      string `json:"endpoint"`
+	ContextWindow int    `json:"contextWindow"` // 0 means unknown
+	Source        string `json:"source,omitempty"`
+}
+
+// listLocalModels prints saved models as model(endpoint). With no tool it
+// aggregates every endpoint in the catalog; with a tool it lists only the
+// models that tool's bindings offer. endpoints, when given, narrows the
+// listing to the selected endpoints (full URL or bare host, comma-separated).
+func listLocalModels(cat *catalog.Catalog, t *tools.Tool, endpoints []string, asJSON bool) error {
+	byID, err := savedProviders(cat, endpoints)
 	if err != nil {
 		return err
 	}
-	seen := map[string]bool{}
-	writer := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	for _, binding := range bindings {
-		for _, modelID := range binding.Models {
-			m, err := cat.Model(modelID)
-			if err != nil {
-				return err
+
+	var rows []localModelRow
+	appendModel := func(m catalog.Model) {
+		p, ok := byID[m.ProviderID]
+		if !ok {
+			return // filtered out, or its endpoint row is gone
+		}
+		rows = append(rows, localModelRow{
+			Model:         m.Slug,
+			Endpoint:      p.BaseURL,
+			ContextWindow: m.ContextWindow,
+			Source:        string(m.ContextWindowSource),
+		})
+	}
+	if t == nil {
+		all, err := cat.Models()
+		if err != nil {
+			return err
+		}
+		for _, m := range all {
+			appendModel(m)
+		}
+	} else {
+		bindings, err := cat.Bindings(t.Name)
+		if err != nil {
+			return err
+		}
+		seen := map[string]bool{}
+		for _, b := range bindings {
+			for _, modelID := range b.Models {
+				if seen[modelID] {
+					continue
+				}
+				seen[modelID] = true
+				m, err := cat.Model(modelID)
+				if err != nil {
+					return err
+				}
+				appendModel(m)
 			}
-			if seen[m.Slug] {
-				continue
-			}
-			seen[m.Slug] = true
-			window := "unknown"
-			if m.ContextWindow > 0 {
-				window = strconv.Itoa(m.ContextWindow)
-			}
-			fmt.Fprintf(writer, "%s\t%s\n", m.Slug, window)
 		}
 	}
-	return writer.Flush()
+
+	// Group by endpoint, then slug: one endpoint's models read as a block, and
+	// the same slug on two endpoints appears twice, each under its own site.
+	slices.SortFunc(rows, func(a, b localModelRow) int {
+		if c := strings.Compare(a.Endpoint, b.Endpoint); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Model, b.Model)
+	})
+
+	if asJSON {
+		if rows == nil {
+			rows = []localModelRow{}
+		}
+		return printJSON(rows)
+	}
+	labels := endpointLabels(rows)
+	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	for _, r := range rows {
+		window := "unknown"
+		if r.ContextWindow > 0 {
+			window = strconv.Itoa(r.ContextWindow)
+		}
+		fmt.Fprintf(w, "%s(%s)\t%s\n", r.Model, labels[r.Endpoint], window)
+	}
+	return w.Flush()
+}
+
+// savedProviders maps every saved endpoint by id, or only the selected ones
+// when endpoints is non-empty. A selection that matches nothing is an error
+// rather than a silent empty listing.
+func savedProviders(cat *catalog.Catalog, endpoints []string) (map[string]catalog.Provider, error) {
+	providers, err := cat.Providers()
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]catalog.Provider, len(providers))
+	for _, p := range providers {
+		byID[p.ID] = p
+	}
+	if len(endpoints) == 0 {
+		return byID, nil
+	}
+	kept := make(map[string]catalog.Provider, len(endpoints))
+	for _, want := range endpoints {
+		norm := normalizeEndpoint(want)
+		matched := false
+		for id, p := range byID {
+			if normalizeEndpoint(p.BaseURL) == norm || hostOf(p.BaseURL) == norm {
+				kept[id] = p
+				matched = true
+			}
+		}
+		if !matched {
+			return nil, fmt.Errorf("no saved endpoint matches %q (saved: %s)", want, strings.Join(savedEndpointList(byID), ", "))
+		}
+	}
+	return kept, nil
+}
+
+func savedEndpointList(byID map[string]catalog.Provider) []string {
+	out := make([]string, 0, len(byID))
+	for _, p := range byID {
+		out = append(out, p.BaseURL)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// endpointLabels shortens each endpoint to its host for the model(endpoint)
+// rendering. When two different endpoints share a host — say /v1 and /v2 on
+// one site — both fall back to the full URL so the labels stay distinguishable.
+func endpointLabels(rows []localModelRow) map[string]string {
+	byHost := map[string]map[string]bool{}
+	for _, r := range rows {
+		host := hostOf(r.Endpoint)
+		if byHost[host] == nil {
+			byHost[host] = map[string]bool{}
+		}
+		byHost[host][r.Endpoint] = true
+	}
+	labels := make(map[string]string, len(rows))
+	for _, r := range rows {
+		if len(byHost[hostOf(r.Endpoint)]) > 1 {
+			labels[r.Endpoint] = r.Endpoint
+			continue
+		}
+		labels[r.Endpoint] = hostOf(r.Endpoint)
+	}
+	return labels
+}
+
+func hostOf(endpoint string) string {
+	s := strings.TrimPrefix(strings.TrimPrefix(endpoint, "https://"), "http://")
+	if i := strings.IndexByte(s, '/'); i >= 0 {
+		s = s[:i]
+	}
+	return s
+}
+
+func normalizeEndpoint(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.TrimPrefix(strings.TrimPrefix(s, "https://"), "http://")
+	return strings.TrimSuffix(s, "/")
+}
+
+// splitEndpoints splits a comma-separated --endpoint value into selections.
+func splitEndpoints(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// splitModelArgs pulls the optional <tool> positional out of models arguments.
+// The tool normally comes first ("models claude --local"); anything else is
+// left for the flag parser, which stops at the first positional.
+func splitModelArgs(args []string) (tool string, rest []string) {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		return args[0], args[1:]
+	}
+	return "", args
 }
 
 func cmdSetContext(cat *catalog.Catalog, args []string) error {

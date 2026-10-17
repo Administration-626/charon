@@ -656,6 +656,155 @@ func TestRunModelsWithInvalidEndpoint(t *testing.T) {
 	}
 }
 
+// seedTwoEndpoints saves one binding per endpoint; glm-4.7 exists on both so
+// listings must tell the two rows apart by endpoint.
+func seedTwoEndpoints(t *testing.T) {
+	t.Helper()
+	home := sandbox(t)
+	seedCodex(t, home)
+	seedClaude(t, home)
+	adds := []struct{ tool, name, endpoint, model string }{
+		{"codex", "work", "https://one.example.com/v1", "gpt-5"},
+		{"codex", "extra", "https://one.example.com/v1", "glm-4.7"},
+		{"claude", "work", "https://two.example.com/v1", "glm-4.7"},
+	}
+	for _, a := range adds {
+		if err := run([]string{"add", a.tool, "--name", a.name, "--key", "sk-test", "--endpoint", a.endpoint, "--model", a.model}); err != nil {
+			t.Fatalf("add %s/%s: %v", a.tool, a.name, err)
+		}
+	}
+}
+
+func TestRunModelsLocalAggregatesEveryEndpoint(t *testing.T) {
+	seedTwoEndpoints(t)
+
+	out, err := captureStdout(t, func() error { return run([]string{"models", "--local"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"gpt-5(one.example.com)",
+		"glm-4.7(one.example.com)",
+		"glm-4.7(two.example.com)", // same slug on two endpoints: one row each
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("aggregate listing missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Count(out, "glm-4.7") != 2 {
+		t.Errorf("glm-4.7 listed %d times, want 2:\n%s", strings.Count(out, "glm-4.7"), out)
+	}
+}
+
+func TestRunModelsLocalToolScopeAndEndpointFilter(t *testing.T) {
+	seedTwoEndpoints(t)
+
+	// Tool-scoped: only what that tool's bindings offer (codex: both one.example models).
+	for _, args := range [][]string{{"models", "codex", "--local"}, {"models", "--local", "codex"}} {
+		out, err := captureStdout(t, func() error { return run(args) })
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if !strings.Contains(out, "gpt-5(one.example.com)") || !strings.Contains(out, "glm-4.7(one.example.com)") {
+			t.Errorf("%v missing codex models:\n%s", args, out)
+		}
+		if strings.Contains(out, "two.example.com") {
+			t.Errorf("%v leaked another tool's endpoint:\n%s", args, out)
+		}
+	}
+
+	// Narrow to one endpoint by bare host.
+	out, err := captureStdout(t, func() error { return run([]string{"models", "--local", "--endpoint", "one.example.com"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "gpt-5(one.example.com)") || strings.Contains(out, "two.example.com") {
+		t.Errorf("host filter did not narrow the listing:\n%s", out)
+	}
+
+	// Narrow to several endpoints by full URL.
+	out, err = captureStdout(t, func() error {
+		return run([]string{"models", "--local", "--endpoint", "https://one.example.com/v1,https://two.example.com/v1"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "gpt-5(one.example.com)") || !strings.Contains(out, "glm-4.7(two.example.com)") {
+		t.Errorf("multi-endpoint filter dropped rows:\n%s", out)
+	}
+
+	// A selection matching nothing is an error, not a silent empty listing.
+	if err := run([]string{"models", "--local", "--endpoint", "nope.example"}); err == nil {
+		t.Error("unknown --endpoint succeeded, want error")
+	}
+}
+
+func TestRunModelsLocalJSON(t *testing.T) {
+	seedTwoEndpoints(t)
+	// A slug outside the builtin registry still gets the 500K fallback window,
+	// recorded as builtin so a manual set-context can later override it.
+	if err := run([]string{"add", "codex", "--name", "third", "--key", "sk-test", "--endpoint", "https://three.example.com/v1", "--model", "mystery-9"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"set-context", "codex", "work", "gpt-5", "272000"}); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := captureStdout(t, func() error { return run([]string{"models", "--local", "--json"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []localModelRow
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("json output = %q (err %v)", out, err)
+	}
+	byKey := map[string]localModelRow{}
+	for _, r := range rows {
+		byKey[r.Model+"@"+r.Endpoint] = r
+	}
+	gpt := byKey["gpt-5@https://one.example.com/v1"]
+	if gpt.ContextWindow != 272000 || gpt.Source != "manual" {
+		t.Errorf("gpt-5 row = %+v, want window 272000 source manual", gpt)
+	}
+	if glm := byKey["glm-4.7@https://two.example.com/v1"]; glm.ContextWindow != 204800 || glm.Source != "builtin" {
+		t.Errorf("glm-4.7 row = %+v, want the builtin registry's window", glm)
+	}
+	if mystery := byKey["mystery-9@https://three.example.com/v1"]; mystery.ContextWindow != 500000 || mystery.Source != "builtin" {
+		t.Errorf("mystery-9 row = %+v, want the 500K fallback window", mystery)
+	}
+}
+
+func TestRunModelsLocalFlagCombos(t *testing.T) {
+	// An empty catalog lists nothing but does not fail.
+	sandbox(t)
+	out, err := captureStdout(t, func() error { return run([]string{"models", "--local"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != "" {
+		t.Errorf("empty catalog printed %q, want nothing", out)
+	}
+	out, err = captureStdout(t, func() error { return run([]string{"models", "--local", "--json"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != "[]" {
+		t.Errorf("empty catalog json = %q, want []", out)
+	}
+
+	// --json only means something with --local; --key only means something without it.
+	if err := run([]string{"models", "codex", "--json", "--key", "sk-test"}); err == nil {
+		t.Error("--json without --local succeeded, want error")
+	}
+	if err := run([]string{"models", "--local", "--key", "sk-test"}); err == nil {
+		t.Error("--key with --local succeeded, want error")
+	}
+	// Remote listing still needs a tool.
+	if err := run([]string{"models"}); err == nil {
+		t.Error("models without a tool succeeded, want error")
+	}
+}
+
 // seedClaude fakes an installed Claude Code (settings.json makes it "detected").
 func seedClaude(t *testing.T, home string) {
 	t.Helper()

@@ -125,6 +125,8 @@ charon                       # 交互式菜单
 charon status                # 显示工具实况与上次确认的绑定（--json）
 charon ls <tool>             # 列出已保存的绑定（--json）
 charon models <tool>         # 列出某个 API 提供的模型（--key [--endpoint]）
+charon models --local        # 按 model(endpoint) 列出各 endpoint 下已保存的全部模型
+                            # （--endpoint URL|主机名[,URL|主机名...] 可筛选；--json）
 charon add <tool>            # 添加并激活一条绑定（--name --key，并提供至少一个模型 id）
 charon edit <tool> <b>       # 修改某绑定的 endpoint/key/model/models（--name 可改名）
 charon rename <tool> <o> <n> # 重命名已保存的绑定
@@ -246,6 +248,11 @@ charon models codex --endpoint https://openrouter.ai/api/v1 --key sk-...
 charon add    codex --name openrouter --endpoint https://openrouter.ai/api/v1 \
                     --key sk-... --model openai/gpt-5.5
 ```
+
+`charon models --local` 不访问网络，直接列出 charon 已保存的模型，按 endpoint
+聚合成 model(endpoint)。同一型号保存在两个 endpoint 下时，每个 endpoint 各列
+一行。用 `--endpoint` 可筛选（完整 URL 或主机名，逗号分隔多选），加 `--json`
+则输出机器可读的行。
 
 --models 会把一份列表注册进工具自身的选择器，之后就能在工具内部切换。省略
 --model 时，列表里的第一个 ID 会作为默认模型；列表随绑定存储，后续 edit
