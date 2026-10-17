@@ -45,6 +45,9 @@ re-renders that binding into the tool, overwriting only the keys charon owns.
 - Per-model reasoning effort. Use `charon set-effort codex <binding> <model> <level>`
   or the Model Library’s `r` key to write low, medium, high, xhigh, max, or ultra to
   Codex when that binding is active.
+- Searchable model library. The Model Library lists every saved model across
+  endpoints in one table (model, endpoint, context, source); type to filter by
+  model or endpoint, esc to clear.
 - Single-page form. Add or edit a binding on one screen (Name, Endpoint,
   Token, Model) with direct typing and [ Save ] / [ Cancel ] buttons.
 - Duplicate with a name. Press c (or x) on a binding, pick the destination —

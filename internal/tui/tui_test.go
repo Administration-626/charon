@@ -333,6 +333,198 @@ func TestModelsTableSkipsLabelsAndAlignsColumns(t *testing.T) {
 	}
 }
 
+// seedModelLibrary saves three models across two endpoints; glm-4.7 exists on
+// both so a search has duplicates to resolve.
+func seedModelLibrary(t *testing.T) *catalog.Catalog {
+	t.Helper()
+	st := openTestCatalog(t, false)
+	p1, err := st.PutProvider("https://one.example.com/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2, err := st.PutProvider("https://two.example.com/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, slug := range []string{"glm-4.7", "gpt-5"} {
+		if _, err := st.PutModel(p1.ID, slug); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.PutModel(p2.ID, "glm-4.7"); err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
+func modelLibraryTitles(m *model) []string {
+	var out []string
+	for _, raw := range m.list.Items() {
+		if it, ok := raw.(item); ok && !isSentinel(it.value) {
+			out = append(out, it.title)
+		}
+	}
+	return out
+}
+
+func typeQuery(t *testing.T, m *model, q string) {
+	t.Helper()
+	for _, r := range q {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		*m = next.(model)
+	}
+}
+
+func TestModelLibrarySearchFiltersBySlugAndEndpoint(t *testing.T) {
+	st := seedModelLibrary(t)
+	m := newModel(st, "test")
+	m.view = viewModels
+	m.width, m.height = 100, 24
+	m.resize()
+	m.loadModels("")
+
+	// Endpoint query narrows to one gateway's models.
+	typeQuery(t, &m, "one.example")
+	if got := modelLibraryTitles(&m); len(got) != 2 || got[0] != "glm-4.7" || got[1] != "gpt-5" {
+		t.Errorf("rows after endpoint search = %v, want one.example's two models", got)
+	}
+	if !strings.Contains(m.list.Title, "search: one.example (2 of 3)") {
+		t.Errorf("title = %q, want the search summary with the match count", m.list.Title)
+	}
+	if it, ok := m.list.SelectedItem().(item); !ok || isSentinel(it.value) {
+		t.Errorf("cursor = %+v while searching, want the first data row", it)
+	}
+
+	// Backspace trims the query; the rows widen back as it shortens.
+	for range 2 {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+		m = next.(model)
+	}
+	if m.modelFilter != "one.examp" {
+		t.Errorf("filter after two backspaces = %q, want one.examp", m.modelFilter)
+	}
+	if got := modelLibraryTitles(&m); len(got) != 2 {
+		t.Errorf("rows after trimming = %v, want the same two", got)
+	}
+
+	// Slug query spans endpoints: glm-4.7 is saved on both.
+	m.modelFilter = ""
+	m.loadModels("")
+	typeQuery(t, &m, "glm")
+	if got := modelLibraryTitles(&m); len(got) != 2 {
+		t.Errorf("rows after slug search = %v, want the two glm-4.7 rows", got)
+	}
+
+	// A query matching nothing leaves an inert notice row, not an empty list.
+	m.modelFilter = "zzz-nothing"
+	m.loadModels("")
+	if got := modelLibraryTitles(&m); len(got) != 0 {
+		t.Errorf("rows for a miss = %v, want none", got)
+	}
+	sawNotice := false
+	for _, raw := range m.list.Items() {
+		if it, ok := raw.(item); ok && it.value == noneSentinel && strings.Contains(it.title, "No match") {
+			sawNotice = true
+		}
+	}
+	if !sawNotice {
+		t.Error("a miss rendered no notice row")
+	}
+
+	// esc clears the search and restores every row; the footer swaps its hint.
+	if !strings.Contains(m.View(), "clear filter") {
+		t.Errorf("footer while searching = %q, want the clear-filter hint", m.View())
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(model)
+	if m.modelFilter != "" {
+		t.Errorf("esc left the search at %q", m.modelFilter)
+	}
+	if got := modelLibraryTitles(&m); len(got) != 3 {
+		t.Errorf("rows after clearing = %v, want all three", got)
+	}
+	if !strings.Contains(m.View(), "esc back") || strings.Contains(m.View(), "clear filter") {
+		t.Error("footer did not return to the plain back hint after clearing")
+	}
+}
+
+func TestModelLibrarySearchLettersBelongToQuery(t *testing.T) {
+	st := seedModelLibrary(t)
+	m := newModel(st, "test")
+	m.view = viewModels
+	m.width, m.height = 100, 24
+	m.resize()
+	m.loadModels("")
+
+	// Once a search is underway, the screen's own shortcut keys type into it
+	// instead of firing — otherwise a query containing e/w/d/r/q is untypable.
+	typeQuery(t, &m, "gpt")
+	for _, r := range "edwrq" {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = next.(model)
+	}
+	if m.modelFilter != "gptedwrq" {
+		t.Errorf("search = %q, want every shortcut letter to land in the query", m.modelFilter)
+	}
+	if m.view != viewModels {
+		t.Errorf("view = %v, want to stay on the library", m.view)
+	}
+
+	// Before any search, the shortcuts still command: d deletes the row.
+	stale := seedModelLibrary(t)
+	m2 := newModel(stale, "test")
+	m2.view = viewModels
+	m2.width, m2.height = 100, 24
+	m2.resize()
+	m2.loadModels("")
+	next, _ := m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m2 = next.(model)
+	if m2.view != viewModels {
+		t.Fatalf("view = %v after d, want the library", m2.view)
+	}
+	models, err := stale.Models()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 2 {
+		t.Errorf("catalog holds %d models after d, want 2 (one deleted)", len(models))
+	}
+}
+
+// TestModelLibrarySearchResetsOnEntry pins that a fresh visit starts
+// unfiltered — the query is transient, like the picker's.
+func TestModelLibrarySearchResetsOnEntry(t *testing.T) {
+	st := seedModelLibrary(t)
+	m := newModel(st, "test")
+	m.view = viewTools
+	m.width, m.height = 100, 24
+	m.resize()
+	m.loadTools()
+	m.modelFilter = "stale"
+	m.list.Select(indexOfLibraryRow(&m))
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if m.view != viewModels {
+		t.Fatalf("view = %v, want the model library", m.view)
+	}
+	if m.modelFilter != "" {
+		t.Errorf("entered the library with a stale search %q", m.modelFilter)
+	}
+	if got := modelLibraryTitles(&m); len(got) != 3 {
+		t.Errorf("rows = %v, want all three models", got)
+	}
+}
+
+func indexOfLibraryRow(m *model) int {
+	for i, raw := range m.list.Items() {
+		if it, ok := raw.(item); ok && it.value == libSentinel {
+			return i
+		}
+	}
+	return 0
+}
+
 // TestBindingsTableAlignsColumns renders the bindings screen through the table
 // delegate and checks that every row lays its cells out on the same columns as
 // the header labels — the whole point of the table form — and that each row is

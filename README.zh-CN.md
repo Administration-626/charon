@@ -41,6 +41,8 @@ endpoint 和凭据。
   `[1m]` 后缀；Codex 中的网关模型会写入明确的窗口，避免落到约 258k 的默认预算。
 - 按模型设置 reasoning effort。用 `charon set-effort codex <绑定> <模型> <级别>`
   或在模型库按 `r`，可将 low、medium、high、xhigh、max 或 ultra 写入当前激活的 Codex 绑定。
+- 可搜索的模型库。模型库在一张表里列出各 endpoint 下已保存的全部模型
+  （型号、endpoint、上下文、来源）；输入文字即可按型号或 endpoint 筛选，esc 清除。
 - 单页表单。在同一屏新增或编辑绑定（Name、Endpoint、Token、Model），可直接输入，
   并使用 [ Save ] / [ Cancel ] 按钮。
 - 快速复制与搜索。按 c 复制绑定，按 x 复制到其他工具；在模型列表中输入文字即可实时模糊搜索。

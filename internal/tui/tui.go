@@ -378,8 +378,17 @@ func (m *model) loadModels(selectID string, fallbackIndex ...int) {
 	for _, p := range providerRows {
 		providers[p.ID] = p.BaseURL
 	}
+	visible := models
+	if m.modelFilter != "" {
+		visible = nil
+		for _, stored := range models {
+			if modelMatchesFilter(stored, providers[stored.ProviderID], m.modelFilter) {
+				visible = append(visible, stored)
+			}
+		}
+	}
 	selectedIndex := -1
-	for i, stored := range models {
+	for i, stored := range visible {
 		if selectID != "" && (stored.ID == selectID || stored.Slug == selectID) {
 			selectedIndex = i
 		}
@@ -397,22 +406,25 @@ func (m *model) loadModels(selectID string, fallbackIndex ...int) {
 			value: stored.ID,
 		})
 	}
-	if len(models) == 0 {
+	switch {
+	case len(models) == 0:
 		items = append(items, item{title: "No models yet", value: noneSentinel})
-	} else {
+	case len(visible) == 0:
+		items = append(items, item{title: "No match — esc clears the search", value: noneSentinel})
+	default:
 		// The column labels lead the table; the cursor skips them (see skipSeparators).
 		items = append([]list.Item{item{cells: modelTableHeader, value: hdrSentinel}}, items...)
 	}
 	items = append(items, item{title: "＋ Add model…", value: addSentinel})
 
-	if selectedIndex >= 0 && len(models) > 0 {
+	if selectedIndex >= 0 && len(visible) > 0 {
 		selectedIndex++ // the header row leads the table
 	}
 	if selectedIndex < 0 {
 		switch {
 		case len(fallbackIndex) > 0:
 			selectedIndex = fallbackIndex[0]
-		case len(models) > 0:
+		case len(visible) > 0:
 			selectedIndex = 1 // first data row, under the column labels
 		default:
 			selectedIndex = 0
@@ -426,9 +438,32 @@ func (m *model) loadModels(selectID string, fallbackIndex ...int) {
 	}
 	m.list.SetItems(items)
 	m.list.Select(selectedIndex)
-	m.list.Title = "Model Library — local"
-	m.setFooterKeys(keyOpen, keyEditContext, keyEffort, keyDelete, keyBack)
+	title := "Model Library — local"
+	if m.modelFilter != "" {
+		title += fmt.Sprintf(" · search: %s (%d of %d)", m.modelFilter, len(visible), len(models))
+	}
+	m.list.Title = title
+	keys := []key.Binding{keyOpen, keyEditContext, keyEffort, keyDelete, keyFilter}
+	if m.modelFilter != "" {
+		keys = append(keys, keyClearFilter)
+	} else {
+		keys = append(keys, keyBack)
+	}
+	m.setFooterKeys(keys...)
 	m.setDelegate(themedTableDelegate())
+}
+
+// modelMatchesFilter reports whether a model row matches the library search.
+// The query matches the slug or the endpoint that offers it (host or full URL),
+// case-insensitively, as a plain substring — a query like "one.example" has to
+// hit the endpoint column the way it reads.
+func modelMatchesFilter(stored catalog.Model, endpoint, query string) bool {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(stored.Slug), q) ||
+		strings.Contains(strings.ToLower(endpoint), q)
 }
 
 func (m *model) editModelWindowByID(id string) error {
@@ -753,10 +788,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == viewReviewModels {
 			return m.updateReviewModels(msg)
 		}
+		// While the model library is being searched, letters belong to the
+		// query: the screen's own shortcuts (q/e/w/r/d) only fire before a
+		// search has started — the same rule the picker follows.
+		searching := m.view == viewModels && m.modelFilter != ""
 		switch msg.String() {
 		case "esc":
+			if m.view == viewModels && m.modelFilter != "" {
+				m.modelFilter = "" // first esc clears the search, the next one leaves
+				m.loadModels("")
+				return m, nil
+			}
 			return m.onEsc()
 		case "q":
+			if searching {
+				break // the letter belongs to the query
+			}
 			if m.view == viewTools || m.view == viewProfiles || m.view == viewModels {
 				return m.onEsc()
 			}
@@ -773,6 +820,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "r":
+			if searching {
+				break // the letter belongs to the query
+			}
 			if m.view == viewProfiles {
 				it, ok := m.selectedBinding()
 				if !ok {
@@ -812,6 +862,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "e":
+			if searching {
+				break // the letter belongs to the query
+			}
 			if m.view == viewEditForm {
 				// Inside the edit form, "e" opens the highlighted field for editing.
 				if it, ok := m.list.SelectedItem().(item); ok {
@@ -827,6 +880,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "w":
 			// Same as "e" here: w is context everywhere else, keep it so on this screen.
+			if searching {
+				break // the letter belongs to the query
+			}
 			if m.view == viewModels {
 				return m.editContextFromList()
 			}
@@ -838,6 +894,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "d":
+			if searching {
+				break // the letter belongs to the query
+			}
 			if m.view == viewProfiles {
 				return m.onDeleteKey()
 			}
@@ -856,6 +915,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
+	// On the model library, any letter that is not a screen shortcut types a
+	// search; the switch above owns the shortcuts, so typing can only start on
+	// a free key (same rule as the picker's search).
+	if m.view == viewModels && !m.showConfirm {
+		if key, ok := msg.(tea.KeyMsg); ok && m.typeModelSearch(key) {
+			if tick := m.statusTick(); tick != nil {
+				return m, tick
+			}
+			return m, nil
+		}
+	}
 	before := m.list.Index()
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
@@ -866,6 +936,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmd, tick)
 	}
 	return m, cmd
+}
+
+// typeModelSearch feeds the model library's search: printable keys extend the
+// query, backspace trims it. Returns false for every other key so the caller
+// falls through to the list.
+func (m *model) typeModelSearch(msg tea.KeyMsg) bool {
+	switch msg.Type {
+	case tea.KeyRunes:
+		m.modelFilter += string(msg.Runes)
+		m.loadModels("")
+		return true
+	case tea.KeyBackspace:
+		if r := []rune(m.modelFilter); len(r) > 0 {
+			m.modelFilter = string(r[:len(r)-1])
+			m.loadModels("")
+			return true
+		}
+	}
+	return false
 }
 
 // editContextFromList opens the context-window editor for the highlighted
@@ -1105,6 +1194,7 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 		if it.value == libSentinel {
 			m.view = viewModels
 			m.clearStatus()
+			m.modelFilter = "" // a fresh visit starts unfiltered
 			m.loadModels("")
 			m.resize()
 			return m, nil
