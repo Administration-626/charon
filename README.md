@@ -104,12 +104,12 @@ Claude or Codex bindings use stay out: their models and protocol were never
 chosen for Pi. The active binding still decides the default endpoint, the default
 model and its own model list, and `charon off` removes every `charon*` provider.
 
-A binding can also be **hidden**: `h` on the bindings screen marks it `~` and keeps
-it in charon — name, key, models, protocol — while the next apply leaves its
-endpoint out of `models.json`. The picker then offers only the endpoints you want
-there, and the key of a hidden endpoint is not written at all. The active binding
-cannot be hidden (switch away first); switching to a hidden binding brings it back
-into the list.
+A binding can also be **hidden**: `h` on the bindings screen keeps it in charon —
+name, key, models, protocol — while the next apply leaves its endpoint out of
+`models.json`. The row stays listed but recedes to gray and is marked `~`; the
+picker then offers only the endpoints you want there, and the key of a hidden
+endpoint is not written at all. The active binding cannot be hidden (switch away
+first); switching to a hidden binding brings it back into the list.
 
 Pi's add/edit form has an **Endpoint Type** dropdown: OpenAI (Chat Completions,
 the default), OpenAI (Responses), Anthropic (Messages), or Gemini (Generate Content).

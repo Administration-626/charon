@@ -94,6 +94,7 @@ type item struct {
 	title, desc string
 	value       string
 	active      bool     // the already-picked binding — stays primary-colored even off-cursor
+	hidden      bool     // kept in charon, left out of the tool's config — renders muted
 	cells       []string // table columns; nil renders the row the classic way
 }
 
@@ -636,7 +637,7 @@ func (m *model) loadProfiles(selectName string) {
 		}
 		cells, drift := m.bindingRow(b.Name)
 		cells[0] = title
-		items = append(items, item{cells: cells, value: b.Name, active: isActive})
+		items = append(items, item{cells: cells, value: b.Name, active: isActive, hidden: b.Hidden})
 		if drift != "" {
 			// The comparison sits on its own inert row under the binding, so every
 			// table row stays exactly one line and pagination stays honest.

@@ -86,10 +86,10 @@ Codex 绑定用到的 endpoint 不参与聚合：它们的模型和协议从未�
 仍决定默认 endpoint、默认模型和它自己的模型列表；`charon off` 会删除全部 `charon*`
 provider。
 
-绑定还可以**隐藏**：在绑定列表里按 `h`，行首会出现 `~`。隐藏只影响写入——binding
-的名称、key、模型和协议都留在 charon，下一次 apply 时这个 endpoint 不再进
-`models.json`，key 也就不会落盘。当前生效的 binding 不能隐藏（先切到别的），切到一条
-被隐藏的 binding 会自动让它回到列表里。
+绑定还可以**隐藏**：在绑定列表里按 `h`，行首出现 `~`，整行转为灰色。隐藏只影响
+写入——binding 的名称、key、模型和协议都留在 charon，下一次 apply 时这个 endpoint
+不再进 `models.json`，key 也就不会落盘。当前生效的 binding 不能隐藏（先切到别的），
+切到一条被隐藏的 binding 会自动让它回到列表里。
 
 Charon 会为 Pi 注册的每个模型默认开启 thinking，并提供标准的
 `off`、`minimal`、`low`、`medium`、`high`、`xhigh` 和 `max` 档位。启动时使用的

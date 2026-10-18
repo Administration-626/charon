@@ -71,6 +71,16 @@ func selectBinding(t *testing.T, m *model, name string) {
 	t.Fatalf("no row for binding %q", name)
 }
 
+// rowOf returns the item backing the named binding row.
+func rowOf(m model, name string) (item, bool) {
+	for _, raw := range m.list.Items() {
+		if it, ok := raw.(item); ok && it.value == name && it.cells != nil {
+			return it, true
+		}
+	}
+	return item{}, false
+}
+
 func TestHiddenBindingRowAndToggle(t *testing.T) {
 	m, hiddenID := hiddenFixture(t)
 	view := m.View()
@@ -79,6 +89,13 @@ func TestHiddenBindingRowAndToggle(t *testing.T) {
 	}
 	if !strings.Contains(view, "~ hidden") {
 		t.Fatalf("bindings title does not explain the marker:\n%s", view)
+	}
+	// The row also carries the flag the delegate renders muted from.
+	if it, ok := rowOf(m, "b"); !ok || !it.hidden {
+		t.Fatalf("row b does not carry the hidden flag: %+v, ok=%v", it, ok)
+	}
+	if it, ok := rowOf(m, "a"); !ok || it.hidden {
+		t.Fatalf("row a is marked hidden: %+v, ok=%v", it, ok)
 	}
 
 	selectBinding(t, &m, "b")

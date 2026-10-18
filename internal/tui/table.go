@@ -151,11 +151,17 @@ func renderTableHeader(w io.Writer, m list.Model, it item) {
 // renderTableRow draws one data row: aligned columns, the whole row filled
 // with the selection color when the cursor is on it, and — when the cursor is
 // elsewhere — the active binding's name in the brand color so "what's active"
-// and "what's under the cursor" stay two distinct signals.
+// and "what's under the cursor" stay two distinct signals. A hidden binding
+// recedes to muted gray: still readable and still selectable, but visibly not
+// part of what the tool's config holds.
 func (d charonDelegate) renderTableRow(w io.Writer, m list.Model, index int, it item) {
 	widths := tableColumnWidths(m)
 	if index == m.Index() {
 		_, _ = io.WriteString(w, d.Styles.SelectedTitle.Render(joinCells(it.cells, widths)))
+		return
+	}
+	if it.hidden {
+		_, _ = io.WriteString(w, d.Styles.NormalTitle.Foreground(colorMuted).Render(joinCells(it.cells, widths)))
 		return
 	}
 	if it.active && len(it.cells) > 0 {
