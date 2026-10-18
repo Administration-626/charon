@@ -1,6 +1,6 @@
 // Package tui provides the interactive arrow-key menu for charon.
 //
-// The model is split across a few files in this package:
+// The menu is split across a few files in this package:
 //   - tui.go     the entry point (Run)
 //   - model.go   the model type, view/status vocabulary and construction
 //   - load.go    loading each screen's rows (tools, bindings, models)
@@ -9,6 +9,9 @@
 //   - views.go   rendering (View, wizard header, prompts, status line)
 //   - wizard.go  the add/edit binding flow and confirm-delete prompt
 //   - picker.go  the fetch-and-choose-a-model screen
+//   - table.go   the shared table columns and cell fitting
+//   - theme.go   the list delegates and the spinner
+//   - banner.go  the startup wordmark
 package tui
 
 import (
