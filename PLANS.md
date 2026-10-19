@@ -2,12 +2,13 @@
 
 Candidate features, ranked by value vs. effort.
 
-The store is a catalog, not snapshots. `~/.config/charon/` holds five JSON files:
-`providers.json`, `credentials.json`, `models.json`, `bindings.json`, `active.json`.
+The store is a catalog, not snapshots. `~/.config/charon/` holds five catalog JSON
+files — `providers.json`, `credentials.json`, `models.json`, `bindings.json`,
+`active.json` — plus `stash.json`, written on the first switch so `charon off` can
+restore pre-charon values.
 A binding is an endpoint + key + model list for one tool; exactly one binding per
 tool is active, and switching re-renders it through `ApplyAuth`. There is no
 `default` binding, no backup, no drift flag, and no user-driven import/export.
-First run locally migrates editable legacy profiles and leaves the old files in place.
 
 ## Done
 
@@ -22,8 +23,8 @@ Claude `/model`, OpenCode `/models`, and Pi `/model` get the binding's model lis
 Codex's config has no such field, so a Codex binding carries exactly one model.
 
 ### Shell completions
-`charon completion <bash|zsh|fish>` prints a script (dynamic binding-name
-completion via the hidden `charon __profiles` command, retained for existing scripts).
+`charon completion <bash|zsh|fish>` prints a script, with dynamic binding-name
+completion via the hidden `charon __profiles` command.
 
 ### Pi endpoint aggregation
 Activating a Pi binding registers the catalog's other Pi bindings as separate

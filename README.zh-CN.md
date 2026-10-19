@@ -45,7 +45,8 @@ endpoint 和凭据。
   （型号、endpoint、上下文、来源）；输入文字即可按型号或 endpoint 筛选，esc 清除。
 - 单页表单。在同一屏新增或编辑绑定（Name、Endpoint、Token、Model），可直接输入，
   并使用 [ Save ] / [ Cancel ] 按钮。
-- 快速复制与搜索。按 c 复制绑定，按 x 复制到其他工具；在模型列表中输入文字即可实时模糊搜索。
+- 快速复制与搜索。按 c（或 x）复制绑定：先选目标工具（当前工具在列表首位），
+  再命名副本；副本共用 endpoint 与 key，不会自动激活。在模型列表中输入文字即可实时模糊搜索。
 - Unicode 名称。绑定名支持中文等文字；不允许空白或控制字符。
 - 默认安全。写入采用原子替换。正在使用的绑定不能删除；删除前须切换到另一条绑定。
 - 试运行预览。`charon switch <工具> <绑定> --dry-run` 把绑定渲染到临时 HOME 下的配置副本，
@@ -65,13 +66,8 @@ endpoint 和凭据。
 | Pi | ~/.pi/agent/models.json（providers.charon-<label>.baseUrl） | ~/.pi/agent/models.json（providers.charon-<label>.apiKey） |
 | Grok | ~/.grok/config.toml（[model.charon-*].base_url） | ~/.grok/config.toml（[model.charon-*].api_key） |
 
-Charon 不再支持 Oh My Pi（omp），但不会删除已有绑定或 `~/.omp/agent/` 中的文件。
-
-Pi 的 Charon provider 使用原生 `models.json`。下次写入配置时，Charon 会迁移旧版
-生成的 `extensions/charon.ts`，并在 `models.json` 和 `settings.json` 均写入成功后
-删除旧扩展。若扩展包含额外代码、格式无法识别或是符号链接，则在任何写入前拒绝操作，
-请检查后手动停用。迁移后请重启 Pi，以卸载已加载的旧扩展。现有 thinking、压缩偏好
-和 `auth.json` 登录凭据保持不变。每个文件单独原子替换；若两次写入之间发生 I/O
+Pi 的 Charon provider 使用原生 `models.json`。现有 thinking、压缩偏好和
+`auth.json` 登录凭据保持不变。每个文件单独原子替换；若两次写入之间发生 I/O
 错误，会明确提示配置可能部分生效。
 
 激活 Pi 绑定时，Charon 还会把 catalog 里其他 Pi 绑定一并注册：每个 endpoint 一条
@@ -135,7 +131,10 @@ go build -o charon ./cmd/charon   # 或只在本目录构建
 ### 交互式菜单
 
 不带参数运行 charon 即可打开菜单：选择一个工具，再切换、添加、编辑或删除
-绑定。随时按 Ctrl+C 退出。
+绑定。按 `?` 查看当前屏幕的全部快捷键，Ctrl+C 退出。绑定页在宽终端上会
+在右侧显示只读详情（完整 endpoint、遮罩后的 key、每个模型的上下文窗口与
+来源、磁盘配置摘要）；窄终端按 `v` 打开同一视图，`e` 仍是编辑。多 endpoint
+工具（Pi）还可按 `h` 隐藏或恢复一条绑定。
 
 ### CLI 参考
 
@@ -144,13 +143,17 @@ charon                       # 交互式菜单
 charon status                # 显示工具实况与上次确认的绑定（--json）
 charon ls <tool>             # 列出已保存的绑定（--json）
 charon models <tool>         # 列出某个 API 提供的模型（--key [--endpoint]）
+charon models <tool> --local # 列出该工具绑定中已保存的模型
 charon add <tool>            # 添加并激活一条绑定（--name --key，并提供至少一个模型 id）
 charon edit <tool> <b>       # 修改某绑定的 endpoint/key/model/models（--name 可改名）
+charon set-context <tool> <b> <model> <tokens|unknown> # 设置模型上下文窗口
+charon set-effort <tool> <b> <model> <level>          # 设置 Codex 推理档位
 charon rename <tool> <o> <n> # 重命名已保存的绑定
 charon cp <tool> <src> <dst> # 复制已保存的绑定
 charon cp <tool> <src> <tool> <dst> # 将已保存的绑定复制到另一个工具
-charon switch <tool> <b>     # 将已保存的绑定应用到工具配置
-charon reapply <tool> <b>    # 显式重新应用绑定及其默认模型
+charon switch <tool> <b>     # 将已保存的绑定应用到工具配置（--dry-run 只预览）
+charon reapply <tool> <b>    # 显式重新应用绑定及其默认模型（--dry-run 只预览）
+charon off <tool>            # 从工具中移除 charon 条目并恢复首个切换前的值
 charon rm <tool> <b>         # 删除一条绑定（正在使用的不能删）
 charon completion <shell>    # 输出 bash/zsh/fish 补全脚本
 charon update                # 升级 charon 到最新发行版
@@ -244,9 +247,6 @@ Pi 的 `maxTokens` 单独查询内置模型表中的已核实输出上限（数�
 在工具内更改模型不会更新 Charon 保存的绑定；只要这条绑定仍是当前绑定，Charon 会保留实况模型。
 应用另一条绑定时会替换模型列表。
 
-在菜单里按 c（或 x）复制绑定：先选择目标工具（列表第一项是当前工具），再命名副本——
-默认预填 <name>-copy，可改。副本与原绑定共用 API key，创建后不会自动激活。
-
 ### 编辑已有绑定
 
 在某绑定上按 e 打开编辑表单，查看当前的 Name、Endpoint、
@@ -293,18 +293,18 @@ charon 并在菜单中选择。
 
 ## 工作原理
 
-- 存储：~/.config/charon/（遵循 $XDG_CONFIG_HOME）。数据保存在五个 JSON 文件中：
+- 存储：~/.config/charon/（遵循 $XDG_CONFIG_HOME）。数据保存在以下 JSON 文件中
+  （stash.json 在首次切换后才出现）：
   - providers.json：服务配置的 id 和 baseUrl，可供多个工具共用。
   - credentials.json：服务配置对应的 API key，权限为 0600。
   - models.json：服务配置对应的模型 slug。
   - bindings.json：工具的绑定名称、凭据、默认模型，以及要在工具菜单中提供的模型 ID。
   - active.json：Charon 为每个工具上次确认的绑定。
+  - stash.json：首次切换前各工具配置的原值（可选文件），供 `charon off` 按字节恢复。
 - 绑定中的模型和 API key 必须对应同一个服务配置。
 - 切换绑定先写工具配置，再更新 active.json。Charon 只修改由它管理的配置项。
 - 每个文件的写入是原子的（临时文件 → rename），跨文件的整次切换不是。切换中断后，
   可查看 status，并显式重新应用想使用的绑定。
-- 首次打开时，会把旧版中保存了 endpoint、key 和 model 的可编辑档案导入为绑定；旧档案目录
-  保留不动。只有配置快照的档案、备份和 OAuth 登录不会导入。
 
 ## 安全
 
@@ -323,10 +323,12 @@ Catalog 的每次修改都持有 advisory flock，两个 charon 进程不会交�
 ```
 cmd/charon/          入口 + 子命令
 internal/artifact/   原子写入
-internal/tools/      各工具适配器（codex、claude、opencode、pi、grok）
+internal/edit/       保留注释与键序的 JSON/JSONC/TOML 编辑
+internal/preview/    试运行预览（临时 HOME + diff，不写文件）
+internal/tools/      各工具适配器（codex、claude、opencode、pi、grok）及 stash/卸载
 internal/catalog/    provider、凭据、模型、绑定、当前指针
-internal/models/     从 provider API 拉取模型列表（openai/anthropic 协议）
-internal/tui/        bubbletea 交互式菜单（单页表单、模糊模型搜索）
+internal/models/     模型列表获取、上下文窗口与思考档位预设
+internal/tui/        bubbletea 交互式菜单（表格列表、详情页、内联模型编辑）
 internal/secret/     掩码
 ```
 
@@ -341,8 +343,8 @@ make fmt     # gofmt -w .
 make run     # 构建 + 交互式菜单（先 sandbox HOME！）
 ```
 
-CI（.github/workflows/ci.yml）在 Linux 上运行格式检查、vet、race 测试、
-构建与 golangci-lint。贡献者与 Agent 约定（包括测试时务必使用独立的 HOME，避免访问
+CI（.github/workflows/ci.yml）在 Linux 与 macOS 上运行格式检查、vet、race 测试
+与构建，并在 Linux 上运行 golangci-lint。贡献者与 Agent 约定（包括测试时务必使用独立的 HOME，避免访问
 真实凭据这条规则）见 [AGENTS.md](AGENTS.md)。
 
 ## 路线图

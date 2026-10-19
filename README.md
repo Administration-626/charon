@@ -77,17 +77,9 @@ re-renders that binding into the tool, overwriting only the keys charon owns.
 | Pi | ~/.pi/agent/models.json (providers.charon-<label>.baseUrl) | ~/.pi/agent/models.json (providers.charon-<label>.apiKey) |
 | Grok | ~/.grok/config.toml ([model.charon-*].base_url) | ~/.grok/config.toml ([model.charon-*].api_key) |
 
-Oh My Pi (omp) is no longer supported. Its existing bindings and files under
-`~/.omp/agent/` are left untouched.
-
-Pi uses its native `models.json` for the Charon provider. On the next configuration
-write, Charon migrates its old generated `extensions/charon.ts` and removes it only
-after both `models.json` and `settings.json` have been written. An extension with
-extra code, an unrecognized format, or a symlink is refused before any writes;
-disable it manually after reviewing it. Restart Pi after migration to unload the
-old extension. Existing thinking/compaction preferences and `auth.json` logins are
-left alone. Each file is replaced atomically; an I/O failure between writes is
-reported as partial application.
+Pi uses its native `models.json`. Existing thinking/compaction preferences and
+`auth.json` logins are left alone. Each file is replaced atomically; an I/O failure
+between writes is reported as partial application.
 
 Activating a Pi binding also registers the catalog's other **Pi bindings**: one
 provider entry per endpoint, carrying the key, model list and request protocol
@@ -118,9 +110,8 @@ The choice is stored per binding and written to `models.json` →
 In the dropdown, `[✓]` marks the current choice and `>` marks the cursor; Enter
 confirms a choice, and Save stores the binding. The saved type also appears in the
 binding list.
-Bindings without a type default to Chat Completions; explicitly saved types are
-unchanged. Pi 1.0.4 has no separate Responses Compact protocol, so it is not offered
-in the dropdown. This does not change Pi's compaction settings. Use the endpoint
+Bindings without a type use Chat Completions. Pi 1.0.4 has no separate Responses
+Compact protocol, so it is not offered in the dropdown. This does not change Pi's compaction settings. Use the endpoint
 documented by your provider; for native Gemini, enter model IDs manually because
 model discovery only probes OpenAI/Anthropic.
 
@@ -187,13 +178,17 @@ charon                       # interactive arrow-key menu
 charon status                # show live config and last confirmed binding (--json)
 charon ls <tool>             # list saved bindings (--json)
 charon models <tool>         # list models offered by an API (--key [--endpoint])
+charon models <tool> --local # list models already saved in this tool's bindings
 charon add <tool>            # add + activate a binding (--name --key and at least one model id)
 charon edit <tool> <b>       # change a binding's endpoint/key/model/models (--name to rename)
+charon set-context <tool> <b> <model> <tokens|unknown> # set a model's context window
+charon set-effort <tool> <b> <model> <level>          # set Codex reasoning effort
 charon rename <tool> <o> <n> # rename a saved binding
 charon cp <tool> <src> <dst> # duplicate a saved binding
 charon cp <tool> <src> <tool> <dst> # copy a saved binding to another tool
-charon switch <tool> <b>     # render a saved binding into the tool
-charon reapply <tool> <b>    # explicitly render it again, including the saved default model
+charon switch <tool> <b>     # render a saved binding into the tool (--dry-run to preview)
+charon reapply <tool> <b>    # render it again, default model included (--dry-run to preview)
+charon off <tool>            # remove charon's entries and restore pre-charon values
 charon rm <tool> <b>         # delete a binding (refused while it is the active one)
 charon completion <shell>    # print a bash/zsh/fish completion script
 charon update                # upgrade charon to the latest release
@@ -311,11 +306,6 @@ Changing the model in the tool does not update the saved binding, and Charon
 keeps the live model while that binding stays active. Rendering another binding
 replaces the model list.
 
-In the menu, press c (or x) on a binding to duplicate it: pick the destination
-tool — this tool leads the list — then name the copy, prefilled as <name>-copy
-and still editable. Both kinds of duplicates share the source key and are not
-activated.
-
 ### Editing an existing binding
 
 Press e on a binding to open its edit form, showing the current Name,
@@ -368,14 +358,16 @@ and choose a binding from the menu.
 
 ## How it works
 
-- Storage: ~/.config/charon/ ($XDG_CONFIG_HOME respected). Five JSON files,
-  no database:
+- Storage: ~/.config/charon/ ($XDG_CONFIG_HOME respected). Six JSON files
+  (stash.json appears after the first switch), no database:
   - providers.json — a site: id, baseUrl. Reused across tools.
   - credentials.json — a key for one site. Mode 0600.
   - models.json — a model slug for one site.
   - bindings.json — one tool's saved choice: name, credential, default model,
     and the model ids its picker should offer.
   - active.json — the last binding Charon confirmed for each tool.
+  - stash.json — pre-charon values per tool (written on the first switch) so
+    `charon off` can restore them byte-exact.
 - A binding's models must belong to the same site as its key. Codex carries
   exactly one model.
 - Switching re-renders the binding, then updates active.json. Only the keys
@@ -383,9 +375,6 @@ and choose a binding from the menu.
 - Each file write is atomic (temp file → rename); a switch across multiple
   files is not atomic. After an interrupted switch, inspect status and explicitly
   reapply the binding you want.
-- On first open, saved legacy profiles with endpoint, key, and model data are imported
-  as bindings. The old profile tree is kept; snapshot-only profiles, backups, and OAuth
-  logins are not imported.
 
 ## Security
 
@@ -408,10 +397,12 @@ platforms locking is a no-op and running concurrent instances is not supported.
 ```
 cmd/charon/          entrypoint + subcommands
 internal/artifact/   atomic writes
-internal/tools/      per-tool adapters (codex, claude, opencode, pi, grok)
+internal/edit/       comment- and order-preserving JSON/JSONC/TOML edits
+internal/preview/    dry-run previews (temporary home + diff, nothing written)
+internal/tools/      per-tool adapters (codex, claude, opencode, pi, grok) + stash/off
 internal/catalog/    providers, credentials, models, bindings, active pointer
-internal/models/     fetch model lists from a provider API (openai/anthropic wire)
-internal/tui/        bubbletea interactive menu (single-page forms, fuzzy model search)
+internal/models/     model fetching, context windows, thinking presets
+internal/tui/        bubbletea interactive menu (table lists, detail pane, inline model editing)
 internal/secret/     masking
 ```
 
@@ -426,8 +417,8 @@ make fmt     # gofmt -w .
 make run     # build + interactive menu (sandbox HOME first!)
 ```
 
-CI (.github/workflows/ci.yml) runs formatting checks, vet, race tests, build,
-and golangci-lint on Linux. Contributor and agent conventions —
+CI (.github/workflows/ci.yml) runs formatting checks, vet, race tests, and build
+on Linux and macOS, plus golangci-lint on Linux. Contributor and agent conventions —
 including the rule to always sandbox HOME when testing so real credentials
 are never touched — live in [AGENTS.md](AGENTS.md).
 

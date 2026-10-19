@@ -14,8 +14,9 @@
 | 依赖 | 作用 | 证据 |
 |---|---|---|
 | `bubbletea`、`bubbles`、`lipgloss` | 终端交互界面、列表、输入框和样式 | `go.mod`、`internal/tui/` |
-| `pelletier/go-toml/v2` | 读写 Codex、Grok 的 TOML 配置 | `go.mod`、`internal/tools/edit.go` |
+| `pelletier/go-toml/v2` | 保格式读写 Codex、Grok 的 TOML 配置 | `go.mod`、`internal/edit/toml.go` |
 | `sahilm/fuzzy` | 模型列表模糊搜索 | `go.mod`、`internal/tui/picker.go` |
+| `tidwall/gjson`、`tidwall/jsonc` | 按路径读取和修改 JSON/JSONC，保留注释与键序 | `go.mod`、`internal/edit/json.go` |
 | `golang.org/x/sys/unix` | Linux/macOS 的 advisory flock | `go.mod`、`internal/catalog/lock_unix.go` |
 
 ## 3) 开发工具链
@@ -29,13 +30,7 @@
 
 ## 4) 常用命令
 
-```sh
-make build
-make test
-make lint
-make fmt
-make run
-```
+见 `AGENTS.md` 的 Commands 一节。
 
 ## 5) 环境与配置
 

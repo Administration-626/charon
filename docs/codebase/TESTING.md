@@ -16,7 +16,7 @@ make cover
 ## 2) 测试布局
 
 - 测试与源码同目录，使用 `*_test.go`。
-- `internal/tools/tools_test.go` 覆盖各 CLI 的描述和写入；`internal/catalog/*_test.go` 覆盖目录约束、迁移、锁和投影；`internal/models/*_test.go` 覆盖 URL、HTTP 方言和内置窗口；`internal/tui/*_test.go` 覆盖纯逻辑和渲染。
+- `internal/tools/tools_test.go` 覆盖各 CLI 的描述和写入；`internal/catalog/*_test.go` 覆盖目录约束、迁移、锁、stash 和投影；`internal/edit/*_test.go` 覆盖 JSONC/TOML 保格式编辑；`internal/models/*_test.go` 覆盖 URL、HTTP 方言、内置窗口和思考预设；`internal/tui/*_test.go` 覆盖纯逻辑和渲染。
 - 没有全局测试 setup；测试辅助函数在各包中创建临时 HOME/XDG 目录。证据：`internal/tools/tools_test.go`、`internal/catalog/catalog_test.go`。
 
 ## 3) 测试范围矩阵

@@ -9,6 +9,7 @@
 //   - views.go   rendering (View, wizard header, prompts, status line)
 //   - wizard.go  the add/edit binding flow and confirm-delete prompt
 //   - picker.go  the fetch-and-choose-a-model screen
+//   - window.go  the context-window preset editor
 //   - table.go   the shared table columns and cell fitting
 //   - theme.go   the list delegates and the spinner
 //   - banner.go  the startup wordmark

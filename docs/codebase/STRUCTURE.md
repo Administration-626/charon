@@ -10,11 +10,11 @@
 | `internal/edit/` | 保格式 JSON/JSONC/TOML 编辑器（改自 magpie，MIT）：只改指定的键和表，注释、键序、缩进原样保留 | `internal/edit/json.go`、`internal/edit/toml.go` |
 | `internal/preview/` | 试运行预览：在临时 HOME 的配置副本上应用绑定并 diff，不写真实文件 | `internal/preview/preview.go` |
 | stash/卸载 | Tool.Owned 声明每文件所有权；`charon off` 删除条目并按字节恢复 pre-charon 值 | `internal/tools/stash.go`、`internal/catalog/stash.go` |
-| `internal/models/` | 远端模型列表获取和上下文窗口规则 | `internal/models/fetch.go`、`builtin.go` |
+| `internal/models/` | 远端模型列表获取、上下文窗口与思考档位规则 | `internal/models/fetch.go`、`builtin.go`、`thinking.go` |
 | `internal/artifact/` | 临时文件、同步、权限、rename 原子写入 | `internal/artifact/artifact.go` |
 | `internal/secret/` | 密钥遮罩和平台密钥链读取 | `internal/secret/` |
-| `internal/tui/` | Bubble Tea 交互菜单、向导、模型选择器 | `internal/tui/` |
-| `docs/` | ADR、WorkBuddy 上下文窗口同步说明、代码库文档 | `docs/` |
+| `internal/tui/` | Bubble Tea 交互菜单、表格列表、详情页、向导、模型选择器 | `internal/tui/model.go`、`update.go`、`actions.go`、`views.go` |
+| `docs/` | WorkBuddy 上下文窗口同步说明、代码库文档 | `docs/` |
 | `scripts/` | 安装脚本和模型规则提取脚本 | `scripts/` |
 | `.github/workflows/` | CI 与发布流水线 | `.github/workflows/` |
 
@@ -22,7 +22,7 @@
 
 - 主入口：`cmd/charon/main.go` 的 `main` 和 `run`。
 - 交互入口：无参数时调用 `tui.Run`。
-- 脚本入口：`status`、`ls`、`models`、`add`、`edit`、`switch`、`rename`、`cp`、`rm`、`completion` 等由 `cmd/charon/commands.go` 分发。
+- 脚本入口：`status`、`ls`、`models`、`add`、`edit`、`set-context`、`set-effort`、`switch`、`reapply`、`off`、`rename`、`cp`、`rm`、`completion` 等由 `cmd/charon/commands.go` 分发。
 - 发布入口：GoReleaser 以 `./cmd/charon` 构建二进制。证据：`.goreleaser.yaml`。
 
 ## 3) 模块边界
@@ -49,5 +49,4 @@
 - `cmd/charon/main.go`
 - `internal/catalog/catalog.go`
 - `internal/tools/tool.go`
-- `internal/tui/tui.go`
-- `docs/codebase/` 中的七份架构文档
+- `internal/tui/tui.go`（入口）

@@ -27,6 +27,7 @@
 - 没有日志框架；状态和错误主要通过 CLI/TUI 输出返回。
 - 原始密钥不得输出；status/JSON 使用 `secret.Mask`，工具适配器只把原始 key 传入写配置流程。证据：`cmd/charon/commands.go`、`internal/secret/mask.go`。
 - 写配置必须经过原子替换，并设置目录 `0700`、凭据文件通常 `0600`。证据：`internal/artifact/artifact.go`、各 adapter。
+- 工具配置只通过 `internal/edit` 的键路径/表编辑修改，不做整文件 marshal/unmarshal，以保留注释、键序和用户条目。证据：`internal/edit/json.go`、`toml.go`、AGENTS.md。
 
 ## 5) 测试约定
 

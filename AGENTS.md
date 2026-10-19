@@ -35,8 +35,8 @@ make run        # build + open the interactive menu (sandbox your HOME first)
 ```
 
 Always run `make fmt` and `make test` before finishing a change. CI
-(`.github/workflows/ci.yml`) runs fmt-check, vet, `-race` tests, build, and
-golangci-lint on Linux + macOS; keep all of them green.
+(`.github/workflows/ci.yml`) runs fmt-check, vet, `-race` tests, and build on
+Linux + macOS, plus golangci-lint on Linux; keep all of them green.
 
 ## Architecture
 
@@ -51,28 +51,36 @@ internal/edit/      format-preserving JSON/JSONC + TOML editors (adapted from
                     validated before any write
 internal/preview/   dry-run previews: apply a binding against copies of the
                     tool's config under a temporary home, diff, write nothing
-stash               Tool.Owned/Created declare what ApplyAuth owns per file;
-                    `charon off` (catalog.Off) removes it and restores the
-                    stashed pre-charon values (catalog stash.json)
 internal/tools/     per-tool adapters
   tool.go           Tool struct, AuthSpec, registry (All/Find)
   edit.go           JSON/TOML read helpers (loadJSONMap/loadTOMLMap)
+  stash.go          Tool.Owned/Created declarations and `charon off` removal;
+                    catalog/stash.go keeps stash.json with pre-charon values
   codex.go / claude.go / opencode.go / pi.go / grok.go   one file per tool
 internal/catalog/   the store: providers, credentials, models, bindings, active pointer
 internal/models/    fetch model lists from a provider API (openai/anthropic wire)
 internal/secret/    masking
 internal/tui/       bubbletea interactive menu
+  tui.go            entry point (Run)
+  model.go          model type, key bindings, construction
+  load.go           loading rows for each screen
+  update.go         message loop and search typing
+  actions.go        key actions on the highlighted row
+  views.go          rendering, detail pane, status line
+  wizard.go         add/edit flow and delete confirmation
+  picker.go         fetch-and-choose-a-model screen
+  window.go         context-window preset editor and custom input
+  table.go / theme.go / banner.go   shared table cells, styles, wordmark
 ```
 
-Layering (imports point left): `secret` ← `artifact` ← `edit` ← `tools` ← `catalog`/`preview` ← `cmd`/`tui`.
+Layering (imports point left): `secret` ← `artifact` ← `edit` ← `tools` ← `catalog` ← `cmd`/`tui`;
+`models` is used by `tools`/`catalog`/`tui`, and `preview` builds on `tools` for `cmd`.
 Binding names are validated in `internal/catalog` (`validateName`); a name is a label,
 never a path segment, so do not join one into a filesystem path.
 
 Data lives under `~/.config/charon/` (`$XDG_CONFIG_HOME` respected):
-`providers.json`, `credentials.json`, `models.json`, `bindings.json`, `active.json`.
-On first open, editable legacy profiles with an endpoint, key, and model are imported;
-the old `profiles/` tree remains untouched. Snapshot-only profiles, backups, and OAuth
-logins are not imported.
+`providers.json`, `credentials.json`, `models.json`, `bindings.json`, `active.json`,
+and `stash.json` (written on the first switch; `charon off` restores from it).
 
 ### Store locking
 
@@ -178,8 +186,9 @@ when the destination also holds several endpoints. A tool without
 - Keep `cmd/` thin — logic belongs in `internal/` packages so it stays testable.
 - Never log or print full secrets; route them through `secret.Mask`.
 - Prefer standard library. Current third-party deps are intentionally minimal:
-  `bubbletea`/`bubbles`/`lipgloss` (TUI) and `pelletier/go-toml/v2` (Codex TOML).
-  Discuss before adding more.
+  `bubbletea`/`bubbles`/`lipgloss` (TUI), `sahilm/fuzzy` (model search),
+  `pelletier/go-toml/v2` (Codex/Grok TOML), `tidwall/gjson` + `tidwall/jsonc`
+  (JSONC-aware edits), and `golang.org/x/sys/unix` (flock). Discuss before adding more.
 - Platform-specific code goes behind build tags (`_darwin.go` / `_other.go`),
   never runtime `runtime.GOOS` branching for the keychain.
 
@@ -189,8 +198,8 @@ when the destination also holds several endpoints. A tool without
   `internal/catalog`, and `internal/tools` from regressing.
 - Use `httptest` for anything hitting the network (see `fetch_test.go`); never
   make real API calls in tests.
-- The TUI is verified by compile + `go vet`; extract pure logic into testable
-  helpers rather than testing the bubbletea event loop.
+- The TUI has table-driven tests for pure helpers and rendered views; keep
+  new logic in testable helpers, and avoid brittle end-to-end terminal tests.
 
 ## Out of scope / do not do
 
