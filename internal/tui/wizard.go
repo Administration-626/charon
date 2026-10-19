@@ -28,7 +28,7 @@ const (
 	focusToken
 	focusPiAPI
 	focusFetch  // [ Fetch & Pick Online Models ]
-	focusManual // [ Type Model IDs Manually ]
+	focusManual // [ Add / Edit Model List ]
 	focusSave
 	focusCancel
 	focusCount // number of focusable positions
@@ -73,22 +73,6 @@ type wizard struct {
 	manualWindows map[string]bool
 }
 
-// modelIDs is the wizard's model choice as a flat list: the curated selection with the
-// default model first, or just the default when nothing is curated. Used to prefill the
-// manual-entry screen so an edit never asks the user to retype ids charon already knows.
-func (w wizard) modelIDs() []string {
-	ids := make([]string, 0, len(w.models)+1)
-	if w.model != "" {
-		ids = append(ids, w.model)
-	}
-	for _, id := range w.models {
-		if id != w.model {
-			ids = append(ids, id)
-		}
-	}
-	return ids
-}
-
 // pickerNote summarizes the curated model list for the edit form, naming the tool's
 // own model-switching menu (e.g. /model, /models) when it has one.
 func (w wizard) pickerNote(t *tools.Tool) string {
@@ -114,10 +98,8 @@ func wizardStep(v view) (n, total int, label string) {
 		return 2, 4, "API key"
 	case viewFetching, viewPickModel:
 		return 3, 4, "choose a model"
-	case viewAddCustomModel:
-		return 3, 4, "type the model ids"
 	case viewReviewModels:
-		return 3, 4, "review models"
+		return 3, 4, "models & context"
 	case viewAddName:
 		return 4, 4, "name the binding"
 	}
@@ -417,39 +399,10 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.view == viewEditField {
-			if m.fromReview {
-				m.fromReview = false
-				m.view = viewReviewModels
-				m.editTarget = ""
-				return m, nil
-			}
 			m.view = viewPickModel // cancel window editing → back to the picker
 			m.editTarget = ""
 			m.renderModels()
 			return m, nil
-		}
-		if m.view == viewAddCustomModel {
-			// Only the picker can be gone back to when a fetch actually produced a list;
-			// manual entry is also where a failed fetch lands, and returning to an empty
-			// picker would strand the user on a blank screen.
-			if len(m.allModels) > 0 {
-				m.view = viewPickModel
-				m.clearStatus()
-				m.renderModels()
-				return m, nil
-			}
-			if m.fromForm || m.wiz.edit {
-				m.fromForm = false
-				m.view = viewEditForm
-				m.clearStatus()
-				m.loadEditFormAt(focusManual)
-				return m, nil
-			}
-			m.view = viewAddKey
-			m.clearStatus()
-			m.startInput("API key", true)
-			m.input.SetValue(m.wiz.key)
-			return m, textinput.Blink
 		}
 		if m.view == viewAddKey {
 			m.view = viewAddEndpoint
@@ -496,37 +449,7 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						return m, nil
 					}
 				}
-				slug := m.editTarget
-				m.editTarget = ""
-				if m.wiz.windows == nil {
-					m.wiz.windows = map[string]int{}
-				}
-				m.wiz.windows[slug] = window
-				if m.wiz.manualWindows == nil {
-					m.wiz.manualWindows = map[string]bool{}
-				}
-				m.wiz.manualWindows[slug] = true
-				if m.fromReview {
-					m.fromReview = false
-					m.view = viewReviewModels
-					m.clearStatus()
-					if window == 0 {
-						m.setStatus(statusOK, "cleared context window for "+slug)
-					} else {
-						m.setStatus(statusOK, fmt.Sprintf("saved context window for %s: %d", slug, window))
-					}
-					return m, nil
-				}
-				m.view = viewPickModel
-				m.clearStatus()
-				m.renderModels()
-				m.list.Select(indexOfValue(m.list.Items(), slug))
-				if window == 0 {
-					m.setStatus(statusOK, "cleared context window for "+slug)
-				} else {
-					m.setStatus(statusOK, fmt.Sprintf("saved context window for %s: %d", slug, window))
-				}
-				return m, nil
+				return m.applyWizardWindow(m.editTarget, window), nil
 			}
 			switch m.editField {
 			case fieldName:
@@ -589,39 +512,6 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			cmd := m.beginFetch()
 			return m, cmd
 
-		case viewAddCustomModel:
-			parsed, err := parseTypedModelSpecs(val)
-			if err != nil {
-				m.setStatus(statusErr, err.Error())
-				return m, nil
-			}
-			if len(parsed) == 0 {
-				m.setStatus(statusErr, "enter at least one model id")
-				return m, nil
-			}
-			slugs := make([]string, 0, len(parsed))
-			if m.wiz.windows == nil {
-				m.wiz.windows = map[string]int{}
-			}
-			if m.wiz.manualWindows == nil {
-				m.wiz.manualWindows = map[string]bool{}
-			}
-			for _, pm := range parsed {
-				slugs = append(slugs, pm.Slug)
-				m.wiz.windows[pm.Slug] = pm.Window
-				if pm.Manual {
-					m.wiz.manualWindows[pm.Slug] = true
-				}
-			}
-			m.wiz.models = append([]string(nil), slugs...)
-			m.wiz.model = slugs[0]
-			m.clearStatus()
-			m.view = viewReviewModels
-			m.reviewSource = viewAddCustomModel
-			m.reviewCursor = 0
-			m.setStatus(statusOK, "models loaded — enter to confirm, w to edit context, d to remove")
-			return m, nil
-
 		case viewAddName:
 			val = strings.TrimSpace(val)
 			if val == "" {
@@ -652,13 +542,8 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.editingModel.Slug = slug
-			m.view = viewModelWindow
-			m.clearStatus()
-			m.startInput("context window in tokens (empty = unknown)", false)
-			if m.editingModel.ID != "" && m.editingModel.ContextWindow > 0 {
-				m.input.SetValue(fmt.Sprint(m.editingModel.ContextWindow))
-			}
-			return m, textinput.Blink
+			m.openWindowPresets(false)
+			return m, nil
 
 		case viewModelWindow:
 			window := 0
@@ -669,30 +554,7 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 			}
-			p, err := m.cat.PutProvider(m.modelEditEndpoint)
-			if err != nil {
-				m.setStatus(statusErr, err.Error())
-				return m, nil
-			}
-			saved, err := m.cat.PutModelWithWindow(p.ID, m.editingModel.Slug, window)
-			if err != nil {
-				m.setStatus(statusErr, err.Error())
-				return m, nil
-			}
-			if m.editingModel.ID != "" && m.editingModel.ID != saved.ID {
-				if err := m.cat.RemoveModel(m.editingModel.ID); err != nil {
-					m.setStatus(statusErr, err.Error())
-					m.view = viewModels
-					m.loadModels(saved.ID)
-					return m, nil
-				}
-			}
-			m.editingModel = catalog.Model{}
-			m.modelEditEndpoint = ""
-			m.view = viewModels
-			m.loadModels(saved.ID)
-			m.setStatus(statusOK, "Saved "+saved.Slug)
-			return m, nil
+			return m.saveCatalogWindow(window)
 
 		case viewModelEffort:
 			levels, effort, err := parseThinkingLevelMap(val)
@@ -892,41 +754,55 @@ func parseContextWindow(val string) (int, error) {
 	return window, nil
 }
 
-type parsedModelSpec struct {
-	Slug   string
-	Window int
-	Manual bool
+// parseModelIDs splits a pasted list into ids. Commas and newlines separate
+// entries; nothing else is parsed, so an id that contains a colon (llama3:8b) or
+// an @ (org/model@tag) survives intact. Context windows are edited in the list,
+// never typed into the same field.
+func parseModelIDs(val string) []string {
+	var ids []string
+	fields := strings.FieldsFunc(val, func(r rune) bool { return r == ',' || r == '\n' })
+	for _, raw := range fields {
+		if id := strings.TrimSpace(raw); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
-func parseTypedModelSpecs(val string) ([]parsedModelSpec, error) {
-	var specs []parsedModelSpec
-	for _, raw := range strings.Split(val, ",") {
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
+// addModels appends ids the list does not already hold and seeds each new row
+// with its derived context window. It returns how many rows were added.
+func (m *model) addModels(ids []string) int {
+	if m.wiz.windows == nil {
+		m.wiz.windows = map[string]int{}
+	}
+	if m.wiz.manualWindows == nil {
+		m.wiz.manualWindows = map[string]bool{}
+	}
+	added := 0
+	for _, id := range ids {
+		if containsID(m.wiz.models, id) {
 			continue
 		}
-		var slug string
-		var window int
-		var manual bool
-		if idx := strings.IndexAny(raw, ":@"); idx >= 0 {
-			slug = strings.TrimSpace(raw[:idx])
-			wStr := strings.TrimSpace(raw[idx+1:])
-			if slug == "" {
-				return nil, fmt.Errorf("missing model id before %q", string(raw[idx]))
-			}
-			w, err := parseContextWindow(wStr)
-			if err != nil {
-				return nil, fmt.Errorf("model %q: %w", slug, err)
-			}
-			window = w
-			manual = true
-		} else {
-			slug = raw
-			window = models.DefaultContextWindow(slug)
+		m.wiz.models = append(m.wiz.models, id)
+		if _, ok := m.wiz.windows[id]; !ok {
+			m.wiz.windows[id] = models.DefaultContextWindow(id)
 		}
-		specs = append(specs, parsedModelSpec{Slug: slug, Window: window, Manual: manual})
+		added++
 	}
-	return specs, nil
+	if m.wiz.model == "" && len(m.wiz.models) > 0 {
+		m.wiz.model = m.wiz.models[0]
+	}
+	return added
+}
+
+// indexOfID returns the position of id in ids, or -1.
+func indexOfID(ids []string, id string) int {
+	for i, s := range ids {
+		if s == id {
+			return i
+		}
+	}
+	return -1
 }
 
 // containsID reports whether id is already in ids.

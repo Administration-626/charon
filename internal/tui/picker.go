@@ -11,7 +11,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sahilm/fuzzy"
 )
@@ -87,7 +86,7 @@ func (m *model) beginFetch() tea.Cmd {
 // model ids are exactly what the user needs registered.
 func (m model) applyFetched(msg fetchedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.setStatus(statusErr, msg.err.Error()+" — type the model ids instead")
+		m.setStatus(statusErr, msg.err.Error()+" — add the model ids instead")
 		return m.startManualModels()
 	}
 	m.view = viewPickModel
@@ -96,16 +95,18 @@ func (m model) applyFetched(msg fetchedMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// startManualModels opens the type-the-ids screen, prefilled with whatever the binding
-// already registers so an edit doesn't have to retype the list. Reached both from the
-// picker's m key and from a failed fetch.
+// startManualModels opens the model list for hand-editing, with the cursor on
+// the inline add row. Reached from the picker's m key, the form's manual action,
+// and a failed fetch.
 func (m model) startManualModels() (tea.Model, tea.Cmd) {
-	m.view = viewAddCustomModel
-	m.startInput("e.g. kimi-k3:1m, z-ai/glm-5.3, custom:200k", false)
-	if prefill := strings.Join(m.wiz.modelIDs(), ", "); prefill != "" {
-		m.input.SetValue(prefill)
+	if m.view == viewPickModel {
+		m.reviewSource = viewPickModel
+	} else {
+		m.reviewSource = viewEditForm
 	}
-	return m, textinput.Blink
+	m.view = viewReviewModels
+	m.reviewCursor = len(m.wiz.models)
+	return m, nil
 }
 
 // filterModels fuzzy-matches query against model ids, ranked best-first (empty = all).
@@ -328,7 +329,7 @@ func indexOfValue(items []list.Item, value string) int {
 func modelRowTitle(id string, checked bool, window int) string {
 	windowText := "context unknown"
 	if window > 0 {
-		windowText = fmt.Sprintf("context %d", window)
+		windowText = "context " + formatTokens(window)
 	}
 	if checked {
 		return "[✓] " + id + " · " + windowText
@@ -524,7 +525,7 @@ func (m model) toggleHighlighted() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// finishPicker validates the selection and advances to the review table.
+// finishPicker validates the selection and advances to the model list.
 // In single-select mode, the highlighted row is chosen. In multi-select mode,
 // at least one model must be checked; zero checked models is blocked with an error.
 func (m model) finishPicker() (tea.Model, tea.Cmd) {
@@ -557,21 +558,6 @@ func (m model) editModelWindow() (tea.Model, tea.Cmd) {
 	}
 	m.editTarget = it.value
 	m.editField = ""
-	m.view = viewEditField
-	m.startInput("context window in tokens (empty = unknown)", false)
-	m.input.SetValue("")
-	if w, ok := m.wiz.windows[it.value]; ok && w > 0 {
-		m.input.SetValue(fmt.Sprint(w))
-	} else if m.cat != nil && m.tool != nil {
-		if p, found, err := m.cat.ProviderByURL(m.tool.ResolveEndpoint(m.wiz.endpoint)); err == nil && found {
-			if ms, err := m.cat.ModelsForProvider(p.ID); err == nil {
-				for _, stored := range ms {
-					if stored.Slug == it.value && stored.ContextWindow > 0 {
-						m.input.SetValue(fmt.Sprint(stored.ContextWindow))
-					}
-				}
-			}
-		}
-	}
-	return m, textinput.Blink
+	m.openWindowPresets(true)
+	return m, nil
 }

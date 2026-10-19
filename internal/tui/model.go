@@ -24,19 +24,19 @@ const (
 	viewModels
 	viewModelEndpoint
 	viewModelSlug
-	viewModelWindow
+	viewModelWindow   // custom context-window entry
+	viewWindowPresets // typical context windows, with Custom… and Unknown
 	viewModelEffort
-	viewAddEndpoint    // wizard: enter endpoint
-	viewAddKey         // wizard: enter API key
-	viewFetching       // wizard: fetching models
-	viewPickModel      // wizard: choose a model
-	viewAddCustomModel // wizard: enter custom model ID
-	viewReviewModels   // wizard: compact review table
-	viewAddName        // wizard: name the binding
-	viewDupName        // clone: name the duplicate
-	viewCopyTool       // duplicate: choose the destination tool
-	viewEditForm       // edit: field picker (url/name/token/model)
-	viewEditField      // edit: single-field text input
+	viewAddEndpoint  // wizard: enter endpoint
+	viewAddKey       // wizard: enter API key
+	viewFetching     // wizard: fetching models
+	viewPickModel    // wizard: choose a model
+	viewReviewModels // wizard: model list + per-row context editor
+	viewAddName      // wizard: name the binding
+	viewDupName      // clone: name the duplicate
+	viewCopyTool     // duplicate: choose the destination tool
+	viewEditForm     // edit: field picker (url/name/token/model)
+	viewEditField    // edit: single-field text input
 )
 
 // statusLevel colors the footer status line by severity.
@@ -105,11 +105,13 @@ var (
 	keyToggle       = key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "toggle"))
 	keyToggleAll    = key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "all"))
 	// keyFilter never matches a real press; it only advertises type-to-search.
-	keyFilter  = key.NewBinding(key.WithKeys("\x00filter"), key.WithHelp("type", "search"))
-	keyRefresh = key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl+r", "refresh"))
-	keyManual  = key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "type ids"))
-	keyWindow  = key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "context"))
-	keyEffort  = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "effort"))
+	keyFilter = key.NewBinding(key.WithKeys("\x00filter"), key.WithHelp("type", "search"))
+	// keyTypeCustom advertises that a typed digit edits a custom context size.
+	keyTypeCustom = key.NewBinding(key.WithKeys("\x00type-window"), key.WithHelp("type", "custom"))
+	keyRefresh    = key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl+r", "refresh"))
+	keyManual     = key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "type ids"))
+	keyWindow     = key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "context"))
+	keyEffort     = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "effort"))
 	// keyEsc names only esc: on a text input "q" has to stay a letter.
 	keyEsc          = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back"))
 	keyClearFilter  = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter"))
@@ -122,15 +124,20 @@ var (
 	keyConfirm      = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "delete"))
 	keyFinish       = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "finish"))
 	keyDuplicate    = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "duplicate"))
-	keyRegister     = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "register"))
 
 	keyConfirmReview = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm"))
+	keyAddModel      = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "add model"))
+	keyCancelAdd     = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel"))
 	keyEditContext   = key.NewBinding(key.WithKeys("w", "e"), key.WithHelp("w/e", "context"))
 	keyDeleteRow     = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "remove"))
 )
 
 // exampleEndpoint is placeholder text; a real endpoint is never prefilled.
 const exampleEndpoint = "https://api.example.com/v1"
+
+// manualModelPlaceholder explains that only ids belong in the add field: context
+// is a column in the list behind it, so ids with colons stay intact.
+const manualModelPlaceholder = "model id (e.g. glm-4.6, llama3:8b; commas separate several)"
 
 type model struct {
 	cat           *catalog.Catalog
@@ -160,20 +167,22 @@ type model struct {
 	pending    *fetchedMsg // fetch result held back until the min-load window elapses
 	fetchStart time.Time   // when the current fetch began, for the min-load throttle
 
-	allModels         []string      // full fetched model list, unfiltered
-	editTarget        string        // model whose context window the input view is editing
-	modelFilter       string        // current type-to-search query in the model picker
-	editingModel      catalog.Model // model being added or edited in the local library
-	modelEditEndpoint string        // the endpoint being edited for that model
-	reviewCursor      int           // highlighted row in viewReviewModels
-	fromReview        bool          // whether single-field edit returns to viewReviewModels
-	reviewSource      view          // view that launched reviewTable (viewAddCustomModel or viewPickModel)
-	status            string
-	statusLvl         statusLevel
-	width             int
-	height            int
-	version           string
-	statusAt          time.Time // when the current footer message was set
+	allModels          []string      // full fetched model list, unfiltered
+	editTarget         string        // model whose context window the input view is editing
+	windowPresetWizard bool          // presets edit the wizard's pending windows, not the catalog
+	modelFilter        string        // current type-to-search query in the model picker
+	editingModel       catalog.Model // model being added or edited in the local library
+	modelEditEndpoint  string        // the endpoint being edited for that model
+	reviewCursor       int           // highlighted row in viewReviewModels
+	addingModel        bool          // the model list's inline add field has focus
+	editingCtx         bool          // the model list's inline ctx field has focus
+	reviewSource       view          // where the model list was opened from (viewEditForm or viewPickModel)
+	status             string
+	statusLvl          statusLevel
+	width              int
+	height             int
+	version            string
+	statusAt           time.Time // when the current footer message was set
 }
 
 // statusTickMsg carries the statusAt stamp it was scheduled from, so a stale
@@ -304,7 +313,7 @@ func (m model) inputView() bool {
 	}
 	switch m.view {
 	case viewModelEndpoint, viewModelSlug, viewModelWindow,
-		viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField, viewAddCustomModel:
+		viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField:
 		return true
 	}
 	return false

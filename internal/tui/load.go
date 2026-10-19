@@ -170,10 +170,7 @@ func (m *model) editModelWindowByID(id string) error {
 	if p, err := m.cat.Provider(stored.ProviderID); err == nil {
 		m.modelEditEndpoint = p.BaseURL
 	}
-	m.startInput("context window in tokens (empty = unknown)", false)
-	if stored.ContextWindow > 0 {
-		m.input.SetValue(fmt.Sprint(stored.ContextWindow))
-	}
+	m.openWindowPresets(false)
 	return nil
 }
 

@@ -13,21 +13,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// modelMenuNote explains where a list of model ids ends up for the selected tool: its
-// own in-session menu, or — for a tool that can't be given a list — that only the first
-// id takes effect, so nobody types five ids expecting a menu that will never appear.
-func (m model) modelMenuNote() string {
-	if m.tool == nil {
-		return ""
-	}
-	if m.tool.ModelMenu == "" {
-		return m.tool.Title + " can't be given a model list, so only the first id is used." +
-			" Add a binding per model to switch between them."
-	}
-	return "All of them are offered in " + m.tool.Title + "'s own " + m.tool.ModelMenu +
-		", so you can switch model without leaving your session."
-}
-
 func (m model) endpointHint(endpoint string) string {
 	if m.tool != nil && m.tool.Name == "pi" {
 		switch m.wiz.piAPI {
@@ -111,10 +96,8 @@ func (m model) stepHelp() []key.Binding {
 		return []key.Binding{keySaveAction, keyCancel}
 	case viewDupName:
 		return []key.Binding{keyDuplicate, keyCancel}
-	case viewAddCustomModel:
-		return []key.Binding{keyRegister, keyEsc}
 	case viewReviewModels:
-		return []key.Binding{keyConfirmReview, keyEditContext, keyDeleteRow, keyMove, keyEsc}
+		return []key.Binding{keyConfirmReview, keyAdd, keyEditContext, keyDeleteRow, keyMove, keyEsc}
 	}
 	return []key.Binding{keyContinue, keyEsc}
 }
@@ -123,6 +106,8 @@ func (m model) View() string {
 	switch m.view {
 	case viewReviewModels:
 		return m.renderReviewTable()
+	case viewWindowPresets:
+		return m.withFooter(m.list.View(), m.footerKeys...)
 	case viewFetching:
 		return m.withFooter(m.wizardHeader() +
 			promptStyle.Render(m.spinner.View()+m.loadingMsg) +
@@ -139,7 +124,7 @@ func (m model) View() string {
 			}
 		}
 		return m.withFooter(body, m.stepHelp()...)
-	case viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField, viewAddCustomModel:
+	case viewAddEndpoint, viewAddKey, viewAddName, viewDupName, viewEditField:
 		body := m.wizardHeader() +
 			promptStyle.Render(m.prompt()) +
 			"\n\n  " + m.input.View()
@@ -147,9 +132,6 @@ func (m model) View() string {
 			if hint := m.endpointHint(m.input.Value()); hint != "" {
 				body += "\n\n" + hint
 			}
-		}
-		if m.view == viewAddCustomModel {
-			body += "\n\n" + hintStyle.Render(m.modelMenuNote())
 		}
 		return m.withFooter(body, m.stepHelp()...)
 	case viewEditForm:
@@ -232,7 +214,7 @@ func (m model) View() string {
 		formLines = append(formLines,
 			"  "+hintStyle.Render("Models       : ")+modelDisplay,
 			modelActionRow("├── [ Fetch & Pick Online Models ]", m.formFocus == focusFetch),
-			modelActionRow("└── [ Type Model IDs Manually ]", m.formFocus == focusManual),
+			modelActionRow("└── [ Add / Edit Model List ]", m.formFocus == focusManual),
 		)
 
 		saveBtn := hintStyle.Render("  [ Save ]")
@@ -343,8 +325,6 @@ func (m model) prompt() string {
 		return "API key — input is hidden as you type:"
 	case viewAddName:
 		return "Name this binding (e.g. work, openrouter-fast):"
-	case viewAddCustomModel:
-		return "Enter model IDs — comma-separated (e.g. kimi-k3:1m, z-ai/glm-5.3, custom:200k):"
 	case viewDupName:
 		dst := "this tool"
 		if m.dupTool != "" && m.dupTool != m.tool.Name {
@@ -393,7 +373,7 @@ func formatTokens(n int) string {
 
 func (m model) renderReviewTable() string {
 	header := m.wizardHeader()
-	sub := promptStyle.Render("Review models to register:") + "\n\n"
+	sub := promptStyle.Render("Models and context windows:") + "\n\n"
 
 	maxSlugLen := 18
 	for _, s := range m.wiz.models {
@@ -407,24 +387,24 @@ func (m model) renderReviewTable() string {
 
 	windowSources := m.modelWindowSources()
 
-	hdrRow := fmt.Sprintf("  %-3s %-*s  %-14s  %s", "#", maxSlugLen, "Model ID", "Context Window", "Source")
-	divider := "  " + strings.Repeat("─", maxSlugLen+34)
+	hdrRow := fmt.Sprintf("  %-3s %-*s  %s", "#", maxSlugLen, "Model ID", "ctx")
+	divider := "  " + strings.Repeat("─", maxSlugLen+26)
 	lines := []string{hintStyle.Render(hdrRow), hintStyle.Render(divider)}
 
+	if len(m.wiz.models) == 0 {
+		lines = append(lines, hintStyle.Render("No models yet — add the first one."))
+	}
 	for i, slug := range m.wiz.models {
 		win := m.wiz.windows[slug]
-		winStr := formatTokens(win)
-		src := windowSources[slug]
-
-		sourceTag := "[unknown]"
-		switch src {
-		case catalog.WindowManual:
-			sourceTag = "[manual]"
-		case catalog.WindowBuiltin:
-			if models.IsKnownBuiltin(slug) {
-				sourceTag = "[builtin]"
-			} else {
-				sourceTag = "[fallback: 500K] ✎"
+		ctxText := formatTokens(win)
+		if win > 0 {
+			switch windowSources[slug] {
+			case catalog.WindowManual:
+				ctxText += " manual"
+			case catalog.WindowBuiltin:
+				if !models.IsKnownBuiltin(slug) {
+					ctxText += " fallback"
+				}
 			}
 		}
 
@@ -434,20 +414,49 @@ func (m model) renderReviewTable() string {
 		if len(displaySlug) > maxSlugLen {
 			displaySlug = displaySlug[:maxSlugLen-1] + "…"
 		}
-
-		if i == m.reviewCursor {
-			cursorMark = "❯ "
-			row := fmt.Sprintf("%s%-3s %-*s  %-14s  %s", cursorMark, numStr, maxSlugLen, displaySlug, winStr, sourceTag)
+		row := fmt.Sprintf("%s%-3s %-*s  %-18s", cursorMark, numStr, maxSlugLen, displaySlug, ctxText)
+		switch {
+		case i == m.reviewCursor && m.editingCtx:
+			lines = append(lines, fmt.Sprintf("%s%-3s %-*s  %s", cursorMark, numStr, maxSlugLen, displaySlug, m.input.View()))
+		case i == m.reviewCursor:
 			lines = append(lines, promptStyle.Render(row))
-		} else {
-			row := fmt.Sprintf("%s%-3s %-*s  %-14s  %s", cursorMark, numStr, maxSlugLen, displaySlug, winStr, hintStyle.Render(sourceTag))
+		default:
 			lines = append(lines, row)
 		}
 	}
 
 	lines = append(lines, hintStyle.Render(divider))
-	lines = append(lines, hintStyle.Render("Press w/e to edit context, d to remove row, enter to confirm."))
+	switch {
+	case m.addingModel:
+		lines = append(lines, promptStyle.Render("  ＋ ")+m.input.View())
+		lines = append(lines, hintStyle.Render("enter adds · esc cancels · commas separate pasted ids"))
+	case m.editingCtx:
+		lines = append(lines, hintStyle.Render(fmt.Sprintf("ctx for %s — current %s (%s)", m.editTarget,
+			formatTokens(m.wiz.windows[m.editTarget]), windowSourceLabel(m.editTarget, windowSources[m.editTarget]))))
+		lines = append(lines, hintStyle.Render("presets 32K/64K/128K/200K/256K/400K/500K/1M/2M · enter saves · esc cancels · empty clears"))
+	default:
+		addRow := "  ＋ Add model…"
+		if m.reviewCursor >= len(m.wiz.models) {
+			addRow = promptStyle.Render("❯ ＋ Add model…")
+			lines = append(lines, addRow)
+			lines = append(lines, hintStyle.Render("enter types a new model id · w/e edits the highlighted row"))
+		} else {
+			lines = append(lines, hintStyle.Render(addRow))
+			lines = append(lines, hintStyle.Render("enter confirms · a adds a model · w/e edits context · d removes"),
+				hintStyle.Render("Context windows are derived when a model is added."))
+		}
+	}
 
 	body := header + sub + strings.Join(lines, "\n")
-	return m.withFooter(body, keyConfirmReview, keyEditContext, keyDeleteRow, keyMove, keyEsc)
+	if m.addingModel {
+		return m.withFooter(body, keyAddModel, keyCancelAdd)
+	}
+	if m.editingCtx {
+		return m.withFooter(body, keySaveAction, keyCancel)
+	}
+	keys := []key.Binding{keyConfirmReview, keyAdd, keyEditContext, keyDeleteRow, keyMove, keyEsc}
+	if m.reviewCursor >= len(m.wiz.models) {
+		keys[0] = keyAddModel
+	}
+	return m.withFooter(body, keys...)
 }

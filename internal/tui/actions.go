@@ -19,14 +19,13 @@ func (m model) editContextFromList() (tea.Model, tea.Cmd) {
 	if !ok || isSentinel(it.value) {
 		return m, nil
 	}
-	m.view = viewModelWindow
 	if err := m.editModelWindowByID(it.value); err != nil {
 		m.setStatus(statusErr, err.Error())
 		m.view = viewModels
 		m.loadModels(it.value)
 		return m, nil
 	}
-	return m, textinput.Blink
+	return m, nil
 }
 
 // onEditKey opens the edit form for the highlighted binding ("e").
@@ -245,6 +244,7 @@ func (m *model) skipSeparators(before int) {
 // startInput configures the text field for a step (password masks the echo).
 func (m *model) startInput(placeholder string, password bool) {
 	m.input.SetValue("")
+	m.input.Prompt = "> "
 	m.input.Placeholder = placeholder
 	if password {
 		m.input.EchoMode = textinput.EchoPassword
@@ -351,14 +351,13 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 			m.startInput("endpoint, e.g. https://openrouter.ai/api/v1", false)
 			return m, textinput.Blink
 		}
-		m.view = viewModelWindow
 		if err := m.editModelWindowByID(it.value); err != nil {
 			m.setStatus(statusErr, err.Error())
 			m.view = viewModels
 			m.loadModels(it.value)
 			return m, nil
 		}
-		return m, textinput.Blink
+		return m, nil
 
 	case viewProfiles:
 		if it.value == addSentinel {
@@ -401,7 +400,156 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// startInlineCtxEdit focuses the highlighted row's ctx cell. The value is edited
+// in place with the same token parser as the other window fields.
+func (m model) startInlineCtxEdit() (tea.Model, tea.Cmd) {
+	if m.reviewCursor >= len(m.wiz.models) {
+		return m, nil
+	}
+	slug := m.wiz.models[m.reviewCursor]
+	m.editTarget = slug
+	m.editingCtx = true
+	m.clearStatus()
+	m.startInput("ctx (e.g. 200k, 1m; empty = unknown)", false)
+	m.input.Prompt = ""
+	m.input.Width = 18
+	if cur := m.wiz.windows[slug]; cur > 0 {
+		m.input.SetValue(fmt.Sprint(cur))
+		m.input.CursorEnd()
+	}
+	return m, textinput.Blink
+}
+
+// commitInlineCtx parses the inline field and stores the window. Confirming the
+// value already in place is a no-op, so opening a builtin row and pressing enter
+// does not turn it into a manual override.
+func (m model) commitInlineCtx() (tea.Model, tea.Cmd) {
+	slug := m.editTarget
+	raw := strings.TrimSpace(m.input.Value())
+	window := 0
+	if raw != "" {
+		w, err := parseContextWindow(raw)
+		if err != nil {
+			m.setStatus(statusErr, err.Error())
+			return m, textinput.Blink
+		}
+		window = w
+	}
+	current := m.wiz.windows[slug]
+	if window == current {
+		m.clearStatus()
+		m.setStatus(statusOK, fmt.Sprintf("kept context window for %s: %s", slug, formatTokens(current)))
+	} else {
+		if m.wiz.windows == nil {
+			m.wiz.windows = map[string]int{}
+		}
+		if m.wiz.manualWindows == nil {
+			m.wiz.manualWindows = map[string]bool{}
+		}
+		m.wiz.windows[slug] = window
+		m.wiz.manualWindows[slug] = true
+		m.setWindowStatus(slug, window)
+	}
+	m.editingCtx = false
+	m.input.Blur()
+	m.editTarget = ""
+	return m, nil
+}
+
+// startInlineModelAdd focuses the model list's add row. The field is rendered in
+// place, so adding an id never leaves the list.
+func (m model) startInlineModelAdd() (tea.Model, tea.Cmd) {
+	m.addingModel = true
+	m.clearStatus()
+	m.startInput(manualModelPlaceholder, false)
+	m.input.Prompt = ""
+	if w := m.width - 8; w > 10 {
+		m.input.Width = w
+	}
+	return m, textinput.Blink
+}
+
+// commitInlineModelAdd turns the inline field's text into rows. Duplicates are
+// counted rather than added twice, and the cursor lands on the last id so its
+// context can be adjusted immediately.
+func (m model) commitInlineModelAdd() (tea.Model, tea.Cmd) {
+	ids := parseModelIDs(m.input.Value())
+	if len(ids) == 0 {
+		m.setStatus(statusErr, "enter at least one model id")
+		return m, textinput.Blink
+	}
+	added := m.addModels(ids)
+	m.reviewCursor = 0
+	for _, id := range ids {
+		if idx := indexOfID(m.wiz.models, id); idx >= 0 {
+			m.reviewCursor = idx
+		}
+	}
+	m.addingModel = false
+	m.input.Blur()
+	m.clearStatus()
+	switch {
+	case added == 0:
+		m.setStatus(statusInfo, "already listed: "+strings.Join(ids, ", "))
+	case added < len(ids):
+		m.setStatus(statusOK, fmt.Sprintf("added %d model(s), %d already listed", added, len(ids)-added))
+	default:
+		m.setStatus(statusOK, fmt.Sprintf("added %d model(s) — a adds another, w/e edits context", added))
+	}
+	return m, nil
+}
+
+// proceedFromModels leaves the model step for the next wizard screen: back to the
+// edit form when it launched the picker, otherwise to naming a new binding.
+func (m model) proceedFromModels() (tea.Model, tea.Cmd) {
+	m.wiz.model = m.wiz.models[0]
+	if m.fromForm || m.wiz.edit {
+		m.fromForm = false
+		m.editField = fieldModel
+		m.view = viewEditForm
+		focusPos := focusManual
+		if m.reviewSource == viewPickModel {
+			focusPos = focusFetch
+		}
+		m.loadEditFormAt(focusPos)
+		return m, nil
+	}
+	m.view = viewAddName
+	m.startInput("binding name (e.g. openrouter-fast)", false)
+	return m, textinput.Blink
+}
+
 func (m model) updateReviewModels(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.addingModel {
+		switch msg.Type {
+		case tea.KeyEsc:
+			m.addingModel = false
+			m.input.Blur()
+			m.clearStatus()
+			return m, nil
+		case tea.KeyEnter:
+			return m.commitInlineModelAdd()
+		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+	}
+	if m.editingCtx {
+		switch msg.Type {
+		case tea.KeyEsc:
+			m.editingCtx = false
+			m.input.Blur()
+			m.editTarget = ""
+			m.clearStatus()
+			return m, nil
+		case tea.KeyEnter:
+			return m.commitInlineCtx()
+		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+	}
+	addRow := len(m.wiz.models) // the trailing "Add model" row sits past the data
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		return m, tea.Quit
@@ -411,7 +559,7 @@ func (m model) updateReviewModels(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyDown:
-		if m.reviewCursor < len(m.wiz.models)-1 {
+		if m.reviewCursor < addRow {
 			m.reviewCursor++
 		}
 		return m, nil
@@ -422,31 +570,27 @@ func (m model) updateReviewModels(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.renderModels()
 			return m, nil
 		}
-		m.view = viewAddCustomModel
+		if m.fromForm || m.wiz.edit {
+			m.fromForm = false
+			m.view = viewEditForm
+			m.clearStatus()
+			m.loadEditFormAt(focusManual)
+			return m, nil
+		}
+		m.view = viewAddKey
 		m.clearStatus()
-		m.startInput("Type model IDs separated by commas, optionally with context (e.g. glm-5:1m, kimi-k3, custom:200k)", false)
-		m.input.SetValue(strings.Join(m.wiz.models, ", "))
+		m.startInput("API key", true)
+		m.input.SetValue(m.wiz.key)
 		return m, textinput.Blink
 	case tea.KeyEnter:
+		if m.reviewCursor >= addRow {
+			return m.startInlineModelAdd()
+		}
 		if len(m.wiz.models) == 0 {
 			m.setStatus(statusErr, "at least one model is required")
 			return m, nil
 		}
-		m.wiz.model = m.wiz.models[0]
-		if m.fromForm || m.wiz.edit {
-			m.fromForm = false
-			m.editField = fieldModel
-			m.view = viewEditForm
-			focusPos := focusManual
-			if m.reviewSource == viewPickModel {
-				focusPos = focusFetch
-			}
-			m.loadEditFormAt(focusPos)
-			return m, nil
-		}
-		m.view = viewAddName
-		m.startInput("binding name (e.g. openrouter-fast)", false)
-		return m, textinput.Blink
+		return m.proceedFromModels()
 	case tea.KeyRunes:
 		if len(msg.Runes) == 1 {
 			switch msg.Runes[0] {
@@ -456,36 +600,25 @@ func (m model) updateReviewModels(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case 'j', 'J':
-				if m.reviewCursor < len(m.wiz.models)-1 {
+				if m.reviewCursor < addRow {
 					m.reviewCursor++
 				}
 				return m, nil
+			case 'a', 'A':
+				m.clearStatus()
+				return m.startInlineModelAdd()
 			case 'w', 'W', 'e', 'E':
-				if len(m.wiz.models) == 0 {
+				if m.reviewCursor >= addRow {
 					return m, nil
 				}
-				if m.reviewCursor >= len(m.wiz.models) {
-					m.reviewCursor = 0
-				}
-				target := m.wiz.models[m.reviewCursor]
-				m.editTarget = target
-				m.editField = ""
-				m.fromReview = true
-				m.view = viewEditField
-				m.startInput("context window in tokens (e.g. 1m, 200k, 1048576, empty=unknown)", false)
-				if win, ok := m.wiz.windows[target]; ok && win > 0 {
-					m.input.SetValue(fmt.Sprint(win))
-				} else {
-					m.input.SetValue("")
-				}
-				return m, textinput.Blink
+				return m.startInlineCtxEdit()
 			case 'd', 'D':
+				if m.reviewCursor >= addRow {
+					return m, nil
+				}
 				if len(m.wiz.models) <= 1 {
 					m.setStatus(statusErr, "at least one model is required")
 					return m, nil
-				}
-				if m.reviewCursor >= len(m.wiz.models) {
-					m.reviewCursor = 0
 				}
 				removed := m.wiz.models[m.reviewCursor]
 				var kept []string

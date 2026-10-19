@@ -32,8 +32,8 @@ func TestInteractiveFlowVisualAudit(t *testing.T) {
 	if !strings.Contains(formView, "Fetch & Pick Online Models") {
 		t.Fatal("Form missing Fetch & Pick Online Models button")
 	}
-	if !strings.Contains(formView, "Type Model IDs Manually") {
-		t.Fatal("Form missing Type Model IDs Manually button")
+	if !strings.Contains(formView, "Add / Edit Model List") {
+		t.Fatal("Form missing Add / Edit Model List button")
 	}
 	if !strings.Contains(formView, "offered in /model") {
 		t.Fatal("Form missing /model menu note")
@@ -44,11 +44,14 @@ func TestInteractiveFlowVisualAudit(t *testing.T) {
 	next, _ := m.updateEditForm(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
 	manualView := m.View()
-	if m.view != viewAddCustomModel {
-		t.Fatalf("view = %v, want viewAddCustomModel", m.view)
+	if m.view != viewReviewModels {
+		t.Fatalf("view = %v, want viewReviewModels", m.view)
 	}
-	if !strings.Contains(manualView, "claude-3-5-sonnet, claude-3-haiku") {
-		t.Fatal("Manual entry did not prefill existing models")
+	if !strings.Contains(manualView, "claude-3-5-sonnet") || !strings.Contains(manualView, "claude-3-haiku") {
+		t.Fatal("Manual entry did not list the existing models")
+	}
+	if !strings.Contains(manualView, "＋ Add model…") {
+		t.Fatal("Manual entry missing the add row")
 	}
 
 	// Step 3: Model Picker View

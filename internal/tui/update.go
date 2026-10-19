@@ -65,6 +65,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.inputView() {
 			return m.updateInput(msg)
 		}
+		if m.view == viewWindowPresets {
+			return m.updateWindowPresets(msg)
+		}
 		if m.showConfirm {
 			return m.handleConfirmDelete(msg)
 		}
