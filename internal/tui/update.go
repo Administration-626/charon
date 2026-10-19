@@ -13,8 +13,16 @@ func (m model) Init() tea.Cmd { return nil }
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		// Crossing the wide/narrow threshold changes the binding list's columns,
+		// so the rows are rebuilt for the new layout while keeping the cursor on
+		// the same binding. Staying on one side leaves the cursor untouched.
+		wasWide := m.wideDetail()
 		m.width, m.height = msg.Width, msg.Height
 		m.resize()
+		if m.view == viewProfiles && m.wideDetail() != wasWide {
+			name, _ := m.highlightedBindingName()
+			m.loadProfiles(name)
+		}
 		return m, nil
 
 	case fetchedMsg:
@@ -59,6 +67,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
 		}
+		if m.showHelp {
+			m.showHelp = false
+			return m, nil // any key dismisses the shortcut sheet
+		}
+		// ? opens the shortcut sheet wherever the key is not typing. Text fields,
+		// inline add/ctx fields, the protocol dropdown, and an active search keep
+		// their letters.
+		if msg.String() == "?" && !m.showConfirm && !m.piAPIOpen && !m.addingModel && !m.editingCtx && !m.inputView() {
+			searching := (m.view == viewModels || m.view == viewPickModel) && m.modelFilter != ""
+			if !searching {
+				m.showHelp = true
+				return m, nil
+			}
+		}
 		if m.view == viewEditForm {
 			return m.updateEditForm(msg)
 		}
@@ -93,7 +115,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if searching {
 				break // the letter belongs to the query
 			}
-			if m.view == viewTools || m.view == viewProfiles || m.view == viewModels {
+			if m.view == viewTools || m.view == viewProfiles || m.view == viewModels || m.view == viewBindingDetail {
 				return m.onEsc()
 			}
 		case "enter":
@@ -149,6 +171,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "a":
 			if m.view == viewProfiles {
 				m.wiz = wizard{windows: map[string]int{}}
+				m.formBaselineSet = false
+				m.discardArmed = false
 				m.view = viewEditForm
 				m.clearStatus()
 				m.loadEditForm()
@@ -157,6 +181,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "e":
 			if searching {
 				break // the letter belongs to the query
+			}
+			if m.view == viewBindingDetail {
+				return m.onEditKey()
 			}
 			if m.view == viewEditForm {
 				// Inside the edit form, "e" opens the highlighted field for editing.
@@ -170,6 +197,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.view == viewModels {
 				return m.editContextFromList()
+			}
+		case "v":
+			if m.view == viewProfiles {
+				m.view = viewBindingDetail
+				m.clearStatus()
+				m.resize()
+				return m, nil
+			}
+			if m.view == viewBindingDetail {
+				return m.onEsc()
 			}
 		case "w":
 			// Same as "e" here: w is context everywhere else, keep it so on this screen.

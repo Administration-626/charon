@@ -29,18 +29,15 @@ func TestInteractiveFlowVisualAudit(t *testing.T) {
 
 	// Step 1: Form View Inspection
 	formView := m.View()
-	if !strings.Contains(formView, "Fetch & Pick Online Models") {
-		t.Fatal("Form missing Fetch & Pick Online Models button")
-	}
-	if !strings.Contains(formView, "Add / Edit Model List") {
-		t.Fatal("Form missing Add / Edit Model List button")
+	if !strings.Contains(formView, "Models…") {
+		t.Fatal("Form missing the Models entry point")
 	}
 	if !strings.Contains(formView, "offered in /model") {
 		t.Fatal("Form missing /model menu note")
 	}
 
 	// Step 2: Open Manual Entry
-	m.formFocus = focusManual
+	m.formFocus = focusModels
 	next, _ := m.updateEditForm(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
 	manualView := m.View()

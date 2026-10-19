@@ -15,6 +15,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func openTestCatalog(t *testing.T, detectCodex bool) *catalog.Catalog {
@@ -911,7 +912,7 @@ func TestInputView(t *testing.T) {
 	if !m.inputView() {
 		t.Error("inputView() = false for viewEditForm with formFocus=0, want true")
 	}
-	m.formFocus = 4 // Save button, not an input field
+	m.formFocus = focusModels // action row, not an input field
 	if m.inputView() {
 		t.Error("inputView() = true for viewEditForm with formFocus=4, want false")
 	}
@@ -1652,8 +1653,8 @@ func TestFormCursorSurvivesModelSubScreens(t *testing.T) {
 		t.Errorf("manual add: view=%v, want viewReviewModels", added.view)
 	}
 	nextForm, _ := added.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
-	if kept := nextForm.(model); kept.view != viewEditForm || kept.formFocus != focusManual {
-		t.Errorf("manual confirm: view=%v focus=%d, want viewEditForm focusManual", kept.view, kept.formFocus)
+	if kept := nextForm.(model); kept.view != viewEditForm || kept.formFocus != focusModels {
+		t.Errorf("manual confirm: view=%v focus=%d, want viewEditForm focusModels", kept.view, kept.formFocus)
 	}
 
 	escManual := pickerModel(t, nil)
@@ -1662,16 +1663,16 @@ func TestFormCursorSurvivesModelSubScreens(t *testing.T) {
 	escManual.reviewSource = viewEditForm
 	escManual.view = viewReviewModels
 	escNext, _ := escManual.updateReviewModels(tea.KeyMsg{Type: tea.KeyEsc})
-	if got := escNext.(model); got.formFocus != focusManual {
-		t.Errorf("manual esc: formFocus = %d, want focusManual", got.formFocus)
+	if got := escNext.(model); got.formFocus != focusModels {
+		t.Errorf("manual esc: formFocus = %d, want focusModels", got.formFocus)
 	}
 
 	m := pickerModel(t, []string{"glm-4.6", "kimi-k2"})
 	m.wiz = wizard{name: "relay", endpoint: "https://relay.example/v1", key: "sk-x"}
 	m.fromForm = true
 	escNext, _ = m.updatePickModel(tea.KeyMsg{Type: tea.KeyEsc})
-	if got := escNext.(model); got.formFocus != focusFetch {
-		t.Errorf("picker esc: formFocus = %d, want focusFetch", got.formFocus)
+	if got := escNext.(model); got.formFocus != focusModels {
+		t.Errorf("picker esc: formFocus = %d, want focusModels", got.formFocus)
 	}
 
 	mEnter := pickerModel(t, []string{"glm-4.6", "kimi-k2"})
@@ -1684,8 +1685,8 @@ func TestFormCursorSurvivesModelSubScreens(t *testing.T) {
 		t.Errorf("picker enter: view = %v, want viewReviewModels", reviewGot.view)
 	}
 	nextForm, _ = reviewGot.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
-	if formNext := nextForm.(model); formNext.formFocus != focusFetch {
-		t.Errorf("review confirm: formFocus = %d, want focusFetch", formNext.formFocus)
+	if formNext := nextForm.(model); formNext.formFocus != focusModels {
+		t.Errorf("review confirm: formFocus = %d, want focusModels", formNext.formFocus)
 	}
 }
 
@@ -2124,8 +2125,8 @@ func TestChromePinnedToTheBottom(t *testing.T) {
 		legend string
 	}{
 		{"tools", viewTools, nil, "enter open • q/esc quit"},
-		{"bindings", viewProfiles, func(m *model) { m.loadProfiles("") }, "enter switch • a add • r reapply • e edit • c duplicate • d delete • ctrl+r refresh"},
-		{"form", viewEditForm, func(m *model) { m.loadEditForm() }, "↑/↓/j/k move • tab next field • enter select • esc cancel"},
+		{"bindings", viewProfiles, func(m *model) { m.loadProfiles("") }, "enter switch • a add • e edit • v details • d delete"},
+		{"form", viewEditForm, func(m *model) { m.loadEditForm() }, "↑/↓/j/k move • tab next field • enter select • s save • esc cancel"},
 		{"input step", viewAddEndpoint, nil, "enter continue • esc back"},
 		{"picker", viewPickModel, func(m *model) { m.showModels([]string{"glm-4.6", "kimi-k2"}) }, "enter finish • esc back"},
 		{"fetching", viewFetching, nil, ""},
@@ -2761,6 +2762,641 @@ func TestAggregationNote(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := aggregationNote(tc.tool, tc.cat(t)); got != tc.want {
 				t.Fatalf("aggregationNote() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestFormEscKeepsEditsThenDiscards pins the dirty guard: esc on a changed field
+// leaves the field without losing the edit, and a second esc discards the form.
+func TestFormEscKeepsEditsThenDiscards(t *testing.T) {
+	st := openTestCatalog(t, false)
+	m := newModel(st, "test")
+	m.tool = m.findTool("claude")
+	m.width, m.height = 100, 30
+	m.wiz = wizard{name: "relay", endpoint: "https://relay.example/v1", key: "sk-x",
+		model: "claude-3", models: []string{"claude-3"}}
+	m.view = viewEditForm
+	m.loadEditForm()
+
+	// Type into the endpoint field, as updateEditForm would.
+	m.formInputs[focusURL].SetValue("https://other.example/v1")
+	m.wiz.endpoint = "https://other.example/v1"
+
+	next, _ := m.updateEditForm(tea.KeyMsg{Type: tea.KeyEsc})
+	kept := next.(model)
+	if kept.view != viewEditForm || !kept.discardArmed {
+		t.Fatalf("first esc: view=%v armed=%v, want the form still open and armed", kept.view, kept.discardArmed)
+	}
+	if kept.formFocus != focusModels {
+		t.Errorf("first esc: focus = %d, want the Models row", kept.formFocus)
+	}
+	if !strings.Contains(kept.status, "edits kept") {
+		t.Errorf("status = %q, want the edits-kept warning", kept.status)
+	}
+
+	next, _ = kept.updateEditForm(tea.KeyMsg{Type: tea.KeyEsc})
+	discarded := next.(model)
+	if discarded.view != viewProfiles {
+		t.Errorf("second esc: view = %v, want viewProfiles", discarded.view)
+	}
+	if discarded.discardArmed || discarded.formBaselineSet {
+		t.Errorf("discard left guard state behind: armed=%v baseline=%v", discarded.discardArmed, discarded.formBaselineSet)
+	}
+}
+
+// TestFormEscExitsWhenClean: nothing typed means esc is still one press.
+func TestFormEscExitsWhenClean(t *testing.T) {
+	st := openTestCatalog(t, false)
+	m := newModel(st, "test")
+	m.tool = m.findTool("claude")
+	m.wiz = wizard{name: "relay", endpoint: "https://relay.example/v1", key: "sk-x",
+		model: "claude-3", models: []string{"claude-3"}}
+	m.view = viewEditForm
+	m.loadEditForm()
+
+	next, _ := m.updateEditForm(tea.KeyMsg{Type: tea.KeyEsc})
+	if got := next.(model); got.view != viewProfiles {
+		t.Errorf("clean esc: view = %v, want viewProfiles", got.view)
+	}
+}
+
+// TestFormSaveKey: s on an action row saves; s in a text field is just a letter.
+func TestFormSaveKey(t *testing.T) {
+	st := openTestCatalog(t, false)
+	m := newModel(st, "test")
+	m.tool = m.findTool("claude")
+	m.width, m.height = 100, 30
+	m.wiz = wizard{name: "relay", endpoint: "https://relay.example/v1", key: "sk-x",
+		model: "claude-3", models: []string{"claude-3"}}
+	m.view = viewEditForm
+	m.loadEditForm()
+
+	m.formInputs[focusName].SetValue("relay-s")
+	m.formInputs[focusName].CursorEnd()
+	m.wiz.name = "relay-s"
+	next, _ := m.updateEditForm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	typed := next.(model)
+	if typed.view != viewEditForm || !strings.HasSuffix(typed.formInputs[focusName].Value(), "s") {
+		t.Fatalf("s in a text field: view=%v value=%q, want it typed", typed.view, typed.formInputs[focusName].Value())
+	}
+
+	typed.formFocus = focusModels
+	typed.applyFormFocus()
+	next, _ = typed.updateEditForm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	saved := next.(model)
+	if saved.view != viewProfiles {
+		t.Fatalf("s on an action row: view = %v, want viewProfiles; status=%q", saved.view, saved.status)
+	}
+	if _, found, err := st.BindingByName("claude", "relay-ss"); err != nil || !found {
+		bindings, _ := st.Bindings("claude")
+		names := make([]string, len(bindings))
+		for i, b := range bindings {
+			names[i] = b.Name
+		}
+		t.Fatalf("binding not saved: found=%v err=%v names=%v", found, err, names)
+	}
+}
+
+// TestReviewFetchKey: f starts a fetch from the model list and remembers to
+// return there, so confirming the picker does not dump the user back to the form.
+func TestReviewFetchKey(t *testing.T) {
+	m := pickerModel(t, nil)
+	m.wiz = wizard{endpoint: "https://relay.example/v1", key: "sk-x"}
+	m.view = viewReviewModels
+	m.reviewCursor = 0
+
+	next, cmd := m.updateReviewModels(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	got := next.(model)
+	if got.view != viewFetching || got.fetchReturn != viewReviewModels {
+		t.Fatalf("view=%v return=%v, want fetching with review return", got.view, got.fetchReturn)
+	}
+	if cmd == nil {
+		t.Fatal("fetch did not return a command")
+	}
+}
+
+// TestApplyFetchedFailureStaysInReview: a failed fetch from the list leaves the
+// cursor and the list exactly where they were.
+func TestApplyFetchedFailureStaysInReview(t *testing.T) {
+	m := pickerModel(t, nil)
+	m.view = viewFetching
+	m.fetchReturn = viewReviewModels
+	m.reviewCursor = 3
+
+	next, _ := m.applyFetched(fetchedMsg{err: errors.New("no /v1/models")})
+	got := next.(model)
+	if got.view != viewReviewModels || got.reviewCursor != 3 {
+		t.Fatalf("view=%v cursor=%d, want the previous review state", got.view, got.reviewCursor)
+	}
+	if got.statusLvl != statusErr {
+		t.Errorf("status level = %v, want error", got.statusLvl)
+	}
+}
+
+// TestPickerEscReturnsToReviewAfterFetch: esc backs out one level, to the list
+// the fetch started from.
+func TestPickerEscReturnsToReviewAfterFetch(t *testing.T) {
+	m := pickerModel(t, []string{"glm-4.6"})
+	m.fetchReturn = viewReviewModels
+	m.view = viewPickModel
+
+	next, _ := m.updatePickModel(tea.KeyMsg{Type: tea.KeyEsc})
+	if got := next.(model); got.view != viewReviewModels {
+		t.Errorf("view = %v, want viewReviewModels", got.view)
+	}
+}
+
+// TestHelpOverlay: ? opens a sheet with the current keys and any key closes it.
+func TestHelpOverlay(t *testing.T) {
+	st := openTestCatalog(t, false)
+	m := newModel(st, "test")
+	m.width, m.height = 100, 30
+	m.resize()
+	m.loadTools()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	opened := next.(model)
+	if !opened.showHelp {
+		t.Fatal("? did not open the help sheet")
+	}
+	view := opened.View()
+	for _, want := range []string{"Keyboard shortcuts", "enter", "ctrl+c"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("help sheet missing %q", want)
+		}
+	}
+
+	next, _ = opened.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	if closed := next.(model); closed.showHelp {
+		t.Error("any key should close the help sheet")
+	}
+}
+
+// TestHelpKeepsQuestionMarkAsInput: a focused text field owns the key.
+func TestHelpKeepsQuestionMarkAsInput(t *testing.T) {
+	m := newModel(openTestCatalog(t, false), "test")
+	m.view = viewAddName
+	m.startInput("name", false)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	got := next.(model)
+	if got.showHelp {
+		t.Fatal("? must type in a text field, not open help")
+	}
+	if !strings.Contains(got.input.Value(), "?") {
+		t.Fatalf("input = %q, want the typed ?", got.input.Value())
+	}
+}
+
+// TestFormDirtyTracksSelectedModelsAndContext: fetched windows for unselected
+// models are staging data, not edits; selected models and their windows are.
+func TestFormDirtyTracksSelectedModelsAndContext(t *testing.T) {
+	w := wizard{name: "x", endpoint: "https://e/v1", key: "k", model: "a", models: []string{"a"},
+		windows: map[string]int{"a": 1000}}
+	m := model{wiz: w, formBaseline: captureForm(w), formBaselineSet: true}
+	if m.formDirty() {
+		t.Fatal("clean form reported dirty")
+	}
+	m.wiz.windows["b"] = 2000 // an unselected fetched model
+	if m.formDirty() {
+		t.Fatal("unselected window marked the form dirty")
+	}
+	m.wiz.windows["a"] = 2000
+	if !m.formDirty() {
+		t.Fatal("selected window change not detected")
+	}
+	m.wiz.windows["a"] = 1000
+	m.wiz.models = append(m.wiz.models, "b")
+	if !m.formDirty() {
+		t.Fatal("model list change not detected")
+	}
+}
+
+// bindingDetailModel builds a catalog with one active binding named relay and
+// returns the model positioned on the bindings screen with that row selected.
+func bindingDetailModel(t *testing.T, width, height int) model {
+	t.Helper()
+	return bindingDetailModelNamed(t, width, height, "relay")
+}
+
+// bindingDetailModelNamed is bindingDetailModel with a caller-chosen binding
+// name, so tests can exercise long or wide names.
+func bindingDetailModelNamed(t *testing.T, width, height int, name string) model {
+	t.Helper()
+	st := openTestCatalog(t, false)
+	p, err := st.PutProvider("https://gateway.example/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr, err := st.PutCredential(p.ID, "sk-test-123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutModelWithWindow(p.ID, "glm-4.6", 200000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutModel(p.ID, "kimi-k2"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := st.AddBinding("claude", name, cr.ID, "glm-4.6", []string{"glm-4.6", "kimi-k2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Activate(b.ID); err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(st, "test")
+	m.tool = m.findTool("claude")
+	m.width, m.height = width, height
+	m.view = viewProfiles
+	m.loadProfiles(name)
+	return m
+}
+
+// TestBindingDetailShowsFullBinding: the wide pane exposes what the table has to
+// truncate — the masked key, every model and its context source, and the status.
+func TestBindingDetailShowsFullBinding(t *testing.T) {
+	m := bindingDetailModel(t, 120, 30)
+	if !m.wideDetail() {
+		t.Fatal("width 120 should use the wide detail layout")
+	}
+	if got := m.list.Width(); got != m.detailListWidth() {
+		t.Errorf("list width = %d, want %d", got, m.detailListWidth())
+	}
+	view := m.View()
+	for _, want := range []string{"API key", "Default", "kimi-k2", "200,000", "manual", "sk-tes••••3456", "v details"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("wide detail missing %q", want)
+		}
+	}
+	if strings.Contains(view, "sk-test-123456") {
+		t.Fatal("wide detail exposed the raw API key")
+	}
+	if strings.Contains(view, "* default") {
+		t.Fatal("detail should state the default once, not mark rows")
+	}
+	if rows := len(strings.Split(view, "\n")); rows != m.height {
+		t.Fatalf("wide view has %d rows, want %d", rows, m.height)
+	}
+}
+
+// TestBindingDetailPaneTopPadding: the detail pane starts detailTopPad blank
+// rows down, aligning its title with the table header and its values with the
+// first binding row.
+func TestBindingDetailPaneTopPadding(t *testing.T) {
+	m := bindingDetailModel(t, 120, 30)
+	lines := strings.Split(m.renderBindingDetailPane(), "\n")
+	if len(lines) <= detailTopPad {
+		t.Fatalf("detail pane has %d lines, want more than %d", len(lines), detailTopPad)
+	}
+	for i := 0; i < detailTopPad; i++ {
+		if got := strings.TrimSpace(lines[i]); got != "" {
+			t.Errorf("line %d = %q, want blank", i, got)
+		}
+	}
+	if got := strings.TrimSpace(lines[detailTopPad]); got != "relay" {
+		t.Errorf("line %d = %q, want %q", detailTopPad, got, "relay")
+	}
+}
+
+// TestBindingDetailNarrowOpensWithV: narrow terminals keep the list until v opens
+// the same detail; esc returns and e opens the existing form.
+func TestBindingDetailNarrowOpensWithV(t *testing.T) {
+	m := bindingDetailModel(t, 80, 30)
+	if m.wideDetail() {
+		t.Fatal("width 80 must not use the wide layout")
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	detail := next.(model)
+	if detail.view != viewBindingDetail {
+		t.Fatalf("v: view = %v, want viewBindingDetail", detail.view)
+	}
+	if view := detail.View(); !strings.Contains(view, "relay") || !strings.Contains(view, "API key") {
+		t.Fatal("detail screen missing the binding values")
+	}
+
+	next, _ = detail.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	back := next.(model)
+	if back.view != viewProfiles {
+		t.Fatalf("esc: view = %v, want viewProfiles", back.view)
+	}
+
+	next, _ = back.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	detail = next.(model)
+	next, _ = detail.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	edit := next.(model)
+	if edit.view != viewEditForm {
+		t.Fatalf("e: view = %v, want viewEditForm", edit.view)
+	}
+	if edit.wiz.origName != "relay" {
+		t.Errorf("edit target = %q, want relay", edit.wiz.origName)
+	}
+}
+
+func TestWideDetailThreshold(t *testing.T) {
+	m := model{view: viewProfiles}
+	m.width = wideDetailMinWidth - 1
+	if m.wideDetail() {
+		t.Errorf("width %d should be narrow", m.width)
+	}
+	m.width = wideDetailMinWidth
+	if !m.wideDetail() {
+		t.Errorf("width %d should be wide", m.width)
+	}
+	m.view = viewBindingDetail
+	if m.wideDetail() {
+		t.Error("the full-screen detail is not the wide list layout")
+	}
+}
+
+// bindingHeaderCells returns the bindings table's column labels.
+func bindingHeaderCells(t *testing.T, m model) []string {
+	t.Helper()
+	for _, raw := range m.list.Items() {
+		if it, ok := raw.(item); ok && it.value == hdrSentinel {
+			return it.cells
+		}
+	}
+	t.Fatal("bindings table header not found")
+	return nil
+}
+
+// bindingDataCellCounts returns the cell count of every binding row; sentinel
+// rows (header, divider, add, drift annotations) are skipped.
+func bindingDataCellCounts(t *testing.T, m model) []int {
+	t.Helper()
+	var counts []int
+	for _, raw := range m.list.Items() {
+		it, ok := raw.(item)
+		if !ok || isSentinel(it.value) || it.cells == nil {
+			continue
+		}
+		counts = append(counts, len(it.cells))
+	}
+	return counts
+}
+
+// TestWideBindingsTableKeepsOnlyNameColumn: the wide detail pane already shows
+// the endpoint and models, so the list beside it drops those columns; the
+// narrow table keeps them because it has no pane.
+func TestWideBindingsTableKeepsOnlyNameColumn(t *testing.T) {
+	m := bindingDetailModel(t, 120, 30)
+	if header := bindingHeaderCells(t, m); len(header) != 1 || header[0] != "name" {
+		t.Fatalf("wide header = %v, want [name]", header)
+	}
+	for _, n := range bindingDataCellCounts(t, m) {
+		if n != 1 {
+			t.Errorf("wide binding row has %d cells, want 1", n)
+		}
+	}
+	listView := m.list.View()
+	for _, label := range []string{"endpoint", "model", "more"} {
+		if strings.Contains(listView, label) {
+			t.Errorf("wide list still shows the %q column", label)
+		}
+	}
+	view := m.View()
+	for _, want := range []string{"Endpoint", "https://gateway.example/v1", "Default"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("wide view missing %q from the detail pane", want)
+		}
+	}
+}
+
+// TestNarrowBindingsTableKeepsAllColumns keeps the narrow layout as it was:
+// endpoint, model, and more still label the full-width list.
+func TestNarrowBindingsTableKeepsAllColumns(t *testing.T) {
+	m := bindingDetailModel(t, 80, 30)
+	if header := bindingHeaderCells(t, m); strings.Join(header, ",") != "name,endpoint,model,more" {
+		t.Fatalf("narrow header = %v, want the four column labels", header)
+	}
+	for _, n := range bindingDataCellCounts(t, m) {
+		if n != 4 {
+			t.Errorf("narrow binding row has %d cells, want 4", n)
+		}
+	}
+	listView := m.list.View()
+	for _, label := range []string{"endpoint", "model", "more"} {
+		if !strings.Contains(listView, label) {
+			t.Errorf("narrow list missing the %q column label", label)
+		}
+	}
+}
+
+// TestWindowResizeRebuildsBindingColumns: crossing the wide/narrow threshold
+// rebuilds the rows for the new layout and keeps the cursor on the same binding.
+func TestWindowResizeRebuildsBindingColumns(t *testing.T) {
+	m := bindingDetailModel(t, 80, 30)
+	if got, ok := m.highlightedBindingName(); !ok || got != "relay" {
+		t.Fatalf("initial highlight = %q, %v; want relay", got, ok)
+	}
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	wide := next.(model)
+	if !wide.wideDetail() {
+		t.Fatal("width 120 should use the wide layout")
+	}
+	if header := bindingHeaderCells(t, wide); len(header) != 1 || header[0] != "name" {
+		t.Fatalf("after widening: header = %v, want [name]", header)
+	}
+	if got, ok := wide.highlightedBindingName(); !ok || got != "relay" {
+		t.Fatalf("after widening: highlight = %q, %v; want relay", got, ok)
+	}
+
+	next, _ = wide.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	narrow := next.(model)
+	if narrow.wideDetail() {
+		t.Fatal("width 80 should use the narrow layout")
+	}
+	if header := bindingHeaderCells(t, narrow); strings.Join(header, ",") != "name,endpoint,model,more" {
+		t.Fatalf("after narrowing: header = %v, want the four column labels", header)
+	}
+	if got, ok := narrow.highlightedBindingName(); !ok || got != "relay" {
+		t.Fatalf("after narrowing: highlight = %q, %v; want relay", got, ok)
+	}
+}
+
+// TestEscFromBindingDetailRebuildsBindingColumns: resizing while the
+// full-screen detail is open can cross the wide/narrow threshold; esc must
+// rebuild the rows for the width it returns to instead of reusing stale ones.
+func TestEscFromBindingDetailRebuildsBindingColumns(t *testing.T) {
+	tests := []struct {
+		name          string
+		fromWidth     int
+		toWidth       int
+		wantHeader    []string
+		wantCellCount int
+	}{
+		{
+			name:          "narrow to wide",
+			fromWidth:     80,
+			toWidth:       120,
+			wantHeader:    []string{"name"},
+			wantCellCount: 1,
+		},
+		{
+			name:          "wide to narrow",
+			fromWidth:     120,
+			toWidth:       80,
+			wantHeader:    []string{"name", "endpoint", "model", "more"},
+			wantCellCount: 4,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := bindingDetailModel(t, tt.fromWidth, 30)
+			next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+			detail := next.(model)
+			if detail.view != viewBindingDetail {
+				t.Fatalf("v: view = %v, want viewBindingDetail", detail.view)
+			}
+
+			next, _ = detail.Update(tea.WindowSizeMsg{Width: tt.toWidth, Height: 30})
+			detail = next.(model)
+			if detail.view != viewBindingDetail {
+				t.Fatalf("resize: view = %v, want viewBindingDetail", detail.view)
+			}
+
+			next, _ = detail.Update(tea.KeyMsg{Type: tea.KeyEsc})
+			back := next.(model)
+			if back.view != viewProfiles {
+				t.Fatalf("esc: view = %v, want viewProfiles", back.view)
+			}
+			if header := bindingHeaderCells(t, back); strings.Join(header, ",") != strings.Join(tt.wantHeader, ",") {
+				t.Fatalf("esc: header = %v, want %v", header, tt.wantHeader)
+			}
+			counts := bindingDataCellCounts(t, back)
+			if len(counts) != 1 || counts[0] != tt.wantCellCount {
+				t.Fatalf("esc: binding cells = %v, want one row with %d cells", counts, tt.wantCellCount)
+			}
+			if got, ok := back.highlightedBindingName(); !ok || got != "relay" {
+				t.Fatalf("esc: highlight = %q, %v; want relay", got, ok)
+			}
+		})
+	}
+}
+
+func TestHardWrapDetailValue(t *testing.T) {
+	if got := strings.Join(hardWrap("abcdef", 3), "|"); got != "abc|def" {
+		t.Errorf("hardWrap = %q, want abc|def", got)
+	}
+	if got := hardWrap("ab", 3); len(got) != 1 || got[0] != "ab" {
+		t.Errorf("hardWrap short value = %q, want one chunk", got)
+	}
+	if got := strings.Join(hardWrap("one two three", 7), "|"); got != "one two|three" {
+		t.Errorf("hardWrap at a space = %q, want one two|three", got)
+	}
+}
+
+// TestHardWrapWideRunes: CJK runes occupy two columns, so wrapping must count
+// display width rather than runes.
+func TestHardWrapWideRunes(t *testing.T) {
+	got := hardWrap("中文名字", 4)
+	if strings.Join(got, "|") != "中文|名字" {
+		t.Fatalf("hardWrap = %q, want 中文|名字", got)
+	}
+	for _, part := range got {
+		if w := lipgloss.Width(part); w > 4 {
+			t.Errorf("chunk %q width = %d, want <= 4", part, w)
+		}
+	}
+}
+
+// TestBindingDetailLongNameWraps: a 60-character binding name must wrap inside
+// the detail pane instead of widening the row past the terminal.
+func TestBindingDetailLongNameWraps(t *testing.T) {
+	name := strings.Repeat("x", 60)
+	m := bindingDetailModelNamed(t, 110, 30, name)
+	if !m.wideDetail() {
+		t.Fatal("width 110 should use the wide detail layout")
+	}
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) != m.height {
+		t.Fatalf("view has %d rows, want %d", len(lines), m.height)
+	}
+	for i, line := range lines {
+		if w := lipgloss.Width(line); w > m.width {
+			t.Fatalf("line %d width = %d, want <= %d: %q", i, w, m.width, line)
+		}
+	}
+	if strings.Contains(view, name) {
+		t.Fatal("60-character name should wrap, not render on one line")
+	}
+	width := m.detailPaneWidth() - detailGap
+	if width < 20 {
+		width = 20
+	}
+	parts := hardWrap(name, width)
+	if len(parts) < 2 {
+		t.Fatalf("name wrapped into %d chunks, want multiple", len(parts))
+	}
+	for _, part := range parts {
+		if !strings.Contains(view, part) {
+			t.Errorf("detail missing wrapped name chunk %q", part)
+		}
+	}
+}
+
+// TestBindingDetailInactiveNote: only tools that write a single endpoint need the
+// "switch to write" hint. Pi registers every visible binding's endpoint in its
+// provider list, so an inactive binding is already on disk.
+func TestBindingDetailInactiveNote(t *testing.T) {
+	for _, tc := range []struct {
+		tool       string
+		wantNote   bool
+		wantStatus string
+		reject     string
+	}{
+		{"claude", true, "inactive", "registered · not default"},
+		{"pi", false, "registered · not default", "inactive"},
+	} {
+		t.Run(tc.tool, func(t *testing.T) {
+			st := openTestCatalog(t, false)
+			p, err := st.PutProvider("https://gateway.example/v1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			cr, err := st.PutCredential(p.ID, "sk-test-123456")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.PutModel(p.ID, "test-model"); err != nil {
+				t.Fatal(err)
+			}
+			active, err := st.AddBinding(tc.tool, "active", cr.ID, "test-model", []string{"test-model"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.AddBinding(tc.tool, "other", cr.ID, "test-model", []string{"test-model"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.Activate(active.ID); err != nil {
+				t.Fatal(err)
+			}
+			m := newModel(st, "test")
+			m.tool = m.findTool(tc.tool)
+			m.width, m.height = 120, 30
+			m.view = viewProfiles
+			m.loadProfiles("other")
+			// The sentence wraps at the pane width, so check the stable prefix.
+			view := m.View()
+			if got := strings.Contains(view, "Not active"); got != tc.wantNote {
+				t.Errorf("%s: note shown = %v, want %v", tc.tool, got, tc.wantNote)
+			}
+			if !strings.Contains(view, tc.wantStatus) {
+				t.Errorf("%s: status missing %q", tc.tool, tc.wantStatus)
+			}
+			if strings.Contains(view, tc.reject) {
+				t.Errorf("%s: status should not contain %q", tc.tool, tc.reject)
+			}
+			if tc.tool == "pi" {
+				m.loadProfiles("active")
+				if view := m.View(); !strings.Contains(view, "✓ default · registered") {
+					t.Errorf("pi active status missing the aggregated default label")
+				}
 			}
 		})
 	}

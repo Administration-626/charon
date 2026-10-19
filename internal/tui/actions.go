@@ -60,6 +60,8 @@ func (m model) onEditKey() (tea.Model, tea.Cmd) {
 	m.wiz = wizard{name: it.value, origName: it.value, edit: true,
 		endpoint: p.BaseURL, key: cr.Key, model: slug, models: slugs, windows: windows, piAPI: b.PiAPI}
 	m.editField = ""
+	m.formBaselineSet = false
+	m.discardArmed = false
 	m.view = viewEditForm
 	m.clearStatus()
 	m.loadEditForm()
@@ -279,16 +281,26 @@ func (m model) onEsc() (tea.Model, tea.Cmd) {
 		m.loadProfiles(src)
 		return m, nil
 	case viewEditForm:
-		m.editField = ""
-		m.dupSource = ""
-		m.dupTool = ""
+		m.leaveEditForm("cancelled")
+		return m, nil
+	case viewBindingDetail:
+		// The terminal may have crossed the wide/narrow threshold while the
+		// detail was open; rebuild the list for the layout we return to.
+		name, _ := m.highlightedBindingName()
 		m.view = viewProfiles
-		m.setStatus(statusInfo, "cancelled")
-		m.loadProfiles("")
+		m.clearStatus()
+		m.loadProfiles(name)
 		return m, nil
 	case viewPickModel:
+		// A fetch started from the model list returns there; the form is the
+		// destination only when the picker was reached another way.
+		if m.fetchReturn == viewReviewModels {
+			m.view = viewReviewModels
+			m.clearStatus()
+			return m, nil
+		}
 		m.view = viewEditForm
-		m.loadEditFormAt(focusFetch)
+		m.loadEditFormAt(focusModels)
 		return m, nil
 	}
 	return m, nil
@@ -362,6 +374,8 @@ func (m model) onEnter() (tea.Model, tea.Cmd) {
 	case viewProfiles:
 		if it.value == addSentinel {
 			m.wiz = wizard{}
+			m.formBaselineSet = false
+			m.discardArmed = false
 			m.view = viewEditForm
 			m.loadEditForm()
 			return m, nil
@@ -507,11 +521,7 @@ func (m model) proceedFromModels() (tea.Model, tea.Cmd) {
 		m.fromForm = false
 		m.editField = fieldModel
 		m.view = viewEditForm
-		focusPos := focusManual
-		if m.reviewSource == viewPickModel {
-			focusPos = focusFetch
-		}
-		m.loadEditFormAt(focusPos)
+		m.loadEditFormAt(focusModels)
 		return m, nil
 	}
 	m.view = viewAddName
@@ -574,7 +584,7 @@ func (m model) updateReviewModels(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.fromForm = false
 			m.view = viewEditForm
 			m.clearStatus()
-			m.loadEditFormAt(focusManual)
+			m.loadEditFormAt(focusModels)
 			return m, nil
 		}
 		m.view = viewAddKey
@@ -607,6 +617,22 @@ func (m model) updateReviewModels(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case 'a', 'A':
 				m.clearStatus()
 				return m.startInlineModelAdd()
+			case 'f', 'F':
+				// Fetch from the endpoint without leaving the model list. The
+				// picker shows the result; confirming it lands back here.
+				endpoint := strings.TrimRight(strings.TrimSpace(m.wiz.endpoint), "/")
+				key := strings.TrimSpace(m.wiz.key)
+				switch {
+				case endpoint == "":
+					m.setStatus(statusErr, "set an endpoint first")
+					return m, nil
+				case key == "" && !strings.Contains(endpoint, "localhost") && !strings.Contains(endpoint, "127.0.0.1"):
+					m.setStatus(statusErr, "set an API key first")
+					return m, nil
+				}
+				m.wiz.endpoint, m.wiz.key = endpoint, key
+				cmd := m.beginFetch()
+				return m, cmd
 			case 'w', 'W', 'e', 'E':
 				if m.reviewCursor >= addRow {
 					return m, nil

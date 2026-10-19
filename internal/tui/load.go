@@ -287,12 +287,19 @@ func (m *model) loadProfiles(selectName string) {
 		target = active
 	}
 
+	wide := m.wideDetail()
 	if m.tool.ApplyAuth != nil {
 		items = append(items, item{title: "＋ Add new binding…", value: addSentinel})
 		if len(saved) > 0 {
 			items = append(items, item{value: sepSentinel})
 			// The column labels lead the table; the cursor skips them (see skipSeparators).
-			items = append(items, item{cells: bindingTableHeader, value: hdrSentinel})
+			header := bindingTableHeader
+			if wide {
+				// The detail pane beside the list already shows the endpoint, the
+				// default model, and every model, so the list keeps only the name.
+				header = []string{"name"}
+			}
+			items = append(items, item{cells: header, value: hdrSentinel})
 		}
 	}
 
@@ -306,8 +313,13 @@ func (m *model) loadProfiles(selectName string) {
 			// Kept in charon, left out of the tool's endpoint list.
 			title = "~ " + title
 		}
-		cells, drift := m.bindingRow(b.Name)
-		cells[0] = title
+		cells, drift := []string{title}, ""
+		if !wide {
+			// The narrow layout has no detail pane, so the table carries the
+			// endpoint/model columns and the on-disk drift comparison.
+			cells, drift = m.bindingRow(b.Name)
+			cells[0] = title
+		}
 		items = append(items, item{cells: cells, value: b.Name, active: isActive, hidden: b.Hidden})
 		if drift != "" {
 			// The comparison sits on its own inert row under the binding, so every
@@ -331,12 +343,10 @@ func (m *model) loadProfiles(selectName string) {
 	if m.tool.MultiEndpoint {
 		m.list.Title = m.tool.Title + " bindings (✓ active · ~ hidden)"
 	}
-	keys := []key.Binding{keySwitch, keyAdd, keyReapply, keyEdit, keyDuplicateRow}
-	if m.tool.MultiEndpoint {
-		// Only a tool that holds several endpoints has a list to hide from.
-		keys = append(keys, keyHide)
-	}
-	keys = append(keys, keyDelete, keyRefresh, keyBack)
+	// Keep the one-line legend short enough for an 80-column terminal: the
+	// less common actions (duplicate, hide, reapply, refresh) live in the ?
+	// sheet, while esc stays a universal key and needs no reminder here.
+	keys := []key.Binding{keySwitch, keyAdd, keyEdit, keyDetails, keyDelete}
 	m.setFooterKeys(keys...)
 	m.setDelegate(themedTableDelegate())
 	m.resize()

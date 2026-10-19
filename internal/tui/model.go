@@ -27,16 +27,17 @@ const (
 	viewModelWindow   // custom context-window entry
 	viewWindowPresets // typical context windows, with Custom… and Unknown
 	viewModelEffort
-	viewAddEndpoint  // wizard: enter endpoint
-	viewAddKey       // wizard: enter API key
-	viewFetching     // wizard: fetching models
-	viewPickModel    // wizard: choose a model
-	viewReviewModels // wizard: model list + per-row context editor
-	viewAddName      // wizard: name the binding
-	viewDupName      // clone: name the duplicate
-	viewCopyTool     // duplicate: choose the destination tool
-	viewEditForm     // edit: field picker (url/name/token/model)
-	viewEditField    // edit: single-field text input
+	viewAddEndpoint   // wizard: enter endpoint
+	viewAddKey        // wizard: enter API key
+	viewFetching      // wizard: fetching models
+	viewPickModel     // wizard: choose a model
+	viewReviewModels  // wizard: model list + per-row context editor
+	viewAddName       // wizard: name the binding
+	viewDupName       // clone: name the duplicate
+	viewCopyTool      // duplicate: choose the destination tool
+	viewEditForm      // edit: field picker (url/name/token/model)
+	viewEditField     // edit: single-field text input
+	viewBindingDetail // bindings: read-only detail, opened with v on narrow screens
 )
 
 // statusLevel colors the footer status line by severity.
@@ -46,6 +47,7 @@ const (
 	statusInfo statusLevel = iota // neutral / muted
 	statusOK                      // success (green)
 	statusErr                     // failure (red)
+	statusWarn                    // caution (yellow): unsaved edits, destructive prompts
 )
 
 const (
@@ -92,6 +94,7 @@ var (
 	keySwitch  = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "switch"))
 	keyReapply = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reapply"))
 	keyEdit    = key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit"))
+	keyDetails = key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "details"))
 	// keyDuplicateRow covers both former shortcuts: cloning within a tool and
 	// copying to another one are the same action with a different destination.
 	keyDuplicateRow = key.NewBinding(key.WithKeys("c", "x"), key.WithHelp("c", "duplicate"))
@@ -130,6 +133,11 @@ var (
 	keyCancelAdd     = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel"))
 	keyEditContext   = key.NewBinding(key.WithKeys("w", "e"), key.WithHelp("w/e", "context"))
 	keyDeleteRow     = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "remove"))
+	keySave          = key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "save"))
+	keyFetch         = key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "fetch models"))
+	keyHelp          = key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help"))
+	keyCloseHelp     = key.NewBinding(key.WithKeys("esc", "?"), key.WithHelp("esc/?", "close"))
+	keyForceQuit     = key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit"))
 )
 
 // exampleEndpoint is placeholder text; a real endpoint is never prefilled.
@@ -157,10 +165,15 @@ type model struct {
 
 	footerKeys []key.Binding // keys the current screen answers to, shown in the bottom legend
 
-	formInputs  []textinput.Model // native form inputs for Name, URL, Token, Model
-	formFocus   int               // focusName through focusCancel; non-Pi forms skip focusPiAPI
-	piAPIOpen   bool
-	piAPICursor int
+	formInputs      []textinput.Model // native form inputs for Name, URL, Token, Model
+	formFocus       int               // focusName through focusCancel; non-Pi forms skip focusPiAPI
+	formBaseline    formSnapshot      // values when the form opened; esc compares against them
+	formBaselineSet bool              // false until the first load captures the baseline
+	discardArmed    bool              // first esc on a dirty form armed discarding it
+	piAPIOpen       bool
+	piAPICursor     int
+	fetchReturn     view // screen to return to after fetching models
+	showHelp        bool // the ? shortcut sheet is open
 
 	spinner    spinner.Model
 	loadingMsg string      // playful line shown on the loading screen, picked per fetch
@@ -241,14 +254,20 @@ func (m *model) resize() {
 	if m.view == viewTools {
 		header = bannerHeight + 1
 	}
-	if m.view == viewProfiles && m.configSummary != "" {
+	// In the wide layout the on-disk summary lives in the detail pane, so the
+	// list does not reserve vertical space for it.
+	if m.view == viewProfiles && !m.wideDetail() && m.configSummary != "" {
 		header += lipgloss.Height(m.renderConfigSummary()) + 1
 	}
 	h := m.height - header - footerRows
 	if h < 3 {
 		h = 3
 	}
-	m.list.SetSize(m.width, h)
+	listWidth := m.width
+	if m.wideDetail() {
+		listWidth = m.detailListWidth()
+	}
+	m.list.SetSize(listWidth, h)
 	m.list.KeyMap.Quit.SetEnabled(false)
 }
 

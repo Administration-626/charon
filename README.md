@@ -171,7 +171,14 @@ go build -o charon ./cmd/charon   # or just build here
 ### Interactive menu
 
 Run charon with no arguments to open an arrow-key menu: pick a tool, then
-switch, add, edit, or delete bindings. Quit any time with Ctrl+C.
+switch, add, edit, or delete bindings. Quit any time with Ctrl+C. Press `?` on
+any screen for its keys. In a binding form, `s` saves and Esc backs out one
+level — it asks again before discarding unsaved edits. The model list's `f`
+fetches models from the endpoint, so online and hand-typed models live in one
+list. On wide terminals the binding page shows a read-only detail pane beside
+the list — full endpoint, masked key, every model with its context window, and
+the on-disk summary. Narrower terminals get the same view with `v`; `e` still
+opens the editor.
 
 ### CLI reference
 

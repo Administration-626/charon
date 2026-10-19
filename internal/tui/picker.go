@@ -70,8 +70,10 @@ func randomLoadingMsg() string {
 	return loadingMessages[rand.Intn(len(loadingMessages))]
 }
 
-// beginFetch shows the loading screen and starts the throttle, spinner, and model fetch.
+// beginFetch shows the loading screen and starts the throttle, spinner, and model
+// fetch. The screen it was called from is remembered so the result can return there.
 func (m *model) beginFetch() tea.Cmd {
+	m.fetchReturn = m.view
 	m.view = viewFetching
 	m.fetchStart = time.Now()
 	m.pending = nil
@@ -87,6 +89,11 @@ func (m *model) beginFetch() tea.Cmd {
 func (m model) applyFetched(msg fetchedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		m.setStatus(statusErr, msg.err.Error()+" — add the model ids instead")
+		if m.fetchReturn == viewReviewModels {
+			// Already editing the list: stay there instead of resetting the cursor.
+			m.view = viewReviewModels
+			return m, nil
+		}
 		return m.startManualModels()
 	}
 	m.view = viewPickModel
@@ -542,7 +549,14 @@ func (m model) finishPicker() (tea.Model, tea.Cmd) {
 	if m.wiz.model == "" || !m.modelSelected(m.wiz.model) {
 		m.wiz.model = m.wiz.models[0]
 	}
-	m.reviewSource = viewPickModel
+	// A fetch launched from the model list already came from the list: esc
+	// must not send the user back to the picker. The wizard keeps the picker
+	// as its esc destination.
+	if m.fetchReturn == viewReviewModels {
+		m.reviewSource = viewEditForm
+	} else {
+		m.reviewSource = viewPickModel
+	}
 	m.view = viewReviewModels
 	m.reviewCursor = 0
 	m.clearStatus()

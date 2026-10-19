@@ -27,8 +27,7 @@ const (
 	focusURL
 	focusToken
 	focusPiAPI
-	focusFetch  // [ Fetch & Pick Online Models ]
-	focusManual // [ Add / Edit Model List ]
+	focusModels // [ Models… ] — opens the list; f fetches inside it
 	focusSave
 	focusCancel
 	focusCount // number of focusable positions
@@ -121,8 +120,14 @@ func newFormInput(placeholder, value string, isPassword bool) textinput.Model {
 	return ti
 }
 
-// loadEditForm populates the native multi-input form.
+// loadEditForm populates the native multi-input form. The first load after the form
+// opens captures the baseline the dirty guard compares against; returning from a
+// sub-screen reloads the values without moving that baseline.
 func (m *model) loadEditForm() {
+	if !m.formBaselineSet {
+		m.formBaseline = captureForm(m.wiz)
+		m.formBaselineSet = true
+	}
 	m.formFocus = focusName
 	m.piAPIOpen = false
 	if m.tool.Name == "pi" && m.wiz.piAPI == "" {
@@ -148,13 +153,28 @@ func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.piAPIOpen {
 		return m.updatePiAPI(msg)
 	}
-	switch msg.String() {
+	key := msg.String()
+	if key != "esc" {
+		// Any other key disarms the discard prompt: esc has to be pressed twice
+		// in a row, so a stray esc before continuing to edit cannot lose work.
+		m.discardArmed = false
+	}
+	switch key {
 	case "esc":
-		m.dupSource = ""
-		m.dupTool = ""
-		m.view = viewProfiles
-		m.setStatus(statusInfo, "cancelled")
-		m.loadProfiles("")
+		if m.discardArmed || !m.formDirty() {
+			m.leaveEditForm("cancelled")
+			return m, nil
+		}
+		m.discardArmed = true
+		if m.formFocus < formInputCount {
+			// Leave the field without losing what was typed; the next esc
+			// discards the whole form.
+			m.formFocus = focusModels
+			m.applyFormFocus()
+			m.setStatus(statusWarn, "edits kept — s saves, esc again discards")
+		} else {
+			m.setStatus(statusWarn, "unsaved changes — s saves, esc again discards")
+		}
 		return m, nil
 	case "up", "shift+tab":
 		m.moveFormFocus(-1)
@@ -162,6 +182,10 @@ func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "down", "tab":
 		m.moveFormFocus(1)
 		return m.syncFormFocus()
+	case "s":
+		if m.formFocus >= formInputCount {
+			return m.submitForm()
+		}
 	case "enter":
 		if m.formFocus == focusPiAPI && m.tool.Name == "pi" {
 			m.piAPIOpen = true
@@ -175,29 +199,9 @@ func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clearStatus()
 			return m, nil
 		}
-		if m.formFocus == focusFetch {
-			endpoint := strings.TrimRight(strings.TrimSpace(m.formInputs[focusURL].Value()), "/")
-			key := strings.TrimSpace(m.formInputs[focusToken].Value())
-			if endpoint == "" && key == "" {
-				m.setStatus(statusErr, "API URL & Key required")
-				return m, nil
-			}
-			if endpoint == "" {
-				m.setStatus(statusErr, "API URL required")
-				return m, nil
-			}
-			if key == "" && !strings.Contains(endpoint, "localhost") && !strings.Contains(endpoint, "127.0.0.1") {
-				m.setStatus(statusErr, "API Key required")
-				return m, nil
-			}
-			m.wiz.endpoint = endpoint
-			m.wiz.key = key
-			m.fromForm = true
-			cmd := m.beginFetch()
-			return m, cmd
-		}
-		if m.formFocus == focusManual {
-			// No fetch needed: endpoints without /v1/models still need their ids registered.
+		if m.formFocus == focusModels {
+			// One entry point for models: the list opens immediately and f
+			// fetches from the endpoint inside it.
 			m.fromForm = true
 			m.clearStatus()
 			return m.startManualModels()
@@ -206,11 +210,7 @@ func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.submitForm()
 		}
 		if m.formFocus == focusCancel {
-			m.dupSource = ""
-			m.dupTool = ""
-			m.view = viewProfiles
-			m.setStatus(statusInfo, "cancelled")
-			m.loadProfiles("")
+			m.leaveEditForm("cancelled")
 			return m, nil
 		}
 		m.moveFormFocus(1)
@@ -226,6 +226,78 @@ func (m model) updateEditForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+// leaveEditForm closes the form and returns to the binding list, clearing the
+// dirty-guard state so the next open starts clean.
+func (m *model) leaveEditForm(status string) {
+	m.discardArmed = false
+	m.formBaselineSet = false
+	m.editField = ""
+	m.dupSource = ""
+	m.dupTool = ""
+	m.view = viewProfiles
+	m.setStatus(statusInfo, status)
+	m.loadProfiles("")
+}
+
+// formSnapshot is the form's own state when it was opened. Model maps are copied
+// because the wizard keeps mutating them while the picker and list are open.
+type formSnapshot struct {
+	name, endpoint, key, piAPI, model string
+	models                            []string
+	windows                           map[string]int
+	manualWindows                     map[string]bool
+}
+
+func captureForm(w wizard) formSnapshot {
+	s := formSnapshot{
+		name:     w.name,
+		endpoint: w.endpoint,
+		key:      w.key,
+		piAPI:    w.piAPI,
+		model:    w.model,
+		models:   append([]string(nil), w.models...),
+	}
+	if len(w.windows) > 0 {
+		s.windows = make(map[string]int, len(w.windows))
+		for k, v := range w.windows {
+			s.windows[k] = v
+		}
+	}
+	if len(w.manualWindows) > 0 {
+		s.manualWindows = make(map[string]bool, len(w.manualWindows))
+		for k, v := range w.manualWindows {
+			s.manualWindows[k] = v
+		}
+	}
+	return s
+}
+
+// formDirty reports whether the form would write something different from what
+// it opened with. Only windows of currently selected models count: a fetch seeds
+// windows for every offered model, and those alone must not look like an edit.
+func (m model) formDirty() bool {
+	if !m.formBaselineSet {
+		return false
+	}
+	s := m.formBaseline
+	if m.wiz.name != s.name || m.wiz.endpoint != s.endpoint || m.wiz.key != s.key ||
+		m.wiz.piAPI != s.piAPI || m.wiz.model != s.model {
+		return true
+	}
+	if len(m.wiz.models) != len(s.models) {
+		return true
+	}
+	for i, id := range m.wiz.models {
+		if id != s.models[i] {
+			return true
+		}
+		if m.wiz.windows[id] != s.windows[id] || m.wiz.manualWindows[id] != s.manualWindows[id] {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *model) moveFormFocus(delta int) {
@@ -270,6 +342,7 @@ func (m *model) applyFormFocus() {
 }
 
 func (m model) submitForm() (tea.Model, tea.Cmd) {
+	m.discardArmed = false
 	name := strings.TrimSpace(m.formInputs[focusName].Value())
 	if name == "" {
 		m.setStatus(statusErr, "Name is required")
@@ -723,6 +796,8 @@ func (m model) finishAdd(name string) (tea.Model, tea.Cmd) {
 	}
 
 	m.setStatus(statusOK, fmt.Sprintf("%s %s (%s · %s)", verb, name, m.wiz.endpoint, describeModels(m.wiz.model, slugs)))
+	m.formBaselineSet = false
+	m.discardArmed = false
 	m.view = viewProfiles
 	m.loadProfiles(name)
 	return m, nil

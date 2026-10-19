@@ -69,7 +69,7 @@ func TestPiEndpointDropdown(t *testing.T) {
 		if !strings.Contains(m.status, option.label) || !strings.Contains(m.status, "Save") {
 			t.Fatal("selection must confirm the choice without claiming the binding is saved")
 		}
-		m.formFocus = focusFetch
+		m.formFocus = focusModels
 		m.applyFormFocus()
 		if view := m.View(); !strings.Contains(view, option.label) || strings.Contains(view, "[✓]") {
 			t.Fatal("collapsed form must show the chosen type after focus moves away")
@@ -105,7 +105,7 @@ func TestEndpointDropdownOnlyAppearsForPi(t *testing.T) {
 			m.tool, m.view = tool, viewEditForm
 			m.loadEditFormAt(focusToken)
 			m.moveFormFocus(1)
-			want := focusFetch
+			want := focusModels
 			if tool.Name == "pi" {
 				want = focusPiAPI
 			}
