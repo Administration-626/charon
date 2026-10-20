@@ -1482,7 +1482,7 @@ func TestInlineCtxEditCancelAndNoOp(t *testing.T) {
 	}
 
 	m = newCtxModel()
-	next, _ = m.updateReviewModels(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	next, _ = m.updateReviewModels(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}})
 	editing = next.(model)
 	next, _ = editing.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
 	if got := next.(model); got.wiz.windows["m"] != 200_000 || got.wiz.manualWindows["m"] || got.editingCtx {
@@ -1496,6 +1496,133 @@ func TestInlineCtxEditCancelAndNoOp(t *testing.T) {
 	next, _ = editing.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
 	if got := next.(model); !got.editingCtx || got.statusLvl != statusErr {
 		t.Fatalf("invalid input: editing = %v status = %q", got.editingCtx, got.status)
+	}
+}
+
+// TestInlineModelEditDoesNotLeaveTheList pins direct row editing ("e"): the id
+// is focused in place, enter saves and chains straight into the ctx field, and the
+// window, its manual flag, and the default model all follow the new id.
+func TestInlineModelEditDoesNotLeaveTheList(t *testing.T) {
+	m := pickerModel(t, nil)
+	m.wiz = wizard{
+		endpoint: "https://relay.example/v1", key: "sk-x",
+		models: []string{"glm-5.3", "kimi-k2"}, model: "glm-5.3",
+		windows:       map[string]int{"glm-5.3": 600_000},
+		manualWindows: map[string]bool{"glm-5.3": true},
+	}
+	m.view = viewReviewModels
+	m.reviewCursor = 0
+
+	next, _ := m.updateReviewModels(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	editing := next.(model)
+	if editing.view != viewReviewModels || !editing.editingID {
+		t.Fatalf("e: view = %v editing = %v, want the inline id field", editing.view, editing.editingID)
+	}
+	if editing.input.Value() != "glm-5.3" {
+		t.Fatalf("input = %q, want the current id prefilled", editing.input.Value())
+	}
+
+	editing.input.SetValue("glm-5.4")
+	next, _ = editing.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
+	ctx := next.(model)
+	if ctx.view != viewReviewModels || ctx.editingID {
+		t.Fatalf("enter: view = %v editing id = %v, want the id committed", ctx.view, ctx.editingID)
+	}
+	if strings.Join(ctx.wiz.models, ",") != "glm-5.4,kimi-k2" {
+		t.Fatalf("models = %v, want the row renamed in place", ctx.wiz.models)
+	}
+	if ctx.wiz.model != "glm-5.4" {
+		t.Errorf("default model = %q, want it to follow the rename", ctx.wiz.model)
+	}
+	if ctx.wiz.windows["glm-5.4"] != 600_000 || ctx.wiz.windows["glm-5.3"] != 0 {
+		t.Errorf("windows = %v, want the window carried to the new id", ctx.wiz.windows)
+	}
+	if !ctx.wiz.manualWindows["glm-5.4"] || ctx.wiz.manualWindows["glm-5.3"] {
+		t.Errorf("manualWindows = %v, want the flag carried to the new id", ctx.wiz.manualWindows)
+	}
+	// The edit chains into the ctx field for the new id, prefilled with its window.
+	if !ctx.editingCtx || ctx.editTarget != "glm-5.4" || ctx.input.Value() != "600000" {
+		t.Fatalf("after id commit: editingCtx = %v target = %q input = %q, want the ctx field for glm-5.4",
+			ctx.editingCtx, ctx.editTarget, ctx.input.Value())
+	}
+
+	next, _ = ctx.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := next.(model); got.editingCtx || got.view != viewReviewModels {
+		t.Fatalf("ctx enter: editingCtx = %v view = %v, want the list", got.editingCtx, got.view)
+	}
+}
+
+// TestInlineModelEditCancelAndGuards covers the quiet and refused paths: esc keeps
+// the old id, an unchanged id still chains into the ctx field, and a duplicate id
+// leaves the id field open with an error.
+func TestInlineModelEditCancelAndGuards(t *testing.T) {
+	newEditModel := func() model {
+		m := *pickerModel(t, nil)
+		m.wiz = wizard{endpoint: "https://relay.example/v1", key: "sk-x",
+			models: []string{"m", "other"}, model: "m", windows: map[string]int{"m": 200_000}}
+		m.view = viewReviewModels
+		m.reviewCursor = 0
+		return m
+	}
+
+	m := newEditModel()
+	next, _ := m.updateReviewModels(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	editing := next.(model)
+	editing.input.SetValue("renamed")
+	next, _ = editing.updateReviewModels(tea.KeyMsg{Type: tea.KeyEsc})
+	if got := next.(model); strings.Join(got.wiz.models, ",") != "m,other" || got.editingID {
+		t.Fatalf("esc changed the list: %v editing=%v", got.wiz.models, got.editingID)
+	}
+
+	m = newEditModel()
+	next, _ = m.updateReviewModels(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	editing = next.(model)
+	next, _ = editing.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := next.(model); strings.Join(got.wiz.models, ",") != "m,other" || got.editingID || !got.editingCtx || got.editTarget != "m" {
+		t.Fatalf("unchanged id: models = %v editing=%v ctx=%v target=%q, want the ctx field for the same id",
+			got.wiz.models, got.editingID, got.editingCtx, got.editTarget)
+	}
+
+	m = newEditModel()
+	next, _ = m.updateReviewModels(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	editing = next.(model)
+	editing.input.SetValue("other")
+	next, _ = editing.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := next.(model); !got.editingID || got.statusLvl != statusErr {
+		t.Fatalf("duplicate id: editing = %v status = %q, want the field open with an error", got.editingID, got.status)
+	}
+}
+
+// TestDeleteLastModelEmptiesTheList pins that removing the only row is allowed:
+// the list lands on its add row, enter starts the add field (not an error), and
+// the next id can be typed straight in.
+func TestDeleteLastModelEmptiesTheList(t *testing.T) {
+	m := pickerModel(t, nil)
+	m.wiz = wizard{endpoint: "https://relay.example/v1", key: "sk-x",
+		models: []string{"glm-5.3"}, model: "glm-5.3", windows: map[string]int{"glm-5.3": 600_000}}
+	m.view = viewReviewModels
+	m.reviewCursor = 0
+
+	next, _ := m.updateReviewModels(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	got := next.(model)
+	if len(got.wiz.models) != 0 {
+		t.Fatalf("models = %v, want the last row removable", got.wiz.models)
+	}
+	if got.reviewCursor != 0 {
+		t.Errorf("cursor = %d, want the add row", got.reviewCursor)
+	}
+	if got.statusLvl != statusOK {
+		t.Errorf("status = %q (%v), want an ok removal", got.status, got.statusLvl)
+	}
+
+	next, _ = got.updateReviewModels(tea.KeyMsg{Type: tea.KeyEnter})
+	if after := next.(model); after.view != viewReviewModels || !after.addingModel {
+		t.Fatalf("enter on the emptied list: view = %v adding = %v, want the inline add field", after.view, after.addingModel)
+	}
+
+	refilled := addModelInline(t, next.(model), "kimi-k2")
+	if strings.Join(refilled.wiz.models, ",") != "kimi-k2" || refilled.wiz.model != "kimi-k2" {
+		t.Fatalf("models = %v default = %q, want the new id registered as default", refilled.wiz.models, refilled.wiz.model)
 	}
 }
 

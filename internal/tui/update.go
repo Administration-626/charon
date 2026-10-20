@@ -72,9 +72,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil // any key dismisses the shortcut sheet
 		}
 		// ? opens the shortcut sheet wherever the key is not typing. Text fields,
-		// inline add/ctx fields, the protocol dropdown, and an active search keep
+		// inline add/id/ctx fields, the protocol dropdown, and an active search keep
 		// their letters.
-		if msg.String() == "?" && !m.showConfirm && !m.piAPIOpen && !m.addingModel && !m.editingCtx && !m.inputView() {
+		if msg.String() == "?" && !m.showConfirm && !m.piAPIOpen && !m.addingModel && !m.editingCtx && !m.editingID && !m.inputView() {
 			searching := (m.view == viewModels || m.view == viewPickModel) && m.modelFilter != ""
 			if !searching {
 				m.showHelp = true

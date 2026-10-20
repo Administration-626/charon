@@ -104,7 +104,7 @@ func (m model) stepHelp() []key.Binding {
 	case viewDupName:
 		return []key.Binding{keyDuplicate, keyCancel}
 	case viewReviewModels:
-		return []key.Binding{keyConfirmReview, keyAdd, keyFetch, keyEditContext, keyDeleteRow, keyMove, keyEsc}
+		return []key.Binding{keyConfirmReview, keyAdd, keyFetch, keyEditRow, keyEditContext, keyDeleteRow, keyMove, keyEsc}
 	}
 	return []key.Binding{keyContinue, keyEsc}
 }
@@ -120,10 +120,10 @@ func (m model) helpBindings() []key.Binding {
 		switch {
 		case m.addingModel:
 			return []key.Binding{keyAddModel, keyCancelAdd}
-		case m.editingCtx:
+		case m.editingCtx, m.editingID:
 			return []key.Binding{keySaveAction, keyCancel}
 		}
-		keys := []key.Binding{keyConfirmReview, keyAdd, keyFetch, keyEditContext, keyDeleteRow, keyMove}
+		keys := []key.Binding{keyConfirmReview, keyAdd, keyFetch, keyEditRow, keyEditContext, keyDeleteRow, keyMove}
 		if m.reviewCursor >= len(m.wiz.models) {
 			keys[0] = keyAddModel
 		}
@@ -770,20 +770,27 @@ func formatTokens(n int) string {
 	return strings.Join(parts, ",")
 }
 
+// reviewSlugColWidth is the id column's width in the model list: the longest id
+// capped at 40, floored at 18. The inline rename field uses it too, so the input
+// lines up with the id it replaces.
+func (m model) reviewSlugColWidth() int {
+	w := 18
+	for _, s := range m.wiz.models {
+		if len(s) > w {
+			w = len(s)
+		}
+	}
+	if w > 40 {
+		w = 40
+	}
+	return w
+}
+
 func (m model) renderReviewTable() string {
 	header := m.wizardHeader()
 	sub := promptStyle.Render("Models and context windows:") + "\n\n"
 
-	maxSlugLen := 18
-	for _, s := range m.wiz.models {
-		if len(s) > maxSlugLen {
-			maxSlugLen = len(s)
-		}
-	}
-	if maxSlugLen > 40 {
-		maxSlugLen = 40
-	}
-
+	maxSlugLen := m.reviewSlugColWidth()
 	windowSources := m.modelWindowSources()
 
 	hdrRow := fmt.Sprintf("  %-3s %-*s  %s", "#", maxSlugLen, "Model ID", "ctx")
@@ -791,7 +798,7 @@ func (m model) renderReviewTable() string {
 	lines := []string{hintStyle.Render(hdrRow), hintStyle.Render(divider)}
 
 	if len(m.wiz.models) == 0 {
-		lines = append(lines, hintStyle.Render("No models yet — add the first one."))
+		lines = append(lines, hintStyle.Render("No models yet — add the first one. a or enter types an id."))
 	}
 	for i, slug := range m.wiz.models {
 		win := m.wiz.windows[slug]
@@ -817,6 +824,8 @@ func (m model) renderReviewTable() string {
 		switch {
 		case i == m.reviewCursor && m.editingCtx:
 			lines = append(lines, fmt.Sprintf("%s%-3s %-*s  %s", cursorMark, numStr, maxSlugLen, displaySlug, m.input.View()))
+		case i == m.reviewCursor && m.editingID:
+			lines = append(lines, fmt.Sprintf("%s%-3s %s  %-18s", cursorMark, numStr, m.input.View(), ctxText))
 		case i == m.reviewCursor:
 			lines = append(lines, promptStyle.Render(row))
 		default:
@@ -833,6 +842,9 @@ func (m model) renderReviewTable() string {
 		lines = append(lines, hintStyle.Render(fmt.Sprintf("ctx for %s — current %s (%s)", m.editTarget,
 			formatTokens(m.wiz.windows[m.editTarget]), windowSourceLabel(m.editTarget, windowSources[m.editTarget]))))
 		lines = append(lines, hintStyle.Render("presets 32K/64K/128K/200K/256K/400K/500K/1M/2M · enter saves · esc cancels · empty clears"))
+	case m.editingID:
+		lines = append(lines, hintStyle.Render(fmt.Sprintf("edit %s — the context window follows the new id", m.editTarget)))
+		lines = append(lines, hintStyle.Render("enter saves the id and continues to ctx · esc cancels"))
 	default:
 		addRow := "  ＋ Add model…"
 		if m.reviewCursor >= len(m.wiz.models) {
@@ -841,7 +853,7 @@ func (m model) renderReviewTable() string {
 			lines = append(lines, hintStyle.Render("enter types a new model id · f fetches online"))
 		} else {
 			lines = append(lines, hintStyle.Render(addRow))
-			lines = append(lines, hintStyle.Render("enter confirms · a adds a model · f fetches · w/e edits context · d removes"),
+			lines = append(lines, hintStyle.Render("enter confirms · a adds a model · f fetches · e edits model and ctx · w edits ctx only · d removes"),
 				hintStyle.Render("Context windows are derived when a model is added."))
 		}
 	}
@@ -850,10 +862,10 @@ func (m model) renderReviewTable() string {
 	if m.addingModel {
 		return m.withFooter(body, keyAddModel, keyCancelAdd)
 	}
-	if m.editingCtx {
+	if m.editingCtx || m.editingID {
 		return m.withFooter(body, keySaveAction, keyCancel)
 	}
-	keys := []key.Binding{keyConfirmReview, keyAdd, keyFetch, keyEditContext, keyDeleteRow, keyMove, keyEsc}
+	keys := []key.Binding{keyConfirmReview, keyAdd, keyFetch, keyEditRow, keyEditContext, keyDeleteRow, keyMove, keyEsc}
 	if m.reviewCursor >= len(m.wiz.models) {
 		keys[0] = keyAddModel
 	}

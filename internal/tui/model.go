@@ -131,7 +131,8 @@ var (
 	keyConfirmReview = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm"))
 	keyAddModel      = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "add model"))
 	keyCancelAdd     = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel"))
-	keyEditContext   = key.NewBinding(key.WithKeys("w", "e"), key.WithHelp("w/e", "context"))
+	keyEditContext   = key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "context"))
+	keyEditRow       = key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "model"))
 	keyDeleteRow     = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "remove"))
 	keySave          = key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "save"))
 	keyFetch         = key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "fetch models"))
@@ -189,6 +190,7 @@ type model struct {
 	reviewCursor       int           // highlighted row in viewReviewModels
 	addingModel        bool          // the model list's inline add field has focus
 	editingCtx         bool          // the model list's inline ctx field has focus
+	editingID          bool          // the model list's inline id field has focus
 	reviewSource       view          // where the model list was opened from (viewEditForm or viewPickModel)
 	status             string
 	statusLvl          statusLevel

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charon/internal/catalog"
+	"charon/internal/models"
 	"charon/internal/secret"
 	"charon/internal/tools"
 
@@ -470,6 +471,83 @@ func (m model) commitInlineCtx() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// startInlineModelEdit opens the highlighted row's id field ("e"). The id is
+// edited in place; committing it chains straight into the ctx field, so one key
+// covers the whole row: id first, context window second.
+func (m model) startInlineModelEdit() (tea.Model, tea.Cmd) {
+	if m.reviewCursor >= len(m.wiz.models) {
+		return m, nil
+	}
+	slug := m.wiz.models[m.reviewCursor]
+	m.editTarget = slug
+	m.editingID = true
+	m.clearStatus()
+	m.startInput("model id", false)
+	m.input.Prompt = ""
+	m.input.Width = m.reviewSlugColWidth()
+	m.input.SetValue(slug)
+	m.input.CursorEnd()
+	return m, textinput.Blink
+}
+
+// commitInlineIDEdit replaces the row's model id and chains into the ctx field.
+// The context window and its manual flag follow the new name, so a rename never
+// loses the curated window; the default model follows too when the renamed row
+// held it. Keeping the id already in place is a no-op, and either way the ctx
+// field opens next — "e" edits the whole model, ctx included.
+func (m model) commitInlineIDEdit() (tea.Model, tea.Cmd) {
+	old := m.editTarget
+	ids := parseModelIDs(m.input.Value())
+	if len(ids) != 1 {
+		m.setStatus(statusErr, "enter exactly one model id")
+		return m, textinput.Blink
+	}
+	newID := ids[0]
+	renamed := newID != old
+	if renamed {
+		if containsID(m.wiz.models, newID) {
+			m.setStatus(statusErr, "already listed: "+newID)
+			return m, textinput.Blink
+		}
+		idx := indexOfID(m.wiz.models, old)
+		if idx < 0 { // the row was deleted under the field; just close it
+			m.editingID = false
+			m.input.Blur()
+			m.editTarget = ""
+			return m, nil
+		}
+		m.wiz.models[idx] = newID
+		if m.wiz.windows == nil {
+			m.wiz.windows = map[string]int{}
+		}
+		if w, ok := m.wiz.windows[old]; ok {
+			m.wiz.windows[newID] = w
+		} else {
+			m.wiz.windows[newID] = models.DefaultContextWindow(newID)
+		}
+		delete(m.wiz.windows, old)
+		if m.wiz.manualWindows != nil {
+			if m.wiz.manualWindows[old] {
+				m.wiz.manualWindows[newID] = true
+			}
+			delete(m.wiz.manualWindows, old)
+		}
+		if m.wiz.model == old {
+			m.wiz.model = newID
+		}
+	}
+	m.editingID = false
+	m.input.Blur()
+	next, cmd := m.startInlineCtxEdit() // same row, possibly its new id
+	if renamed {
+		if mm, ok := next.(model); ok {
+			mm.setStatus(statusOK, "renamed "+old+" → "+newID+" · set ctx")
+			next = mm
+		}
+	}
+	return next, cmd
+}
+
 // startInlineModelAdd focuses the model list's add row. The field is rendered in
 // place, so adding an id never leaves the list.
 func (m model) startInlineModelAdd() (tea.Model, tea.Cmd) {
@@ -559,6 +637,21 @@ func (m model) updateReviewModels(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input, cmd = m.input.Update(msg)
 		return m, cmd
 	}
+	if m.editingID {
+		switch msg.Type {
+		case tea.KeyEsc:
+			m.editingID = false
+			m.input.Blur()
+			m.editTarget = ""
+			m.clearStatus()
+			return m, nil
+		case tea.KeyEnter:
+			return m.commitInlineIDEdit()
+		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+	}
 	addRow := len(m.wiz.models) // the trailing "Add model" row sits past the data
 	switch msg.Type {
 	case tea.KeyCtrlC:
@@ -633,17 +726,18 @@ func (m model) updateReviewModels(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.wiz.endpoint, m.wiz.key = endpoint, key
 				cmd := m.beginFetch()
 				return m, cmd
-			case 'w', 'W', 'e', 'E':
+			case 'w', 'W':
 				if m.reviewCursor >= addRow {
 					return m, nil
 				}
 				return m.startInlineCtxEdit()
-			case 'd', 'D':
+			case 'e', 'E':
 				if m.reviewCursor >= addRow {
 					return m, nil
 				}
-				if len(m.wiz.models) <= 1 {
-					m.setStatus(statusErr, "at least one model is required")
+				return m.startInlineModelEdit()
+			case 'd', 'D':
+				if m.reviewCursor >= addRow {
 					return m, nil
 				}
 				removed := m.wiz.models[m.reviewCursor]
@@ -654,10 +748,26 @@ func (m model) updateReviewModels(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 				}
 				m.wiz.models = kept
-				if m.reviewCursor >= len(m.wiz.models) {
-					m.reviewCursor = len(m.wiz.models) - 1
+				if m.wiz.model == removed {
+					switch {
+					case len(kept) > 0:
+						m.wiz.model = kept[0]
+					default:
+						m.wiz.model = "" // the next added id becomes the default
+					}
 				}
-				m.setStatus(statusOK, "removed "+removed)
+				if m.reviewCursor >= len(m.wiz.models) {
+					if len(m.wiz.models) == 0 {
+						m.reviewCursor = 0 // the add row is the only one left
+					} else {
+						m.reviewCursor = len(m.wiz.models) - 1
+					}
+				}
+				status := "removed " + removed
+				if len(m.wiz.models) == 0 {
+					status += " — a adds a model"
+				}
+				m.setStatus(statusOK, status)
 				return m, nil
 			}
 		}
