@@ -7,7 +7,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 # Install location (no sudo needed by default).
 PREFIX  ?= $(HOME)/.local
 
-.PHONY: build install uninstall test cover lint fmt tidy clean run
+.PHONY: build install uninstall test cover lint fmt tidy clean run vuln hooks
 
 build: ## Build ./charon for the current platform
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) $(PKG)
@@ -31,6 +31,12 @@ cover: ## Run tests with a coverage summary
 
 lint: ## Run golangci-lint (install: https://golangci-lint.run)
 	golangci-lint run
+
+vuln: ## Run govulncheck (install: go install golang.org/x/vuln/cmd/govulncheck@latest)
+	govulncheck ./...
+
+hooks: ## Use the repo's git hooks (pre-push runs test, lint and vuln)
+	git config core.hooksPath .githooks
 
 fmt: ## Format all Go files
 	gofmt -w .

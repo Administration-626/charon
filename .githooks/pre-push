@@ -1,0 +1,20 @@
+#!/bin/sh
+# Pre-push gate: the same checks as `make test`, plus optional static and
+# vulnerability scans. Enable with `make hooks`.
+set -eu
+
+cd "$(git rev-parse --show-toplevel)"
+
+make test
+
+if command -v golangci-lint >/dev/null 2>&1; then
+	make lint
+else
+	echo "pre-push: golangci-lint not installed, skipping lint" >&2
+fi
+
+if command -v govulncheck >/dev/null 2>&1; then
+	make vuln
+else
+	echo "pre-push: govulncheck not installed, skipping vuln scan" >&2
+fi

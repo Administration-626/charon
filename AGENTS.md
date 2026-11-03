@@ -200,6 +200,11 @@ when the destination also holds several endpoints. A tool without
   make real API calls in tests.
 - The TUI has table-driven tests for pure helpers and rendered views; keep
   new logic in testable helpers, and avoid brittle end-to-end terminal tests.
+- `internal/edit` has fuzz targets (`go test ./internal/edit -fuzz=FuzzPatchJSON`)
+  and a fixture corpus in `testdata/` compared against golden files. Regenerate
+  goldens with `-update` only after reading the diff.
+- `make vuln` runs `govulncheck`; `make hooks` points git at `.githooks/pre-push`
+  (test + lint + vuln, skipping tools that are not installed).
 
 ## Out of scope / do not do
 
