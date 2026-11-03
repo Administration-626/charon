@@ -1,0 +1,16 @@
+# Codex config written by hand, kept as a realistic fixture.
+model = "gpt-5"
+model_provider = "openai"
+approval_policy = "on-request"
+model_reasoning_effort = "high"   # keep this
+
+[model_providers.openai]
+name = "OpenAI"
+base_url = "https://api.openai.com/v1"
+
+[model_providers.charon-old]
+name = "old gateway"
+base_url = "https://old.example.com/v1"
+
+[profiles.fast]
+model = "gpt-5-mini"

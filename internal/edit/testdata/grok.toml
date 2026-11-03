@@ -1,0 +1,11 @@
+# grok config
+[model.charon-old]
+name = "old"
+base_url = "https://old.example.com/v1"
+api_key = "sk-old"
+
+[model.mine]
+name = "mine"
+
+[models]
+default = "charon-old"

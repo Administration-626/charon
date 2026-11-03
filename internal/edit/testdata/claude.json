@@ -1,0 +1,12 @@
+{
+  "model": "claude-sonnet-4-5",
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://old.example.com",
+    "ANTHROPIC_API_KEY": "sk-ant-old",
+    "ANTHROPIC_AUTH_TOKEN": "stale-token",
+    "KEEP_ME": "1"
+  },
+  "permissions": {
+    "allow": ["Bash(ls:*)"]
+  }
+}

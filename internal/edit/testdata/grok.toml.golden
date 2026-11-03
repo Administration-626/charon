@@ -1,0 +1,15 @@
+# grok config
+
+[model.mine]
+name = "mine"
+
+[models]
+default = "charon-work"
+
+[model.charon-work]
+name = "work"
+base_url = "https://work.example.com/v1"
+api_key = "sk-new"
+
+[model."charon-a.b"]
+name = "dotted"

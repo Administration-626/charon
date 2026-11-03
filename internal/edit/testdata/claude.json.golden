@@ -1,0 +1,11 @@
+{
+  "model": "claude-opus-4-1",
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://gw.example.com",
+    "ANTHROPIC_API_KEY": "sk-new",
+    "KEEP_ME": "1"
+  },
+  "permissions": {
+    "allow": ["Bash(ls:*)"]
+  }
+}

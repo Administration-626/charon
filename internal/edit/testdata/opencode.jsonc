@@ -1,0 +1,22 @@
+{
+  // shared config, comments must survive a switch
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "charon": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://old.example.com/v1",
+        "apiKey": "sk-old"
+      },
+      "models": {
+        "old-model": {}
+      }
+    },
+    "mine": {
+      "options": {
+        "baseURL": "https://mine.example.com"
+      }
+    }
+  },
+  "theme": "dark"
+}

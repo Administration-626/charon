@@ -1,0 +1,21 @@
+# Codex config written by hand, kept as a realistic fixture.
+model = "gpt-5.1"
+model_provider = "charon"
+approval_policy = "on-request"
+model_reasoning_effort = "medium"   # keep this
+
+[model_providers.openai]
+name = "OpenAI"
+base_url = "https://api.openai.com/v1"
+
+[profiles.fast]
+model = "gpt-5-mini"
+
+[model_providers.charon]
+name = "charon"
+base_url = "https://gw.example.com/v1"
+experimental_bearer_token = "sk-new"
+
+[model_providers.charon-work]
+name = "work"
+base_url = "https://work.example.com/v1"
