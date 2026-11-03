@@ -475,10 +475,11 @@ func setJSONAfterBytes(raw []byte, anchor, keyPath string, value any) ([]byte, e
 	comma := at < len(stripped) && stripped[at] == ','
 	if !pretty {
 		v, _ := json.Marshal(value)
+		member := string(k) + ":" + string(v)
 		if comma {
-			return splice(raw, at+1, 0, []byte(string(v)+","))
+			return splice(raw, at+1, 0, []byte(member+","))
 		}
-		return splice(raw, a.Index+len(a.Raw), 0, []byte(","+string(v)))
+		return splice(raw, a.Index+len(a.Raw), 0, []byte(","+member))
 	}
 	// pretty: the member goes on its own line at the anchor's indentation
 	indent := lineIndent(raw, a.Index)
