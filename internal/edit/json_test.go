@@ -468,3 +468,27 @@ func TestPatchJSONRefusesNonObject(t *testing.T) {
 		t.Error("a top-level array must be refused")
 	}
 }
+
+func TestJSONEditsRefuseCorruptingResult(t *testing.T) {
+	// jsonc drops the stray comma, so the splice offsets point before it and
+	// the naive result would carry two commas. The pre-write check must refuse
+	// rather than hand the tool an unreadable file.
+	raw := []byte("{,  // note\n} ")
+	if _, err := PatchJSON(raw, nil, []KV{{Path: "b.c", Value: 2}}); err == nil {
+		t.Fatal("an edit that produces invalid JSONC must be refused")
+	}
+	path := filepath.Join(t.TempDir(), "s.json")
+	write(t, path, string(raw))
+	if err := ApplyJSON(path, []KV{{Path: "b.c", Value: 2}}, nil); err == nil {
+		t.Fatal("ApplyJSON must refuse too")
+	}
+	if err := SetJSON(path, KV{Path: "b.c", Value: 2}); err == nil {
+		t.Fatal("SetJSON must refuse too")
+	}
+	if err := SetJSONAfter(path, "", "b.c", 2); err == nil {
+		t.Fatal("SetJSONAfter must refuse too")
+	}
+	if read(t, path) != string(raw) {
+		t.Error("refused edit must leave the file untouched")
+	}
+}

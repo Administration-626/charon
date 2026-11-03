@@ -61,7 +61,11 @@ func SetJSON(path string, kvs ...KV) error {
 			return fmt.Errorf("%s: %w", path, err)
 		}
 	}
-	return WriteAtomic(path, keepCRLF(raw, orig))
+	out := keepCRLF(raw, orig)
+	if !validJSONC(out) {
+		return fmt.Errorf("%s: edited result is not valid JSON/JSONC", path)
+	}
+	return WriteAtomic(path, out)
 }
 
 // ApplyJSON sets and removes key paths in one write: the deletes are applied
@@ -113,10 +117,22 @@ func PatchJSON(raw []byte, del []string, set []KV) ([]byte, error) {
 			return nil, err
 		}
 	}
-	if marked {
-		return append(append([]byte(nil), bom...), keepCRLF(raw, orig)...), nil
+	out := keepCRLF(raw, orig)
+	if !validJSONC(out) {
+		return nil, fmt.Errorf("edited result is not valid JSON/JSONC")
 	}
-	return keepCRLF(raw, orig), nil
+	if marked {
+		return append(append([]byte(nil), bom...), out...), nil
+	}
+	return out, nil
+}
+
+// validJSONC reports whether b is JSON/JSONC a parser can read once comments
+// and trailing commas are removed. Every edit checks its result with it before
+// touching the disk, so a splice into an unusual position can never leave a
+// file the tool refuses to load.
+func validJSONC(b []byte) bool {
+	return json.Valid(jsonc.ToJSONInPlace(append([]byte(nil), b...)))
 }
 
 func setJSONBytes(raw []byte, keyPath string, value any) ([]byte, error) {
@@ -301,6 +317,9 @@ func DelJSON(path string, keyPaths ...string) error {
 	if !changed {
 		return nil
 	}
+	if !validJSONC(raw) {
+		return fmt.Errorf("%s: edited result is not valid JSON/JSONC", path)
+	}
 	return WriteAtomic(path, raw)
 }
 
@@ -445,7 +464,11 @@ func SetJSONAfter(path, anchor, keyPath string, value any) error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
-	return WriteAtomic(path, keepCRLF(raw, orig))
+	out := keepCRLF(raw, orig)
+	if !validJSONC(out) {
+		return fmt.Errorf("%s: edited result is not valid JSON/JSONC", path)
+	}
+	return WriteAtomic(path, out)
 }
 
 func setJSONAfterBytes(raw []byte, anchor, keyPath string, value any) ([]byte, error) {
