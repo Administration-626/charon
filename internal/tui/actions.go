@@ -69,11 +69,9 @@ func (m model) onEditKey() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// onHideKey toggles whether the highlighted binding belongs to the tool's
-// shared endpoint list ("h"). Hiding keeps the binding here — name, key, models,
-// protocol — and rewrites the active binding's config so the endpoint drops out
-// of the tool's picker. The active binding itself cannot be hidden: its defaults
-// would point at an entry that is no longer written.
+// onHideKey toggles the highlighted endpoint's visibility ("h"). Pi updates
+// all saved bindings at that address and its managed provider immediately,
+// without reapplying the current binding or resetting the live model.
 func (m model) onHideKey() (tea.Model, tea.Cmd) {
 	it, ok := m.selectedBinding()
 	if !ok {
@@ -87,24 +85,27 @@ func (m model) onHideKey() (tea.Model, tea.Cmd) {
 	hide := !b.Hidden
 	if err := m.cat.SetBindingHidden(b.ID, hide); err != nil {
 		m.setStatus(statusErr, err.Error())
+		m.loadProfiles(it.value)
 		return m, nil
 	}
 	status := "Showed " + it.value
 	if hide {
 		status = "Hid " + it.value
 	}
-	// The list lives in the active binding's config, so re-render it for the
-	// change to reach the tool. Without an active binding there is nothing
-	// written to update; the next switch picks the flag up.
-	if active, found, err := m.cat.Active(m.tool.Name); err == nil && found {
-		if _, err := m.cat.Reapply(active.ID); err != nil {
-			m.setStatus(statusErr, status+" in charon, but rewriting the tool config failed: "+err.Error())
-			m.loadProfiles(it.value)
-			return m, nil
+	if m.tool.Name == "pi" {
+		status += " endpoint · all saved Pi bindings at this address"
+	}
+	if m.tool.Name != "pi" {
+		if active, found, err := m.cat.Active(m.tool.Name); err == nil && found {
+			if _, err := m.cat.Reapply(active.ID); err != nil {
+				m.setStatus(statusErr, status+" in charon, but rewriting the tool config failed: "+err.Error())
+				m.loadProfiles(it.value)
+				return m, nil
+			}
 		}
-		if note := aggregationNote(m.tool, m.cat); note != "" {
-			status += " · " + note
-		}
+	}
+	if note := aggregationNote(m.tool, m.cat); note != "" {
+		status += " · " + note
 	}
 	m.setStatus(statusOK, status)
 	m.loadProfiles(it.value)
@@ -149,8 +150,8 @@ func (m model) startDuplicate(name string) (tea.Model, tea.Cmd) {
 // Within the same tool the copy shares the credential row — that is the point of
 // duplicating, and why the first destination row exists. Across tools
 // StoreBinding writes a fresh provider/credential pair, reusing an existing row
-// only when the endpoint and key match one exactly. Pi's request protocol
-// survives only pi→pi; other tools have no such setting. The duplicate is never
+// only when the endpoint and key match one exactly. Pi's request protocol and
+// headers survive only pi→pi; other tools have no such settings. The duplicate is never
 // activated.
 func (m model) duplicateBinding(srcName, dstToolName, newName string) error {
 	dst := m.findTool(dstToolName)
@@ -176,6 +177,11 @@ func (m model) duplicateBinding(srcName, dstToolName, newName string) error {
 		dup, err := m.cat.AddBinding(dst.Name, newName, b.CredentialID, slug, slugs, b.PiAPI)
 		if err != nil {
 			return err
+		}
+		if dst.Name == "pi" && b.Headers != nil {
+			if _, err := m.cat.SetBindingHeaders(dup.ID, b.Headers); err != nil {
+				return err
+			}
 		}
 		return m.hideDuplicate(dup.ID, dst, b.Hidden)
 	}

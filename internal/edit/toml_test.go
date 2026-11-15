@@ -523,3 +523,84 @@ func TestSetTOMLTableSeparatesFromNextHeader(t *testing.T) {
 		t.Errorf("replaced table not separated from the next header:\n%q", out)
 	}
 }
+
+// TestSetTOMLTablesReplacesTheParentItWrites: a table written next to a child of
+// it is replaced, not appended a second time. The first apply appends both;
+// without the replace the second apply would put a duplicate header in the file,
+// which no TOML reader accepts.
+func TestSetTOMLTablesReplacesTheParentItWrites(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	write(t, path, "[chr]\nold = 1\n\n[chr.\"a.b\"]\nstale = 2\n")
+	tables := []Table{
+		{Name: "chr", KVs: []KV{{Path: "a", Value: 1}}},
+		{Name: `chr."a.b"`, KVs: []KV{{Path: "b", Value: 2}}},
+	}
+	for i := 1; i <= 2; i++ {
+		if err := SetTOMLTables(path, []string{"chr."}, tables); err != nil {
+			t.Fatalf("apply %d: %v\n%s", i, err, read(t, path))
+		}
+	}
+	want := "[chr]\na = 1\n\n[chr.\"a.b\"]\nb = 2\n"
+	if out := read(t, path); out != want {
+		t.Errorf("got %q, want %q", out, want)
+	}
+}
+
+// TestTOMLKeepsTheFilesFinalNewline: an edit must not decide whether the file
+// ends with a line break. A block appended at the end used to give a file that
+// had no final newline one, and deleting the last block of a file used to lose
+// it (leaving a CRLF file ending on a lone \r, which is not TOML at all).
+func TestTOMLKeepsTheFilesFinalNewline(t *testing.T) {
+	cases := []struct {
+		name, src string
+		edit      func(path string) error
+		want      string
+	}{
+		{
+			name: "append keeps a missing newline missing",
+			src:  "a = 1",
+			edit: func(path string) error {
+				return SetTOMLTables(path, []string{"t"}, []Table{{Name: "t", KVs: []KV{{Path: "x", Value: 1}}}})
+			},
+			want: "a = 1\n\n[t]\nx = 1",
+		},
+		{
+			name: "append keeps a CRLF newline",
+			src:  "a = 1\r\n",
+			edit: func(path string) error {
+				return SetTOMLTables(path, []string{"t"}, []Table{{Name: "t", KVs: []KV{{Path: "x", Value: 1}}}})
+			},
+			want: "a = 1\r\n\r\n[t]\r\nx = 1\r\n",
+		},
+		{
+			name: "deleting the last table of a CRLF file",
+			src:  "[keep]\r\nk = 1\r\n\r\n[gone]\r\ng = 2\r\n",
+			edit: func(path string) error { return DelTOMLTable(path, "gone") },
+			want: "[keep]\r\nk = 1\r\n",
+		},
+		{
+			name: "deleting the last table of a file with no final newline",
+			src:  "[keep]\nk = 1\n\n[gone]\ng = 2",
+			edit: func(path string) error { return DelTOMLTable(path, "gone") },
+			want: "[keep]\nk = 1",
+		},
+		{
+			name: "deleting every top key leaves an empty file",
+			src:  "a = 1\nb = 2\n",
+			edit: func(path string) error { return DelTOMLTop(path, "a", "b") },
+			want: "",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.toml")
+			write(t, path, c.src)
+			if err := c.edit(path); err != nil {
+				t.Fatal(err)
+			}
+			if got := read(t, path); got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
+	}
+}

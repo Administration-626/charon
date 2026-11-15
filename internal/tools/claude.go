@@ -2,7 +2,6 @@ package tools
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -122,7 +121,7 @@ func newClaude() *Tool {
 		Describe: func() (Info, error) {
 			var info Info
 
-			if data, err := os.ReadFile(settingsPath); err == nil {
+			if data, err := readConfig(settingsPath); err == nil {
 				var s struct {
 					Model       string `json:"model"`
 					EffortLevel string `json:"effortLevel"`
@@ -205,7 +204,7 @@ func claudeWindowModel(id string, window int) string {
 // claudeAccountEmail reads the logged-in account's email from ~/.claude.json for
 // display only; the file is never written. "" if absent.
 func claudeAccountEmail() string {
-	data, err := os.ReadFile(filepath.Join(home(), ".claude.json"))
+	data, err := readConfig(filepath.Join(home(), ".claude.json"))
 	if err != nil {
 		return ""
 	}
@@ -223,7 +222,7 @@ func claudeAccountEmail() string {
 // claudeExistingModels reads the model ids currently registered in settings.json's
 // modelPicker, so a write without a replacement list can keep them.
 func claudeExistingModels(settingsPath string) []string {
-	data, err := os.ReadFile(settingsPath)
+	data, err := readConfig(settingsPath)
 	if err != nil {
 		return nil
 	}

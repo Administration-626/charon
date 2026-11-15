@@ -14,7 +14,7 @@
 | `internal/artifact/` | 临时文件、同步、权限、rename 原子写入 | `internal/artifact/artifact.go` |
 | `internal/secret/` | 密钥遮罩和平台密钥链读取 | `internal/secret/` |
 | `internal/tui/` | Bubble Tea 交互菜单、表格列表、详情页、向导、模型选择器 | `internal/tui/model.go`、`update.go`、`actions.go`、`views.go` |
-| `docs/` | WorkBuddy 上下文窗口同步说明、代码库文档 | `docs/` |
+| `docs/` | 行为规格、工程走查、WorkBuddy 上下文窗口同步说明、代码库文档 | `docs/spec.md`、`docs/engineering-walkthrough.md`、`docs/codebase/` |
 | `scripts/` | 安装脚本和模型规则提取脚本 | `scripts/` |
 | `.github/workflows/` | CI 与发布流水线 | `.github/workflows/` |
 
@@ -22,7 +22,7 @@
 
 - 主入口：`cmd/charon/main.go` 的 `main` 和 `run`。
 - 交互入口：无参数时调用 `tui.Run`。
-- 脚本入口：`status`、`ls`、`models`、`add`、`edit`、`set-context`、`set-effort`、`switch`、`reapply`、`off`、`rename`、`cp`、`rm`、`completion` 等由 `cmd/charon/commands.go` 分发。
+- 脚本入口：`status`、`ls`、`models`、`add`、`edit`、`set-context`、`set-effort`、`switch`、`reapply`、`off`、`rename`、`cp`、`rm`、`completion` 等由 `cmd/charon/main.go` 分发，`commands.go` 实现。
 - 发布入口：GoReleaser 以 `./cmd/charon` 构建二进制。证据：`.goreleaser.yaml`。
 
 ## 3) 模块边界

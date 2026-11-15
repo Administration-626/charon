@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -27,25 +28,43 @@ type OwnedFile struct {
 	Prefixes     []string // table-name prefixes
 }
 
-// StashVal is one owned path's pre-charon value: Raw as the file wrote it
-// (JSON raw text, or TOML value text), or Absent when the file had no such
-// path and charon's entry is simply removed. Prev is the key before this one
-// in its JSON parent object, the anchor that puts a restored key back where
-// it was.
+// StashVal is one owned path's pre-charon value, written so off can put back
+// exactly what was there:
+//
+//   - Absent: the path did not exist, so charon's entry is removed rather than
+//     restored. For a JSON path this also covers an object charon created: off
+//     records it here and deletes it once empty, so the user is not left with a
+//     `{}` they never wrote.
+//   - Raw: the value exactly as the file wrote it (JSON raw text, or TOML value
+//     text), restored verbatim rather than re-rendered.
+//   - Prev: the key before this one in its JSON parent object, the anchor that
+//     puts a restored key back where the user had it instead of at the front.
+//     Empty means it was the first member.
 type StashVal struct {
 	Absent bool   `json:"absent,omitempty"`
 	Raw    string `json:"raw,omitempty"`
 	Prev   string `json:"prev,omitempty"`
 }
 
-// FileStash is what one file's owned paths held before charon first wrote.
+// FileStash is what one file's owned paths held before charon first wrote:
+// JSON paths by dot path, TOML top-level keys, and TOML table keys by
+// "table.key".
+//
+// Absent marks a file charon created. Off then deletes it when nothing but an
+// empty object (or nothing at all) is left in it, so a config the user never had
+// does not survive as a husk — while a file the user did have is left in place
+// even when off empties it, since the file itself is theirs.
 type FileStash struct {
-	JSON map[string]StashVal `json:"json,omitempty"`
-	Top  map[string]StashVal `json:"tomlTop,omitempty"`
-	Keys map[string]StashVal `json:"tomlKeys,omitempty"` // "table.key"
+	Absent bool                `json:"absent,omitempty"`
+	JSON   map[string]StashVal `json:"json,omitempty"`
+	Top    map[string]StashVal `json:"tomlTop,omitempty"`
+	Keys   map[string]StashVal `json:"tomlKeys,omitempty"` // "table.key"
 }
 
-// ToolStash is a tool's whole pre-charon state, keyed by file path.
+// ToolStash is a tool's whole pre-charon state, keyed by file path. It is
+// written once, on the tool's first switch, and kept until off — so every field
+// here is optional and an older stash.json (without Absent, or without the
+// object parents charon creates) still drives off correctly.
 type ToolStash struct {
 	Files map[string]FileStash `json:"files"`
 }
@@ -57,9 +76,26 @@ func (t *Tool) CaptureStash() ToolStash {
 	st := ToolStash{Files: map[string]FileStash{}}
 	for _, of := range t.Owned {
 		fs := FileStash{}
+		if _, err := os.Stat(of.Path); os.IsNotExist(err) {
+			fs.Absent = true
+		}
 		if len(of.JSON) > 0 {
 			fs.JSON = map[string]StashVal{}
 			for _, p := range of.JSON {
+				// The objects above p are recorded too, but only those charon
+				// would create: off then removes them whole instead of leaving
+				// an empty {} the user never wrote. A parent that already
+				// exists is the user's — its owned children are stashed one by
+				// one and the object itself is left alone, so a key the user
+				// adds later survives off.
+				for _, parent := range jsonParents(p) {
+					if _, done := fs.JSON[parent]; done {
+						continue
+					}
+					if _, ok := edit.GetJSONRaw(of.Path, parent); !ok {
+						fs.JSON[parent] = StashVal{Absent: true}
+					}
+				}
 				if raw, ok := edit.GetJSONRaw(of.Path, p); ok {
 					fs.JSON[p] = StashVal{Raw: raw, Prev: edit.PrevJSONKey(of.Path, p)}
 				} else {
@@ -161,9 +197,20 @@ func (t *Tool) Off(st ToolStash) error {
 					}
 				}
 			}
+			// An object charon created goes too, once the entries it held are
+			// gone: deleting only those would leave an empty {} the user never
+			// wrote.
+			if err := deleteEmptiedParents(of.Path, createdJSONParents(fs, of.JSON)); err != nil {
+				return err
+			}
 		}
 		if err := t.offTOML(of, fs); err != nil {
 			return err
+		}
+		if fs.Absent {
+			if err := removeIfHusk(of.Path); err != nil {
+				return err
+			}
 		}
 	}
 	for _, created := range t.Created {
@@ -243,6 +290,91 @@ func (t *Tool) offTOML(of OwnedFile, fs FileStash) error {
 		if err := edit.DelTOMLTop(of.Path, delTop...); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// jsonParents returns the object paths above p: "a.b.c" yields "a" and "a.b".
+// A dot escaped with a backslash is part of a key, not a separator.
+func jsonParents(p string) []string {
+	var out []string
+	for i := 0; i < len(p); i++ {
+		switch p[i] {
+		case '\\':
+			i++
+		case '.':
+			out = append(out, p[:i])
+		}
+	}
+	return out
+}
+
+// createdJSONParents lists the object parents the stash records as absent — the
+// ones charon created and off removes. A parent is left out when any owned path
+// under it was stashed with a value to restore, so a stash that does hold the
+// user's content never loses it to the parent's removal.
+func createdJSONParents(fs FileStash, owned []string) []string {
+	isOwned := make(map[string]bool, len(owned))
+	for _, p := range owned {
+		isOwned[p] = true
+	}
+	var out []string
+	for p, v := range fs.JSON {
+		if isOwned[p] || !v.Absent {
+			continue
+		}
+		kept := false
+		for _, o := range owned {
+			if c, ok := fs.JSON[o]; strings.HasPrefix(o, p+".") && ok && !c.Absent {
+				kept = true
+				break
+			}
+		}
+		if !kept {
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// deleteEmptiedParents removes the object parents charon created, once the
+// entries it wrote into them are gone. A parent that still holds something — a
+// key the user added while charon was active — is left alone, so off never
+// deletes content charon did not write.
+func deleteEmptiedParents(path string, parents []string) error {
+	for _, p := range parents {
+		raw, ok := edit.GetJSONRaw(path, p)
+		if !ok {
+			continue
+		}
+		var obj map[string]json.RawMessage
+		if json.Unmarshal([]byte(raw), &obj) != nil || len(obj) > 0 {
+			continue
+		}
+		if err := edit.DelJSON(path, p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// removeIfHusk deletes a file charon created when nothing but an empty object —
+// or nothing at all — is left in it. Anything the user added after charon wrote
+// it stays, file and all.
+func removeIfHusk(path string) error {
+	data, err := edit.Read(path)
+	if err != nil {
+		return err
+	}
+	if len(bytes.TrimSpace(data)) > 0 {
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(data, &obj) != nil || len(obj) > 0 {
+			return nil // holds something, or is not an empty object
+		}
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing %s: %w", path, err)
 	}
 	return nil
 }

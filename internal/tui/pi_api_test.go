@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -142,6 +143,11 @@ func TestPiEndpointTypeSaveEditAndCopy(t *testing.T) {
 	if err != nil || !found || b.PiAPI != "anthropic-messages" || m.statusLvl != statusOK {
 		t.Fatalf("save protocol = %q, err=%v, status=%s", b.PiAPI, err, m.status)
 	}
+	headers := map[string]string{"Originator": "custom-client", "X-Key": "private-header-value"}
+	b, err = st.SetBindingHeaders(b.ID, headers)
+	if err != nil {
+		t.Fatal(err)
+	}
 	m.clearStatus() // The saved type stays visible in the edit form, not the list.
 	if strings.Contains(m.View(), "Anthropic (Messages)") {
 		t.Fatal("binding list must not show the endpoint type")
@@ -158,8 +164,11 @@ func TestPiEndpointTypeSaveEditAndCopy(t *testing.T) {
 	next, _ = m.submitForm()
 	m = next.(model)
 	b, found, err = st.BindingByName("pi", "work")
-	if err != nil || !found || b.PiAPI != "google-generative-ai" {
-		t.Fatalf("edit protocol = %q, err=%v", b.PiAPI, err)
+	if err != nil || !found || b.PiAPI != "google-generative-ai" || !reflect.DeepEqual(b.Headers, headers) {
+		t.Fatalf("edit lost protocol or headers: API=%q, err=%v", b.PiAPI, err)
+	}
+	if strings.Contains(m.View(), "private-header-value") {
+		t.Fatal("header value leaked into the TUI")
 	}
 	m.clearStatus()
 	// A wrong protocol surfaces as an access failure inside pi's own harness,
@@ -188,8 +197,8 @@ func TestPiEndpointTypeSaveEditAndCopy(t *testing.T) {
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
 	cloned, found, err := st.BindingByName("pi", "work-copy")
-	if err != nil || !found || cloned.PiAPI != b.PiAPI {
-		t.Fatalf("duplicate protocol = %q, err=%v", cloned.PiAPI, err)
+	if err != nil || !found || cloned.PiAPI != b.PiAPI || !reflect.DeepEqual(cloned.Headers, headers) {
+		t.Fatalf("duplicate lost protocol or headers: API=%q, err=%v", cloned.PiAPI, err)
 	}
 	// Cross-tool duplication: the protocol survives only pi→pi.
 	for _, dst := range []string{"pi", "claude"} {
@@ -203,6 +212,13 @@ func TestPiEndpointTypeSaveEditAndCopy(t *testing.T) {
 		cloned, found, err = st.BindingByName(dst, name)
 		if err != nil || !found || cloned.PiAPI != wantAPI {
 			t.Fatalf("duplicate to %s protocol = %q, err=%v", dst, cloned.PiAPI, err)
+		}
+		wantHeaders := headers
+		if dst != "pi" {
+			wantHeaders = nil
+		}
+		if !reflect.DeepEqual(cloned.Headers, wantHeaders) {
+			t.Fatalf("duplicate to %s did not preserve/drop Pi headers", dst)
 		}
 	}
 	after, err := os.ReadFile(path)

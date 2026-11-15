@@ -76,18 +76,33 @@ func splitLines(s string) []string {
 // \r\n for every line break, the lines added or replaced get \r\n too, so the
 // file never ends up with mixed endings. Untouched lines already carry their
 // \r, and a file that mixed endings is left as it was.
+//
+// It also keeps the file's final line break as it was, because that one is not
+// part of the edit. A block deleted at the end of a file takes the empty last
+// element carrying that line break with it, so the element is put back; a file
+// that ended without a line break keeps ending without one, so a block appended
+// at the end does not give it a blank last line. A file charon is creating has
+// no endings to keep.
 func joinLinesLike(lines []string, orig string) string {
+	endsWithBreak := len(orig) > 0 && strings.HasSuffix(orig, "\n")
+	carriesBreak := len(lines) > 0 && lines[len(lines)-1] == ""
+	if endsWithBreak && !carriesBreak {
+		lines = append(append([]string{}, lines...), "")
+	}
 	s := joinLines(lines)
+	if len(orig) > 0 && !endsWithBreak {
+		s = strings.TrimSuffix(strings.TrimSuffix(s, "\n"), "\r")
+	}
 	if n := strings.Count(orig, "\n"); n > 0 && strings.Count(orig, "\r\n") == n {
 		s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\n", "\r\n")
 	}
 	return s
 }
 
+// joinLines joins lines back as splitLines took them apart: a file that ended
+// with a newline keeps its empty final element and so keeps the newline, and one
+// that did not ends without it. Nothing is added here — a block appended by an
+// edit carries the blank line that separates it.
 func joinLines(lines []string) string {
-	s := strings.Join(lines, "\n")
-	if !strings.HasSuffix(s, "\n") {
-		s += "\n"
-	}
-	return s
+	return strings.Join(lines, "\n")
 }

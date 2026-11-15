@@ -108,3 +108,31 @@ func TestValidateKey(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateHeaders(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		headers map[string]string
+		valid   bool
+	}{
+		{"nil", nil, true},
+		{"empty", map[string]string{}, true},
+		{"normal", map[string]string{"User-Agent": "custom/1.0", "X-Empty": ""}, true},
+		{"token punctuation", map[string]string{"X!#$%&'*+-.^_`|~": "literal $!\tvalue"}, true},
+		{"empty name", map[string]string{"": "value"}, false},
+		{"space", map[string]string{"Bad Name": "value"}, false},
+		{"colon", map[string]string{"Bad:Name": "value"}, false},
+		{"unicode name", map[string]string{"标头": "value"}, false},
+		{"duplicate case", map[string]string{"User-Agent": "one", "user-agent": "two"}, false},
+		{"newline", map[string]string{"X-Key": "value\n"}, false},
+		{"carriage return", map[string]string{"X-Key": "value\r"}, false},
+		{"nul", map[string]string{"X-Key": "value\x00"}, false},
+		{"delete control", map[string]string{"X-Key": "value\x7f"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateHeaders(tc.headers); (err == nil) != tc.valid {
+				t.Fatalf("ValidateHeaders error = %v, want valid=%v", err, tc.valid)
+			}
+		})
+	}
+}

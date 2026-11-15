@@ -3468,8 +3468,8 @@ func TestBindingDetailLongNameWraps(t *testing.T) {
 }
 
 // TestBindingDetailInactiveNote: only tools that write a single endpoint need the
-// "switch to write" hint. Pi registers every visible binding's endpoint in its
-// provider list, so an inactive binding is already on disk.
+// "switch to write" hint. Pi can project other visible bindings into the shared
+// provider list, but saved visibility alone does not prove registration on disk.
 func TestBindingDetailInactiveNote(t *testing.T) {
 	for _, tc := range []struct {
 		tool       string
@@ -3478,7 +3478,7 @@ func TestBindingDetailInactiveNote(t *testing.T) {
 		reject     string
 	}{
 		{"claude", true, "inactive", "registered · not default"},
-		{"pi", false, "registered · not default", "inactive"},
+		{"pi", false, "not hidden · not default", "inactive"},
 	} {
 		t.Run(tc.tool, func(t *testing.T) {
 			st := openTestCatalog(t, false)
@@ -3521,7 +3521,7 @@ func TestBindingDetailInactiveNote(t *testing.T) {
 			}
 			if tc.tool == "pi" {
 				m.loadProfiles("active")
-				if view := m.View(); !strings.Contains(view, "✓ default · registered") {
+				if view := m.View(); !strings.Contains(view, "✓ saved default · not hidden") {
 					t.Errorf("pi active status missing the aggregated default label")
 				}
 			}

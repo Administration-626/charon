@@ -155,3 +155,27 @@ func homeOf(t *testing.T) string {
 	}
 	return home
 }
+
+// TestOffAcceptsAStashWrittenByAnOlderCharon: the stash format gained the file's
+// own absence flag and the object parents charon creates, both optional. A
+// stash.json from before that still has to drive off, restoring what it recorded
+// and leaving everything else as it was.
+func TestOffAcceptsAStashWrittenByAnOlderCharon(t *testing.T) {
+	c := openTest(t)
+	config := filepath.Join(homeOf(t), ".claude", "settings.json")
+	os.MkdirAll(filepath.Dir(config), 0o700)
+	orig := "{\n  \"env\": {\n    \"ANTHROPIC_API_KEY\": \"sk-old\",\n    \"KEEP\": \"1\"\n  }\n}\n"
+	os.WriteFile(config, []byte(orig), 0o600)
+	old := `{"claude":{"files":{"` + config + `":{"json":{` +
+		`"env.ANTHROPIC_API_KEY":{"raw":"\"sk-old\"","prev":"KEEP"},` +
+		`"env.ANTHROPIC_BASE_URL":{"absent":true},` +
+		`"model":{"absent":true}` +
+		`}}}}}`
+	if err := os.WriteFile(c.table("stash.json"), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Off("claude"); err != nil {
+		t.Fatalf("off with an older stash: %v", err)
+	}
+	mustEqualBytes(t, config, orig)
+}

@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -323,6 +324,162 @@ func TestRunCopyBindingAcrossTools(t *testing.T) {
 	}
 	if slugs, err := c.ModelSlugs(copied.Models); err != nil || strings.Join(slugs, ",") != "kimi-k2,glm-4.6" {
 		t.Fatalf("copied models = %v, err=%v; want kimi-k2,glm-4.6 for Codex", slugs, err)
+	}
+}
+
+// TestRunCopyPreservesHiddenOnlyForMultiEndpoint locks in that cp carries a
+// source's hidden flag only to a destination that has an endpoint list to hide
+// from. A hidden Pi binding copied within Pi stays hidden, a visible copy stays
+// visible, and a Pi→Codex copy is saved without the unsupported flag. Copying
+// never activates, rewrites Pi config, or registers the hidden source's gateway
+// key, not even when the active binding is explicitly reapplied afterwards.
+func TestRunCopyPreservesHiddenOnlyForMultiEndpoint(t *testing.T) {
+	home := sandbox(t)
+	if err := run([]string{"add", "pi", "--name", "a", "--key", "sk-one",
+		"--endpoint", "https://one.example/v1", "--model", "one"}); err != nil {
+		t.Fatalf("add a: %v", err)
+	}
+	if err := run([]string{"add", "pi", "--name", "b", "--key", "sk-two",
+		"--endpoint", "https://two.example/v1", "--model", "two",
+		"--headers", `{"X-Backup":"hdr-backup"}`}); err != nil {
+		t.Fatalf("add b: %v", err)
+	}
+	if err := run([]string{"switch", "pi", "a"}); err != nil {
+		t.Fatalf("switch a: %v", err)
+	}
+
+	c := openCatalog(t)
+	b, found, err := c.BindingByName("pi", "b")
+	if err != nil || !found {
+		t.Fatalf("b binding: found=%v err=%v", found, err)
+	}
+	b, err = c.UpdateBinding(b.ID, b.Name, b.CredentialID, "two", []string{"two"}, "anthropic-messages")
+	if err != nil {
+		t.Fatalf("set b protocol: %v", err)
+	}
+	if err := c.SetBindingHidden(b.ID, true); err != nil {
+		t.Fatalf("hide b: %v", err)
+	}
+	// The fixture applied b before it was hidden; reapply a to remove that
+	// stale group so the byte comparison below starts from a clean Pi config.
+	if err := run([]string{"reapply", "pi", "a"}); err != nil {
+		t.Fatalf("reapply a: %v", err)
+	}
+
+	bBefore, found, err := c.BindingByName("pi", "b")
+	if err != nil || !found || !bBefore.Hidden {
+		t.Fatalf("b before copy: %+v found=%v err=%v", bBefore, found, err)
+	}
+	aBefore, found, err := c.BindingByName("pi", "a")
+	if err != nil || !found {
+		t.Fatalf("a before copy: found=%v err=%v", found, err)
+	}
+	modelsPath := filepath.Join(home, ".pi", "agent", "models.json")
+	settingsPath := filepath.Join(home, ".pi", "agent", "settings.json")
+	modelsBefore, err := os.ReadFile(modelsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settingsBefore, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Hidden source, same (multi-endpoint) tool: the copy stays hidden and
+	// inherits the credential, models, protocol, and headers.
+	if err := run([]string{"cp", "pi", "b", "b-copy"}); err != nil {
+		t.Fatalf("cp hidden b: %v", err)
+	}
+	after := openCatalog(t)
+	clone, found, err := after.BindingByName("pi", "b-copy")
+	if err != nil || !found {
+		t.Fatalf("b-copy missing: found=%v err=%v", found, err)
+	}
+	if !clone.Hidden {
+		t.Errorf("b-copy Hidden = false, want the hidden source flag preserved")
+	}
+	if clone.CredentialID != bBefore.CredentialID {
+		t.Errorf("b-copy credential = %q, want shared %q", clone.CredentialID, bBefore.CredentialID)
+	}
+	if clone.ModelID != bBefore.ModelID || !reflect.DeepEqual(clone.Models, bBefore.Models) {
+		t.Errorf("b-copy models = %q %v, want %q %v", clone.ModelID, clone.Models, bBefore.ModelID, bBefore.Models)
+	}
+	if clone.PiAPI != bBefore.PiAPI {
+		t.Errorf("b-copy protocol = %q, want %q", clone.PiAPI, bBefore.PiAPI)
+	}
+	if !reflect.DeepEqual(clone.Headers, bBefore.Headers) {
+		t.Errorf("b-copy headers = %#v, want %#v", clone.Headers, bBefore.Headers)
+	}
+	cr, err := after.Credential(clone.CredentialID)
+	if err != nil || cr.Key != "sk-two" {
+		t.Errorf("b-copy key = %q err=%v, want sk-two", cr.Key, err)
+	}
+	bAfter, found, err := after.BindingByName("pi", "b")
+	if err != nil || !found || !reflect.DeepEqual(bAfter, bBefore) {
+		t.Errorf("source b changed by copy: before=%+v after=%+v err=%v", bBefore, bAfter, err)
+	}
+	aAfter, found, err := after.BindingByName("pi", "a")
+	if err != nil || !found || !reflect.DeepEqual(aAfter, aBefore) {
+		t.Errorf("binding a changed by copy: before=%+v after=%+v err=%v", aBefore, aAfter, err)
+	}
+	if active, found, err := after.Active("pi"); err != nil || !found || active.Name != "a" {
+		t.Errorf("active after copy = %+v found=%v err=%v, want a", active, found, err)
+	}
+	modelsAfter, err := os.ReadFile(modelsPath)
+	if err != nil || !bytes.Equal(modelsBefore, modelsAfter) {
+		t.Errorf("copy rewrote Pi models.json (err=%v)", err)
+	}
+	settingsAfter, err := os.ReadFile(settingsPath)
+	if err != nil || !bytes.Equal(settingsBefore, settingsAfter) {
+		t.Errorf("copy rewrote Pi settings.json (err=%v)", err)
+	}
+
+	// Visible source: the copy stays visible.
+	if err := run([]string{"cp", "pi", "a", "a-copy"}); err != nil {
+		t.Fatalf("cp visible a: %v", err)
+	}
+	visible, found, err := openCatalog(t).BindingByName("pi", "a-copy")
+	if err != nil || !found || visible.Hidden {
+		t.Errorf("a-copy Hidden = %v found=%v err=%v, want visible", visible.Hidden, found, err)
+	}
+
+	// Non-multi-endpoint destination: no hidden flag is carried (or passed to
+	// a setter that would reject it).
+	if err := run([]string{"cp", "pi", "b", "codex", "b-codex"}); err != nil {
+		t.Fatalf("cp hidden b to codex: %v", err)
+	}
+	codexCopy, found, err := openCatalog(t).BindingByName("codex", "b-codex")
+	if err != nil || !found {
+		t.Fatalf("b-codex missing: found=%v err=%v", found, err)
+	}
+	if codexCopy.Hidden {
+		t.Errorf("b-codex Hidden = true, but Codex has no endpoint list to hide from")
+	}
+
+	// An explicit reapply of the active binding must not resurrect the hidden
+	// source's (or its copy's) gateway key. Reapply legitimately resets the
+	// default model; that is separate from what copying does.
+	if err := run([]string{"reapply", "pi", "a"}); err != nil {
+		t.Fatalf("reapply a after copy: %v", err)
+	}
+	reapplied, err := os.ReadFile(modelsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leaked := range []string{"sk-two", "https://two.example/v1"} {
+		if strings.Contains(string(reapplied), leaked) {
+			t.Errorf("reapply registered hidden gateway %q:\n%s", leaked, reapplied)
+		}
+	}
+	final := openCatalog(t)
+	for _, name := range []string{"b", "b-copy"} {
+		got, found, err := final.BindingByName("pi", name)
+		if err != nil || !found || !got.Hidden {
+			t.Errorf("%s after reapply: Hidden=%v found=%v err=%v, want hidden", name, got.Hidden, found, err)
+		}
+	}
+	if active, found, err := final.Active("pi"); err != nil || !found || active.Name != "a" {
+		t.Errorf("active after reapply = %+v found=%v err=%v, want a", active, found, err)
 	}
 }
 
@@ -775,6 +932,155 @@ func TestRunEditModelsFlagReplacesPickerList(t *testing.T) {
 	}
 }
 
+// TestRunEditHelpDoesNotLeakSecrets drives every path where flag parsing prints
+// the edit usage: -h/--help, an unknown flag, and --key without a value. Usage
+// must keep documenting --key but never echo the saved key, a key supplied on
+// the same command line, or a stored Pi header value; a parse failure must not
+// touch the catalog or the tool config either.
+func TestRunEditHelpDoesNotLeakSecrets(t *testing.T) {
+	home := sandbox(t)
+	const (
+		oldKey      = "sk-old-leak-111111"
+		newKey      = "sk-new-leak-333333"
+		headerValue = "Bearer hdr-leak-222222"
+		headerLeak  = "hdr-leak-222222"
+	)
+	if err := run([]string{"add", "pi", "--name", "leak", "--key", oldKey,
+		"--endpoint", "https://pi.example/v1", "--model", "m1",
+		"--headers", `{"Authorization":"` + headerValue + `"}`}); err != nil {
+		t.Fatalf("add pi binding: %v", err)
+	}
+	// Snapshot after catalog startup (Open runs migrations/backfills) so those
+	// initialization writes are not mistaken for a parse-time change.
+	_ = openCatalog(t)
+	before := snapshotTree(t, home)
+
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"short help", []string{"edit", "pi", "leak", "-h"}},
+		{"long help", []string{"edit", "pi", "leak", "--help"}},
+		{"unknown flag", []string{"edit", "pi", "leak", "--key", newKey, "--bogus"}},
+		{"missing key value", []string{"edit", "pi", "leak", "--key"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			output, err := captureStdout(t, func() error {
+				stderr := os.Stderr
+				os.Stderr = os.Stdout // Capture flag's usage/errors in the same pipe.
+				defer func() { os.Stderr = stderr }()
+				return run(tc.args)
+			})
+			if err == nil {
+				t.Fatalf("run(%v) succeeded, want a help/parse error", tc.args)
+			}
+			for _, want := range []string{"-key string", "API key"} {
+				if !strings.Contains(output, want) {
+					t.Errorf("usage must still document --key (%q missing):\n%s", want, output)
+				}
+			}
+			for _, secret := range []string{oldKey, newKey, headerLeak} {
+				if strings.Contains(output, secret) {
+					t.Errorf("usage leaked %q:\n%s", secret, output)
+				}
+				if strings.Contains(err.Error(), secret) {
+					t.Errorf("returned error leaked %q: %v", secret, err)
+				}
+			}
+			if after := snapshotTree(t, home); !reflect.DeepEqual(before, after) {
+				t.Errorf("help/parse failure changed files:\nbefore=%v\nafter=%v", before, after)
+			}
+		})
+	}
+
+	c := openCatalog(t)
+	b, found, err := c.BindingByName("pi", "leak")
+	if err != nil || !found {
+		t.Fatalf("pi binding after help: found=%v err=%v", found, err)
+	}
+	cr, err := c.Credential(b.CredentialID)
+	if err != nil || cr.Key != oldKey {
+		t.Errorf("stored key = %q err=%v, want it unchanged", cr.Key, err)
+	}
+	if got := b.Headers["Authorization"]; got != headerValue {
+		t.Errorf("stored header = %q, want it unchanged", got)
+	}
+}
+
+// TestRunEditKeyFlagSemantics locks in the three --key cases: omitting it keeps
+// the saved key, supplying one rotates it in both the catalog and live config,
+// and explicitly passing an empty value is rejected rather than read as "keep".
+func TestRunEditKeyFlagSemantics(t *testing.T) {
+	home := sandbox(t)
+	seedCodex(t, home)
+	const (
+		oldKey = "sk-old-777777"
+		newKey = "sk-new-888888"
+	)
+	if err := run([]string{"add", "codex", "--name", "gw", "--key", oldKey,
+		"--endpoint", "https://gw.example/v1", "--model", "gpt-5"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	credentialKey := func() string {
+		t.Helper()
+		c := openCatalog(t)
+		b, found, err := c.BindingByName("codex", "gw")
+		if err != nil || !found {
+			t.Fatalf("gw binding: found=%v err=%v", found, err)
+		}
+		cr, err := c.Credential(b.CredentialID)
+		if err != nil {
+			t.Fatalf("credential: %v", err)
+		}
+		return cr.Key
+	}
+	configPath := filepath.Join(home, ".codex", "config.toml")
+	configHas := func(key string) bool {
+		t.Helper()
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Contains(string(data), key)
+	}
+
+	// No --key: the saved key survives an unrelated edit.
+	if err := run([]string{"edit", "codex", "gw", "--model", "gpt-5.5"}); err != nil {
+		t.Fatalf("edit without --key: %v", err)
+	}
+	if got := credentialKey(); got != oldKey {
+		t.Errorf("key after edit without --key = %q, want %q", got, oldKey)
+	}
+	if !configHas(oldKey) {
+		t.Errorf("live config lost the original key after an edit without --key")
+	}
+
+	// Explicit new key: catalog and live config both update.
+	if err := run([]string{"edit", "codex", "gw", "--key", newKey}); err != nil {
+		t.Fatalf("edit with --key: %v", err)
+	}
+	if got := credentialKey(); got != newKey {
+		t.Errorf("key after --key = %q, want %q", got, newKey)
+	}
+	if !configHas(newKey) || configHas(oldKey) {
+		t.Errorf("live config was not rotated to the new key")
+	}
+
+	// Explicit empty key: an error, and nothing is rewritten.
+	before := snapshotTree(t, home)
+	err := run([]string{"edit", "codex", "gw", "--key", ""})
+	if err == nil || !strings.Contains(err.Error(), "API key is required") {
+		t.Fatalf("edit --key empty = %v, want API-key-required error", err)
+	}
+	if after := snapshotTree(t, home); !reflect.DeepEqual(before, after) {
+		t.Errorf("rejected empty key changed files:\nbefore=%v\nafter=%v", before, after)
+	}
+	if got := credentialKey(); got != newKey {
+		t.Errorf("key after rejected empty value = %q, want %q", got, newKey)
+	}
+}
+
 // captureStdout runs fn with os.Stdout piped and returns what it printed.
 func captureStdout(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
@@ -796,6 +1102,35 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 	<-stop
 	_ = reader.Close()
 	return string(out), fnErr
+}
+
+// snapshotTree records file paths and contents under root, so a test can detect
+// observable file additions, removals or content changes (not transient writes).
+func snapshotTree(t *testing.T, root string) map[string]string {
+	t.Helper()
+	files := make(map[string]string)
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[rel] = string(data)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
 }
 
 func TestSwitchDryRunPreviewsWithoutWriting(t *testing.T) {

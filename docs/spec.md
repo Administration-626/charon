@@ -1,8 +1,8 @@
 # Charon 行为规格与验收基线
 
-状态：**草案 v1，待逐项确认，不代表全部验收完成**。整理日期：2026-11-11；依据当前未提交工作树，Git HEAD `305beab`。
+状态：**草案 v1，待逐项确认，不代表全部验收完成**。更新日期：2026-11-15；依据当前未提交工作树，Git HEAD `cf947c6`。
 
-**最新产品结论：按 endpoint 合并到 h，已确认、尚未实现。** 用户先否决“h 隐藏 + p 停供／恢复 key”的双层交互，随后提出合并到 h，并确认继续。当前采用：同地址的所有 Pi 方案一起隐藏／显示，立即更新托管 provider，保留当前默认模型；不同地址即使用同 key，也不连带隐藏。正在使用的地址先拒绝隐藏，d 仍只删选中保存方案。试验用的 p 菜单、独立 key 政策、`disable-key`／`enable-key` 命令及相关字段与屏障已经精准删除；当前 `h` 仍只隐藏选中的单条绑定。详细实现／回退边界见[新 session 接棒](next-session-handoff.md)。
+**最新产品结论：按 endpoint 合并到 h，已确认并实现。** 用户先否决“h 隐藏 + p 停供／恢复 key”的双层交互，随后提出合并到 h，并确认继续。当前采用：同地址的所有 Pi 方案一起隐藏／显示，立即更新托管 provider，保留当前默认模型；不同地址即使用同 key，也不连带隐藏。正在使用的地址先拒绝隐藏，d 仍只删选中保存方案。试验用的 p 菜单、独立 key 政策、`disable-key`／`enable-key` 命令及相关字段与屏障已经精准删除。历史方案与回退边界见[接棒记录](next-session-handoff.md)。
 
 本文件回答“Charon 应该做什么、什么结果算正确”。[README](../README.zh-CN.md)说明操作方式，[AGENTS.md](../AGENTS.md)规定开发安全与工程约束，[代码库文档](codebase/ARCHITECTURE.md)解释结构，[走查记录](engineering-walkthrough.md)保存一轮验证结果。新增规格先放在这里，不为每个命令另造一套配置或测试框架。
 
@@ -49,7 +49,7 @@ Charon 管理 Codex、Claude Code、OpenCode、Pi、Grok 的 endpoint、凭据�
 | G-REF | binding 的模型必须属于其 credential 的 provider；默认模型必须在其注册模型列表中；绑定名在同工具内唯一，不能是含空白／控制字符的名称 | `TestBindingSameProviderConstraint`、`TestNameValidation`、CLI 参数测试 |
 | G-LOCK | mutating Catalog 操作遵守既有 mutex 与 Unix flock；读改写与相关投影不能随意拆开 | Linux/macOS 约束；其他平台没有跨进程并发保证；`StoreBinding` 跨表复合事务仍是已知限制 |
 | G-FAIL | 必须返回真实错误，不把部分成功显示为完全成功；错误结果不自动等于“所有文件未变” | 区分输入拒绝、单文件替换失败、跨文件部分成功；见 Q1 |
-| G-TUI | 主要用户操作必须在 TUI 可用、状态可见；CLI 测试通过不能替代 TUI 操作验收 | 绑定列表、隐藏与复制以按键／渲染测试验收；独立 key 停供试验已被否决并撤回，见 D5；分组 h 尚未实现 |
+| G-TUI | 主要用户操作必须在 TUI 可用、状态可见；CLI 测试通过不能替代 TUI 操作验收 | 绑定列表、隐藏与复制以按键／渲染测试验收；独立 key 停供试验已被否决并撤回，见 D5；分组 h 同时由 catalog 配置断言与 TUI 按键测试覆盖 |
 | G-SANDBOX | 开发测试隔离 HOME / XDG_CONFIG_HOME，用假 key 与 httptest；不能触碰真实配置或 Keychain | 现有测试辅助函数与 AGENTS；本次实验全部在临时目录中执行 |
 
 证据：`internal/artifact/`、`internal/edit/`、`internal/catalog/catalog.go`、`internal/catalog/lock_unix.go`、`internal/catalog/bind.go`、`internal/secret/`、`internal/preview/headers_test.go`。
@@ -216,12 +216,12 @@ API 边界：`Catalog.RemoveBinding` 是内部删除原语，允许删除并清�
 
 ### 8.2 隐藏绑定
 
-- **HIDE-01**：隐藏保留 catalog 的绑定与设置，排除它对多 endpoint 配置的贡献；其他绑定仍可使用相同 endpoint / key。
-- **HIDE-02**：不能隐藏当前绑定；激活隐藏绑定时解除其隐藏。
-- **HIDE-03**：UI `h` 更新隐藏状态后立即重写已有 active 配置；底层 setter 仅保存标志。不能把底层行为直接当成 UI 行为。
-- **HIDE-BOUNDARY**：当前 UI 通过 reapply 更新列表，会重设默认模型；是否应只更新列表并保留工具内的模型选择，以及是否按 endpoint 成组隐藏，见 Q3 与[接棒文档](next-session-handoff.md)。
+- **HIDE-01**：Pi 按规范化 endpoint 分组，同地址的所有保存绑定一起隐藏／显示；隐藏保留 catalog 记录及设置。不同 endpoint 即使共用 key 也互不影响。
+- **HIDE-02**：不能隐藏包含 active 绑定的 endpoint，也不能删除 Pi 磁盘默认正在使用的 provider；激活隐藏组内任一绑定会显示整组。
+- **HIDE-03**：UI `h` 调用 `Catalog.SetBindingHidden`，立即只增删目标 endpoint 的托管 provider 并保存整组标志；不做全量 reapply，不改变 active、Pi settings 或当前默认模型。
+- **HIDE-BOUNDARY**：配置写成功而 catalog 保存失败属于部分生效，必须明确报错并允许修复后重试；legacy extension 仍使用目标 endpoint 时先拒绝。新增、编辑与复制遵守同组状态，d 仍只删除选中的保存绑定。
 
-测试：`internal/catalog/hidden_test.go`、`internal/tui/hidden_test.go`；默认模型副作用由 `onHideKey`→`Reapply` 的源码调用链确认，`[TODO]` 增加专门验收测试。
+测试：`internal/catalog/hidden_test.go`、`internal/catalog/pi_visibility_test.go`、`internal/tui/hidden_test.go`、`internal/tui/pi_visibility_test.go`；覆盖同组不同 key、跨组同 key、即时隐藏／恢复、默认模型与设置字节保留、active／磁盘默认拒绝及 TUI 按键流程。
 
 ### 8.3 请求标头与协议
 
@@ -266,8 +266,8 @@ D1/D2 最初均用临时 HOME、假 key 复现。D1 帮助泄露已修复；随�
 | D1（已修复） | 原 edit 把保存的 key 当成可打印的参数默认值，帮助／参数错误会泄露 | 新增 `TestRunEditHelpDoesNotLeakSecrets`：旧代码四种输出路径失败，修复后通过；`TestRunEditKeyFlagSemantics` 保证省略、换 key、显式空 key 的原行为 | 两次独立变异分别恢复泄露、吞掉显式空值，测试均报警；不把这次窄修复宣称为完整安全审计 |
 | D2（已修复） | 原辅助 CLI 没有继承 Hidden，TUI 已继承 | `TestRunCopyPreservesHiddenOnlyForMultiEndpoint` 旧代码失败、新代码通过；`TestDuplicateHiddenBindingViaKeys` 覆盖 c/x、逐键输入副本名、隐藏标记、模型保留与后续应用 | 三次独立变异：CLI 丢标志、TUI 丢标志、TUI 复制误触发重新应用，均被对应测试发现；不把隐藏等同整把 key 禁用 |
 | D3 | README 的“dry-run 不写文件”若理解为全进程零写入，与启动初始化不一致 | `run` 在 dispatch 前执行 `Catalog.Open`，可建目录、迁移或补齐元数据 | `[ASK USER]` Q2；先明确只读范围再决定是否改 Open 入口 |
-| D4 | 项目要求 CI 绿色，当前 lint 仍有两项原有错误 | `headers_test.go:110` 遮蔽 copy；`validate.go:74` De Morgan 提示 | `[TODO]` 处理门禁并重验，不能因为原有问题就记为通过 |
-| D5（已否决并撤回） | 用户拒绝 h 与停供／恢复 key 并存、恢复不自动生效的设计 | 自动按键／配置／PTY 测试曾通过，但真人反馈为“不采用，宁可不实现”；p 菜单、CLI 命令、政策字段与屏障已删除 | 不重新引入独立 key 政策；按 endpoint 分组实现 h 时仍以用户试用为准 |
+| D4（已修复） | 本地 lint 曾有两项原有错误 | `headers_test.go:110` 遮蔽 copy；`validate.go:74` De Morgan 提示 | 已重命名局部变量并等价简化布尔表达式；本轮新增格式与错误字符串问题也已清理，`golangci-lint run` 通过 |
+| D5（已否决并撤回） | 用户拒绝 h 与停供／恢复 key 并存、恢复不自动生效的设计 | 自动按键／配置／PTY 测试曾通过，但真人反馈为“不采用，宁可不实现”；p 菜单、CLI 命令、政策字段与屏障已删除 | 不重新引入独立 key 政策；endpoint 分组 h 已实现，仍以用户试用为准 |
 | D6（设计风险，未修复） | 跨工具复制只报告保存结果，没有解释请求协议变化、标头不迁移与兼容性未验证；反向复制到 Pi 统一落到 Chat Completions | 复制调用链及 `TestRunPreservesPiEndpointType` 可确认默认；Claude／Codex adapter 分别使用 Anthropic／Responses，列模型成功不验证推理 | 已补 7.1 的当前行为、设计判断与待补验收；`[ASK USER]` Q5。本轮仅文档，不把建议当成已实现行为 |
 
 覆盖率阈值未配置；上一轮工作树总体 statement coverage 为 80.8%。这不是规格覆盖率，也不能证明没有回退。短时 fuzz、共享构造器的差分与有限变异检查均是有边界的证据。
@@ -307,22 +307,13 @@ D1/D2 最初均用临时 HOME、假 key 复现。D1 帮助泄露已修复；随�
 
 真正待确认的是：**你只想查看时，是否连 Charon 自己的首次建目录／整理旧数据也不能发生？** 不是在问“能否偷偷修改 Pi”。目前不改初始化流程；只有出现实际零写入需求时才讨论更强约束，不要求用户现在作决定。
 
-### Q3 — 隐藏备用方案，为什么会把另一方案正在用的模型改回去？
+### Q3 — 隐藏备用方案，为什么会把另一方案正在用的模型改回去？（已解决）
 
-这里隐藏的是**一条保存的方案**，不是一把 key 或模型名字。
+旧实现按 h 隐藏 `backup` 时会全量重新应用 active 的 `work`，因此可能把用户已在 Pi 中选择的 `model-big` 重置为 `work` 保存的 `model-small`。现在 h 只增删 `backup` 所在 endpoint 的托管 provider，不重写 `settings.json`，所以当前默认模型、active 身份和其他 provider 保持不变。
 
-例子：Charon 当前确认使用 `work`，保存的默认模型是 `model-small`，列表里还注册了 `model-big`；你后来在 Pi 配置里把默认改成了 `model-big`。另有 `backup`，使用另一网关，现在想把 backup 从 Pi 列表隐藏。
+隐藏状态按 endpoint 而不是 key 归组：同地址的别名一起隐藏，不同地址即使共用 key 也互不影响。如果 active 身份属于目标组，或 Pi 磁盘默认已经指向目标 provider，操作会被拒绝并提示先在 TUI 切换到其他 endpoint；若目标已在 catalog 中 active 但磁盘默认漂移，则先按 r 明确重新应用。不会暗中切换网关，也不保证运行中 Pi 进程的内存选择随磁盘变化。
 
-目前按 h 隐藏 backup 时，会重新应用 work 的整份保存配置，因此可能把 Pi 的默认模型从 `model-big` 改回 `model-small`。原来问“保留模型”，指的是：**仅隐藏 backup 时，要不要避免这个无关的模型重置？** 不是问要不要删除 catalog 里的模型记录。
-
-必须另分两种情况：
-
-- **work 与 backup 用同一个 key K**：隐藏 backup 不等于处理 K；work 仍允许使用 K，也不能仅因 key 相同就删除 work 的模型选择。独立停供整把 key 的试验已被否决并撤回，不再作为隐藏的替代任务。
-- **Pi 的磁盘默认已经指向 backup，正好要隐藏这个条目**：删除它后不能无条件保留一个指向已不存在 provider 的默认选择。当前 UI 会重新应用 work、切回它的默认；是保持这个行为，还是先拒绝并提示换方案，需要单独的场景验收，不能藏在一句“保留当前模型”里。
-
-Charon 拒绝隐藏的是它自己确认的 active 方案，不会因为 Pi 手工选了 backup 就自动把 active 身份改为 backup。上述讨论只涉及磁盘默认，不保证运行中 Pi 的内存选择随之改变。
-
-`[ASK USER]` 待确认的是这些具体场景，不是无条件保留任意模型。本轮不改隐藏行为；已有调用链证据，尚缺专门的模型漂移验收测试。
+该方向已由用户确认并实现；`TestPiVisibilityEndpointImmediateAndDefaultsUntouched`、`TestPiVisibilityDiskDefaultRefused` 与 `TestPiVisibilityViaHKeys` 覆盖配置字节保留、拒绝路径和 TUI 按键流程。
 
 ### Q4 — 改 work 的 context size，为什么 backup 以后也会跟着变？
 
@@ -373,9 +364,9 @@ gopls 不可用，LSP 检查未运行；需要时安装 gopls 或在 `pi-lsp.jso
 
 **D5 的独立 key 停供试验已撤回。** 曾实现的 p 双动作菜单、确认页、`disable-key`／`enable-key` 命令、`Credential.PiDisabled`、`AuthSpec.PiDisabledKeys` 以及投影／激活／stash／标头屏障均已精准删除。此前自动化与 PTY 结果仅作为“被否决设计”的历史证据，不能替代产品决定，也不能作为重新引入该功能的理由。
 
-撤回时保留了原有 `h`、header 与格式保留编辑器、差分／fuzz 测试、`cmdEdit` 帮助不泄露 key 的修复、隐藏复制修复及无关工作树改动；未安装或替换用户现有二进制。按 endpoint 分组的新 `h` 尚未实现。
+撤回时保留了原有 `h`、header 与格式保留编辑器、差分／fuzz 测试、`cmdEdit` 帮助不泄露 key 的修复、隐藏复制修复及无关工作树改动；未安装或替换用户现有二进制。按 endpoint 分组的新 `h` 现已实现，当前规则与验收见 8.2 和 Q3。
 
-Q1 的“写配置失败，明确报错后重试”已收到用户答案；Q2–Q4 先解释具体场景，再按用户需要逐项确认，不能当成已批准的功能改动。临时证据在 `/tmp/charon-help-fix-di397ba1/`：修复前后目标日志、`checks.json`、`mutations.json` 与只读场景复核报告；可重复运行的回归案例保存在 `cmd/charon/main_test.go`。
+Q1 的“写配置失败，明确报错后重试”已收到用户答案；Q2 与 Q4 先解释具体场景，再按用户需要逐项确认，不能当成已批准的功能改动。Q3 已按 8.2 实现并验收。临时证据在 `/tmp/charon-help-fix-di397ba1/`：修复前后目标日志、`checks.json`、`mutations.json` 与只读场景复核报告；可重复运行的回归案例保存在 `cmd/charon/main_test.go`。
 
 **D6 本轮仅完成设计审查与规格记录，未改功能。** 在当前工作树的临时副本中运行 `make fmt`、`make test`，隔离 HOME／XDG_CONFIG_HOME，避免格式化其他未完成的源文件。格式化与 vet 通过；六项复制／协议／Claude 地址相关测试另以 `-race -count=1` 重跑通过。全量测试未通过：catalog 的 `TestHiddenDuplicateDoesNotShadowVisible`、`TestEditingKeepsHidden` 失败，TUI 的协议下拉、配置摘要、底栏和详情等行数断言失败。本轮不修这些隐藏／布局问题，也不据此更新其交付状态。日志在 `/tmp/charon-copy-spec-lb7755rh/{fmt,test,copy-tests}.log`；没有运行真实网关、外部 CLI 会话、lint 或新建议交互的验收，COPY-04～07 的待确认项仍未实现。
 

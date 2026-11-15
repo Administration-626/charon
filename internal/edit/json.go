@@ -96,7 +96,8 @@ func keepCRLF(out, orig []byte) []byte {
 }
 
 // PatchJSON computes a config change without writing a file: the deletes
-// are applied first, then the sets, so a key in both ends up set. A byte
+// are applied first, then the sets, so a key in both ends up set — such a key
+// is only set, keeping the place it has in the file. A byte
 // order mark raw starts with is read through and kept.
 func PatchJSON(raw []byte, del []string, set []KV) ([]byte, error) {
 	raw, marked := bytes.CutPrefix(raw, bom)
@@ -105,7 +106,17 @@ func PatchJSON(raw []byte, del []string, set []KV) ([]byte, error) {
 	}
 	orig := raw
 	var err error
+	// A key named by both ends up set, so it is only set: deleting it first
+	// and inserting it again would move it to the front of its object, and the
+	// user's key order is what this editor exists to keep.
+	setting := make(map[string]bool, len(set))
+	for _, kv := range set {
+		setting[kv.Path] = true
+	}
 	for _, key := range del {
+		if setting[key] {
+			continue
+		}
 		raw, _, err = delJSONBytes(raw, key)
 		if err != nil {
 			return nil, err
@@ -210,7 +221,7 @@ func insertKey(raw, stripped []byte, from int, key string, value any) ([]byte, e
 		return nil, fmt.Errorf("cannot locate object for %q", key)
 	}
 	k, _ := json.Marshal(key)
-	pretty := bytes.IndexByte(raw, '\n') >= 0
+	pretty := !compact(raw)
 	empty := len(bytes.TrimSpace(raw[open+1:end])) == 0
 
 	if !pretty {
@@ -233,9 +244,22 @@ func insertKey(raw, stripped []byte, from int, key string, value any) ([]byte, e
 	return splice(raw, open+1, 0, []byte("\n"+kv+","))
 }
 
+// compact reports whether an edit writes its members on one line: the document
+// is written on a single line, and it is not the empty object an edit of a
+// missing or empty file starts from. Such a file reads as compact however it
+// was saved — its only line break is the one after its content — so a member
+// written into it stays on that line instead of being laid out on its own.
+func compact(raw []byte) bool {
+	b := bytes.TrimSpace(raw)
+	if bytes.Equal(b, []byte("{}")) {
+		return false // a document charon is creating: write it multi-line
+	}
+	return !bytes.Contains(b, []byte("\n"))
+}
+
 // marshalAt renders value with indentation matching the line that holds pos.
 func marshalAt(raw []byte, pos int, value any) []byte {
-	if bytes.IndexByte(raw, '\n') < 0 {
+	if compact(raw) {
 		b, _ := json.Marshal(value)
 		return b
 	}
@@ -365,12 +389,17 @@ func delJSONBytes(raw []byte, keyPath string) ([]byte, bool, error) {
 	from, to := a, b
 	ls := bytes.LastIndexByte(raw[:a], '\n') + 1
 	alone := len(bytes.TrimSpace(raw[ls:a])) == 0
+	// Whether a comma follows is read off the file itself: jsonc blanks out
+	// comments and trailing commas alike, so stripped cannot tell a member
+	// that has a comma from one that does not. The comma has to go with the
+	// member either way — leaving it behind is a JSONC-only trailing comma at
+	// best, and the edit that follows it fails.
 	j := b
-	for j < len(stripped) && ws(stripped[j]) {
+	for j < len(raw) && ws(raw[j]) {
 		j++
 	}
 	var out []byte
-	if j < len(stripped) && stripped[j] == ',' {
+	if j < len(raw) && raw[j] == ',' {
 		// not the last member: drop through the trailing comma
 		to = j + 1
 		if alone {
@@ -488,7 +517,7 @@ func setJSONAfterBytes(raw []byte, anchor, keyPath string, value any) ([]byte, e
 		return setJSONBytes(raw, keyPath, value) // first-member insert
 	}
 	k, _ := json.Marshal(unescapeKey(parts[len(parts)-1]))
-	pretty := bytes.IndexByte(raw, '\n') >= 0
+	pretty := !compact(raw)
 	// a comma after the anchor's value means the anchor is not the last
 	// member; the key goes between the comma and the next member
 	at := a.Index + len(a.Raw)

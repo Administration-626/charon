@@ -581,9 +581,42 @@ func describeModels(slug string, slugs []string) string {
 	return slug
 }
 
+// parseHeaders runs after flag parsing so invalid input is never echoed by flag's
+// "invalid value" error (header values can contain credentials).
+func parseHeaders(fs *flag.FlagSet, t *tools.Tool, value string) (map[string]string, error) {
+	explicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "headers" {
+			explicit = true
+		}
+	})
+	if !explicit {
+		return nil, nil
+	}
+	if t.Name != "pi" {
+		return nil, fmt.Errorf("request headers are only supported for Pi")
+	}
+	var object map[string]any
+	if err := json.Unmarshal([]byte(value), &object); err != nil || object == nil {
+		return nil, fmt.Errorf("--headers must be a JSON object of string values")
+	}
+	headers := make(map[string]string, len(object))
+	for name, value := range object {
+		s, ok := value.(string)
+		if !ok {
+			return nil, fmt.Errorf("--headers must be a JSON object of string values")
+		}
+		headers[name] = s
+	}
+	if err := tools.ValidateHeaders(headers); err != nil {
+		return nil, err
+	}
+	return headers, nil
+}
+
 func cmdAdd(cat *catalog.Catalog, args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: charon add <tool> --name <b> --key <k> [--endpoint <url>] [--model <id>] [--models <id,...>]")
+		return fmt.Errorf("usage: charon add <tool> --name <b> --key <k> [--endpoint <url>] [--model <id>] [--models <id,...>] [--headers <json>]")
 	}
 	t, err := requireTool(args[0])
 	if err != nil {
@@ -595,7 +628,12 @@ func cmdAdd(cat *catalog.Catalog, args []string) error {
 	model := fs.String("model", "", "model id")
 	modelList := fs.String("models", "", "comma-separated model ids to offer in the tool's own picker")
 	name := fs.String("name", "", "binding name")
+	headerJSON := fs.String("headers", "", "Pi request headers as a JSON object ({} clears)")
 	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	headers, err := parseHeaders(fs, t, *headerJSON)
+	if err != nil {
 		return err
 	}
 	if t.ApplyAuth == nil {
@@ -621,6 +659,12 @@ func cmdAdd(cat *catalog.Catalog, args []string) error {
 	if err != nil {
 		return err
 	}
+	if headers != nil {
+		b, err = cat.SetBindingHeaders(b.ID, headers)
+		if err != nil {
+			return err
+		}
+	}
 	if _, err := cat.Activate(b.ID); err != nil {
 		return err
 	}
@@ -634,7 +678,7 @@ func cmdAdd(cat *catalog.Catalog, args []string) error {
 
 func cmdEdit(cat *catalog.Catalog, args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: charon edit <tool> <binding> [--endpoint --key --model --models --name]")
+		return fmt.Errorf("usage: charon edit <tool> <binding> [--endpoint --key --model --models --name --headers]")
 	}
 	t, err := requireTool(args[0])
 	if err != nil {
@@ -658,26 +702,40 @@ func cmdEdit(cat *catalog.Catalog, args []string) error {
 	}
 
 	// Flags default to the current values, so an unset flag leaves that field unchanged.
+	// --key is the exception: its default is applied after parsing because -h/--help
+	// and every parse error print the FlagSet's defaults, which must never include a
+	// saved credential.
 	// --models is not defaulted: whether the user passed it decides if the picker is rewritten.
 	fs := flag.NewFlagSet("edit", flag.ContinueOnError)
 	endpoint := fs.String("endpoint", view.endpoint, "endpoint")
-	key := fs.String("key", cr.Key, "API key")
+	key := fs.String("key", "", "API key")
 	model := fs.String("model", view.slug, "model id")
 	modelList := fs.String("models", "", "comma-separated model ids to offer in the tool's own picker")
 	newName := fs.String("name", "", "rename the binding")
+	headerJSON := fs.String("headers", "", "Pi request headers as a JSON object ({} clears)")
 	if err := fs.Parse(args[2:]); err != nil {
+		return err
+	}
+	headers, err := parseHeaders(fs, t, *headerJSON)
+	if err != nil {
 		return err
 	}
 	explicit := false
 	modelExplicit := false
+	keyExplicit := false
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
 		case "models":
 			explicit = true
 		case "model":
 			modelExplicit = true
+		case "key":
+			keyExplicit = true
 		}
 	})
+	if !keyExplicit {
+		*key = cr.Key
+	}
 	modelID := strings.TrimSpace(*model)
 	if explicit && !modelExplicit {
 		requested := splitModels(*modelList)
@@ -702,6 +760,12 @@ func cmdEdit(cat *catalog.Catalog, args []string) error {
 	b, err := catalog.StoreBinding(cat, t, &cur, target, *endpoint, *key, modelID, splitModels(*modelList), explicit, nil)
 	if err != nil {
 		return err
+	}
+	if headers != nil {
+		b, err = cat.SetBindingHeaders(b.ID, headers)
+		if err != nil {
+			return err
+		}
 	}
 	// The active check and projection are serialized with switch so the tool config
 	// cannot end up describing a binding that the active pointer no longer names.
@@ -800,8 +864,21 @@ func cmdDuplicate(cat *catalog.Catalog, args []string) error {
 	if dstTool.Name == "pi" && b.Tool == "pi" {
 		piAPI = b.PiAPI
 	}
-	if _, err := catalog.StoreBinding(cat, dstTool, nil, dstName, p.BaseURL, cr.Key, slug, slugs, true, nil, piAPI); err != nil {
+	dup, err := catalog.StoreBinding(cat, dstTool, nil, dstName, p.BaseURL, cr.Key, slug, slugs, true, nil, piAPI)
+	if err != nil {
 		return err
+	}
+	if dstTool.Name == "pi" && b.Tool == "pi" && b.Headers != nil {
+		if _, err := cat.SetBindingHeaders(dup.ID, b.Headers); err != nil {
+			return err
+		}
+	}
+	// Carry the hidden flag only where a list exists to hide from; a tool with a
+	// single endpoint has no equivalent setting and must not be given one.
+	if b.Hidden && dstTool.MultiEndpoint {
+		if err := cat.SetBindingHidden(dup.ID, true); err != nil {
+			return err
+		}
 	}
 	fmt.Printf("Copied %s binding %q → %s %q\n", t.Title, args[1], dstTool.Title, dstName)
 	return nil

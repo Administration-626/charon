@@ -3,7 +3,6 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -209,7 +208,7 @@ func newGrok() *Tool {
 			}
 
 			if info.AuthMode == "" {
-				if data, err := os.ReadFile(authPath); err == nil && len(data) > 0 {
+				if data, err := readConfig(authPath); err == nil && len(data) > 0 {
 					var auth map[string]any
 					if json.Unmarshal(data, &auth) == nil && len(auth) > 0 {
 						info.AuthMode = "oauth"

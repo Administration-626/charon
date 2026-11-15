@@ -886,6 +886,14 @@ func SetTOMLTablesMatching(path string, names, prefixes []string, tables []Table
 				return true
 			}
 		}
+		// A table about to be written is replaced too, even when no name or
+		// prefix covers it: leaving the old block and appending the new one
+		// would put a duplicate header in the file.
+		for _, t := range tables {
+			if name == t.Name || bare == BareTOMLName(t.Name) {
+				return true
+			}
+		}
 		return false
 	}
 	top := len(lines)

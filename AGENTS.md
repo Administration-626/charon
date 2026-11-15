@@ -5,6 +5,27 @@ Guidance for AI coding agents (and humans) working in this repository.
 and Grok CLIs and switches each one's **endpoint + credentials** between
 named bindings.
 
+## Primary user workflow: TUI
+
+The user primarily uses the interactive TUI. Treat CLI commands as secondary
+automation/compatibility entry points, not the required path for normal use or
+user acceptance. Core user-facing actions must be reachable and understandable
+in the TUI; a CLI-only implementation is not complete delivery for this user.
+Exercise the TUI's key-message flow and rendered state in tests, alongside
+catalog/config assertions. Do not remove existing CLI support without explicit
+approval, and do not invent more CLI commands instead of completing the UI.
+
+**Latest approved direction:** merge the behavior into `h`, grouped by endpoint
+address for Pi. All saved Pi bindings at that address hide/show together;
+different endpoints remain independent even if they share a key. Hide/show must
+update the managed provider immediately without switching or resetting the current
+model. Refuse hiding the endpoint in use; keep `d` scoped to the selected binding.
+The experimental `p` menu, independent key policy, and its disable-key/enable-key
+commands have been removed. Group-based `h` is implemented; preserve its endpoint
+scope, immediate provider update, live-model preservation and active-endpoint
+refusals. See `docs/spec.md` for the behavior contract and
+`docs/next-session-handoff.md` for the approved cases and historical evidence.
+
 ## Golden rule: this tool edits real user credentials
 
 `charon` reads and writes live config for other tools (`~/.codex`, `~/.claude`,
@@ -82,6 +103,28 @@ Data lives under `~/.config/charon/` (`$XDG_CONFIG_HOME` respected):
 `providers.json`, `credentials.json`, `models.json`, `bindings.json`, `active.json`,
 and `stash.json` (written on the first switch; `charon off` restores from it).
 
+### What `charon off` restores
+
+The stash records a tool's config before charon first writes to it, and off puts
+it back **byte for byte**: comments, key order, indentation, a CRLF or BOM
+encoding, a missing final newline. Three rules keep that promise:
+
+- `OwnedFile.JSON`, `TOMLTop` and `TOMLKeys` are restorable (captured with their
+  written form and, for JSON, the previous sibling that anchors them back into
+  place). Tables, table-name prefixes and JSON key prefixes are charon's own
+  namespace: off deletes them and never restores them, so a fixture must not
+  pre-exist one.
+- An object charon created is recorded (`StashVal{}` with `Absent`) and removed
+  once the entries inside it are gone — but only when nothing is left in it, so a
+  key the user added while charon was active survives. `FileStash.Absent` marks a
+  file charon created, removed if nothing but an empty object remains.
+- A file's final line break is the file's, not the edit's: `joinLinesLike` in
+  `internal/edit` re-adds the empty last element a deletion consumed and strips a
+  line break the file never had. Nothing else may decide how a file ends.
+
+A file that held only blank lines comes back empty rather than with its exact
+count of newlines; anything else restores exactly.
+
 ### Store locking
 
 - **Mutations are serialized by an advisory lock.** Every mutating `Catalog` method
@@ -142,15 +185,26 @@ it in the dropdown or write it as an API value.
 
 ### Hidden bindings (`Binding.Hidden`)
 
-`h` on the bindings screen keeps a binding in the catalog but leaves its endpoint
-out of the tool's config. `Catalog.SetBindingHidden` owns the flag and
-`Catalog.endpointGroups` honors it, so the endpoint disappears from a
-multi-endpoint tool's list on the next apply and its stale provider entry is
-removed by the usual prefix cleanup. Two invariants: the active binding is never
-hidden (its defaults would point at an entry that is not written), and activating
-a hidden binding clears the flag. Editing preserves it; duplicating carries it
-when the destination also holds several endpoints. A tool without
+`h` on the bindings screen keeps bindings in the catalog but leaves their endpoint
+out of the tool's config. For Pi, all bindings at the same normalized endpoint
+share one visibility state. `Catalog.SetBindingHidden` updates that group and uses
+`tools.PreparePiEndpointVisibility` to add or remove only its managed provider
+immediately, without reapplying the active binding or changing Pi settings;
+`Catalog.endpointGroups` honors the same flags on later applies. Hiding is refused
+when the group contains the active binding or the on-disk default uses the
+endpoint. Activating any binding in a hidden group shows the whole group; adding,
+editing and duplicating preserve or inherit the group state. A tool without
 `MultiEndpoint` has no list to hide from, and the setter refuses.
+
+### Pi key policy (retired)
+
+The experimental `p` menu, `disable-key`/`enable-key` commands and
+`Credential.PiDisabled` policy were rejected by the user and removed. Do not
+reintroduce a separate key policy or a write barrier in projection, activation,
+stash restoration, header handling, CLI or TUI. Hiding is an endpoint concern,
+not a key concern: hiding one endpoint must not disable the same key on another.
+The supported replacement is endpoint-grouped hiding through `h`. Historical
+evidence and the approved acceptance cases stay in `docs/next-session-handoff.md`.
 
 ### Built-in context windows (`internal/models/builtin.go`)
 
@@ -181,6 +235,10 @@ when the destination also holds several endpoints. A tool without
 
 ## Conventions
 
+Behavior contracts and acceptance scenarios live in `docs/spec.md`. Update the
+relevant rule when changing behavior; keep `[ASK USER]` decisions explicit rather
+than treating the current implementation as the only valid product requirement.
+
 - Standard Go style: `gofmt`/`goimports`, tabs, error wrapping with `%w`,
   table-driven tests, small focused packages, exported identifiers documented.
 - Keep `cmd/` thin — logic belongs in `internal/` packages so it stays testable.
@@ -203,6 +261,26 @@ when the destination also holds several endpoints. A tool without
 - `internal/edit` has fuzz targets (`go test ./internal/edit -fuzz=FuzzPatchJSON`)
   and a fixture corpus in `testdata/` compared against golden files. Regenerate
   goldens with `-update` only after reading the diff.
+- `internal/edit/diff_test.go` checks each edit differentially: the same change
+  is made to a decoded copy of the document (`map[string]any`, whole-document
+  rewrite) and the two are compared **by value**. Bytes are expected to differ —
+  preserving comments, key order and indentation is the point of the package —
+  so a difference means the edit changed the document's meaning. A new edit
+  operation or a new config shape belongs there as a case; keep the oracle a
+  stub, never a second implementation of the editor.
+- `internal/tools/off_diff_test.go` does the same for `charon off`: every tool's
+  config is generated across the layouts a hand-edited file really has (2/4
+  spaces, tabs, compact, CRLF, BOM, no final newline) and with charon's entries
+  already present in each position of the object, then captured, applied and
+  removed — the bytes must match. A new owned path or layout belongs in that
+  matrix, and every off-behaviour fix gets a focused test next to it.
+- `internal/tools/pi_groups_diff_test.go` covers the one multi-endpoint tool the
+  other way round: an endpoint registered as a `Groups` entry must come out
+  identical to applying that endpoint alone (labels aside, which the test
+  normalizes and checks against each other). The two paths share model/header
+  value builders, so protocol resolution, window defaults, thinking presets and header projection
+  cannot drift between them. Mutation-check it before trusting it: a case only
+  counts when breaking the group path makes it fail.
 - `make vuln` runs `govulncheck`; `make hooks` points git at `.githooks/pre-push`
   (test + lint + vuln, skipping tools that are not installed).
 

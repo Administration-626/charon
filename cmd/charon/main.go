@@ -106,5 +106,6 @@ Usage:
   charon uninstall           remove the installed charon binary
 
 Tools: codex, claude, opencode, pi, grok
+Pi add/edit: --headers '<JSON object>' saves request headers; '{}' clears them.
 `)
 }

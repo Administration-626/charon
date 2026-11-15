@@ -20,7 +20,7 @@
 | `credentials.json` | 保存 API key | `internal/catalog` | 本地明文，依赖文件权限保护 | `internal/catalog/catalog.go` |
 | `models.json` | 模型 slug、上下文窗口、effort 与 thinking 映射 | `internal/catalog` | 模型元数据可能过期 | `internal/catalog/windows.go`、`internal/models/builtin.go` |
 | `bindings.json` | 工具到 credential/model 的引用，含 `piApi` 与 `hidden` | `internal/catalog` | 引用完整性依赖写入时校验 | `internal/catalog/catalog.go` |
-| `active.json` | 每个工具当前 binding | `internal/catalog` | 需要与 live config 保持一致 | `internal/catalog/project.go` |
+| `active.json` | 每个工具上次确认的 binding 身份，不是实时配置或版本快照 | `internal/catalog` | 与 live config 可能不同，status 需分开显示 | `internal/catalog/project.go` |
 | `stash.json` | 首次切换前各工具配置的原值，供 `charon off` 恢复 | `internal/catalog/stash.go` | 与 live config 一样包含真实 key，需同样保护 | `internal/catalog/stash.go`、`internal/tools/stash.go` |
 | 目标 CLI 配置文件 | 实际运行配置 | `internal/tools` | 不同格式和多文件投影 | `internal/tools/*.go` |
 
@@ -28,11 +28,12 @@
 
 - Charon 将 key 保存在 `credentials.json`，并把 key 写入对应工具自己的配置文件；文件写入通常为 `0600`，目录为 `0700`。`stash.json` 还原的是同样含 key 的原文，也按 `0600` 写入。
 - 官方 OAuth 登录属于各 CLI 自己的业务；适配器只读取必要的状态，不迁移或覆盖 OAuth 凭据。证据：`internal/tools/*.go`、`AGENTS.md`。
-- `status` 和 JSON 输出遮罩密钥；没有密钥轮换、加密存储或导入导出机制。后两项当前为 `[TODO]`，不是已实现能力。
+- `status` 和 JSON 输出按规范遮罩密钥；edit 帮助输出的 key 默认值泄露已修复，并增加帮助／参数错误回归测试，见[规格 D1](../spec.md)。这不是完整凭据安全证明；用户自行把凭据塞入 endpoint URL 等输入域仍需另行验收。没有自动密钥轮换或静态加密机制；通用配置导入／导出明确不在当前范围，不默认列为建设任务。
+- Pi 的独立 key 停供／恢复试验（p 菜单、`disable-key`／`enable-key`、`PiDisabled` 政策）已被用户否决并撤回，不再是产品入口。隐藏按 endpoint 处理，不按 key 字面值连带其他地址；分组隐藏的 `h` 尚未实现，行为边界见[接棒文档](../next-session-handoff.md)。
 
 ## 4) 可靠性和失败行为
 
-- 模型 HTTP 请求设置 20 秒 context timeout；跨主机重定向会删除认证头；没有重试或熔断。证据：`internal/models/fetch.go`。
+- 模型 HTTP 请求设置 20 秒 context timeout；跨主机重定向会删除认证头。发现入口会尝试另一方言，但没有同方言的自动退避重试或熔断。证据：`internal/models/fetch.go`、`cmd/charon/commands.go` 的 `probeModels`。
 - 模型发现失败时，TUI 切换到手动输入模型 ID；CLI 直接返回错误。证据：`internal/tui/picker.go`、`cmd/charon/commands.go`。
 - 目标配置写入通过临时文件、`Sync`、`Chmod`、`Rename`；Pi 的两份 JSON 配置仍然分两次写入。证据：`internal/artifact/artifact.go`、`internal/tools/pi.go`。
 

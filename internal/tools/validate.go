@@ -65,6 +65,31 @@ func EndpointHasClaudeV1(t *Tool, ep string) bool {
 	return strings.HasSuffix(strings.TrimRight(u.Path, "/"), "/v1")
 }
 
+// ValidateHeaders rejects invalid HTTP field names, control characters in values,
+// and duplicate names that differ only in case. Values are never included in errors.
+func ValidateHeaders(headers map[string]string) error {
+	seen := make(map[string]bool, len(headers))
+	for name, value := range headers {
+		if name == "" || strings.IndexFunc(name, func(r rune) bool {
+			return (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') &&
+				(r < '0' || r > '9') && !strings.ContainsRune("!#$%&'*+-.^_`|~", r)
+		}) >= 0 {
+			return fmt.Errorf("invalid HTTP header name %q", name)
+		}
+		folded := strings.ToLower(name)
+		if seen[folded] {
+			return fmt.Errorf("duplicate HTTP header name %q (names are case-insensitive)", name)
+		}
+		seen[folded] = true
+		for i := range len(value) {
+			if value[i] < 0x20 && value[i] != '\t' || value[i] == 0x7f {
+				return fmt.Errorf("invalid value for HTTP header %q", name)
+			}
+		}
+	}
+	return nil
+}
+
 // ValidateKey reports whether key is a non-empty API key/token once trimmed.
 func ValidateKey(key string) error {
 	if strings.TrimSpace(key) == "" {

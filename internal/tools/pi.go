@@ -302,6 +302,56 @@ type piAggregation struct {
 	Groups       []piProvider
 }
 
+// piHeaders escapes explicitly supplied literal values, or carries over headers
+// from a managed provider for this exact endpoint before stale keys are removed.
+// Existing Pi interpolation/command expressions are already encoded and stay raw.
+func piHeaders(headers map[string]string, providers map[string]any, endpoint string) (map[string]string, error) {
+	if headers != nil {
+		if err := ValidateHeaders(headers); err != nil {
+			return nil, err
+		}
+		encoded := make(map[string]string, len(headers))
+		for name, value := range headers {
+			encoded[name] = piEscapeValue(value)
+		}
+		return encoded, nil
+	}
+	var keys []string
+	for key := range providers {
+		if key == managedProvider || strings.HasPrefix(key, managedProvider+"-") {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		provider, _ := providers[key].(map[string]any)
+		if provider["baseUrl"] != endpoint {
+			continue
+		}
+		raw, exists := provider["headers"]
+		if !exists {
+			continue
+		}
+		values, ok := raw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("providers.%s.headers must be an object of strings", key)
+		}
+		inherited := make(map[string]string, len(values))
+		for name, value := range values {
+			s, ok := value.(string)
+			if !ok {
+				return nil, fmt.Errorf("providers.%s.headers must be an object of strings", key)
+			}
+			inherited[name] = s
+		}
+		if err := ValidateHeaders(inherited); err != nil {
+			return nil, fmt.Errorf("providers.%s.headers: %w", key, err)
+		}
+		return inherited, nil
+	}
+	return nil, nil
+}
+
 // piGroups names the binding's own provider after its endpoint and builds the
 // entries for the other endpoints. Pi shows a model as provider/id in /model
 // and --list-models, so a provider key of plain "charon" hides which endpoint
@@ -311,7 +361,7 @@ type piAggregation struct {
 // holds it. Each entry carries that endpoint's own key and request protocol, so
 // a request reaches its gateway the way that endpoint's binding would send it;
 // an absent protocol means openai-completions, pi's default.
-func piGroups(a AuthSpec) (piAggregation, error) {
+func piGroups(a AuthSpec, providers map[string]any) (piAggregation, error) {
 	labels := piEndpointLabels(a.Endpoint, a.Groups)
 	taken := map[string]bool{}
 	agg := piAggregation{PrimaryLabel: labels[a.Endpoint]}
@@ -320,21 +370,35 @@ func piGroups(a AuthSpec) (piAggregation, error) {
 		if g.Endpoint == "" || g.Endpoint == a.Endpoint {
 			continue
 		}
-		api, err := ResolvePiAPI(g.PiAPI)
-		if err != nil {
-			return piAggregation{}, fmt.Errorf("endpoint %s: %w", g.Endpoint, err)
-		}
 		label := labels[g.Endpoint]
 		key := piProviderKey(label, taken)
-		agg.Groups = append(agg.Groups, piProvider{Key: key, Entry: map[string]any{
-			"name":    label,
-			"baseUrl": g.Endpoint,
-			"apiKey":  piEscapeValue(g.Key),
-			"api":     api,
-			"models":  piBuildModels(g.Models, api, label),
-		}})
+		entry, err := piGroupEntry(g, label, providers)
+		if err != nil {
+			return piAggregation{}, err
+		}
+		agg.Groups = append(agg.Groups, piProvider{Key: key, Entry: entry})
 	}
 	return agg, nil
+}
+
+// piGroupEntry is shared by full apply and endpoint-only visibility changes.
+func piGroupEntry(g EndpointGroup, label string, providers map[string]any) (map[string]any, error) {
+	api, err := ResolvePiAPI(g.PiAPI)
+	if err != nil {
+		return nil, fmt.Errorf("endpoint %s: %w", g.Endpoint, err)
+	}
+	headers, err := piHeaders(g.Headers, providers, g.Endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("endpoint %s headers: %w", g.Endpoint, err)
+	}
+	entry := map[string]any{
+		"name": label, "baseUrl": g.Endpoint, "apiKey": piEscapeValue(g.Key),
+		"api": api, "models": piBuildModels(g.Models, api, label),
+	}
+	if headers != nil {
+		entry["headers"] = headers
+	}
+	return entry, nil
 }
 
 // piWriteProviders rewrites charon's provider entries in models.json.
@@ -421,6 +485,9 @@ func piLegacyConfig(path string) (*piProviderConfig, error) {
 	if !stat.Mode().IsRegular() {
 		return nil, fmt.Errorf("refusing to migrate %s: not a regular file; disable it manually", path)
 	}
+	// Read raw, not through readConfig: the bytes are compared against what
+	// charon generated, so a byte order mark really is a modification and must
+	// make the migration refuse rather than accept a file charon did not write.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read legacy pi extension: %w", err)
@@ -492,7 +559,7 @@ func newPi() *Tool {
 			// is an endpoint pi was already set up for, with the protocol that
 			// binding saved. The binding's own entry is keyed after its
 			// endpoint too, so provider/id never reads a bare "charon".
-			agg, err := piGroups(a)
+			agg, err := piGroups(a, providers)
 			if err != nil {
 				return err
 			}
@@ -519,6 +586,10 @@ func newPi() *Tool {
 				previous, _ = providers[managedProvider].(map[string]any)
 			}
 
+			headers, err := piHeaders(a.Headers, providers, a.Endpoint)
+			if err != nil {
+				return fmt.Errorf("endpoint %s headers: %w", a.Endpoint, err)
+			}
 			modelSlug := strings.TrimSpace(a.Model)
 			var entries any
 			if a.Models == nil {
@@ -559,6 +630,18 @@ func newPi() *Tool {
 				{Path: "providers." + primaryKey + ".api", Value: api},
 				{Path: "providers." + primaryKey + ".models", Value: entries},
 			}
+			if headers == nil {
+				// A reused provider key can now name a different endpoint. Never
+				// leave that old endpoint's headers attached to the new one.
+				if current, ok := providers[primaryKey].(map[string]any); ok {
+					if _, exists := current["headers"]; exists {
+						headers = map[string]string{}
+					}
+				}
+			}
+			if headers != nil {
+				msets = append(msets, edit.KV{Path: "providers." + primaryKey + ".headers", Value: headers})
+			}
 			ssets := []edit.KV{{Path: "defaultProvider", Value: primaryKey}}
 			if modelSlug != "" {
 				ssets = append(ssets, edit.KV{Path: "defaultModel", Value: modelSlug})
@@ -585,7 +668,7 @@ func newPi() *Tool {
 		Describe: func() (Info, error) {
 			var info Info
 
-			if data, err := os.ReadFile(settingsPath); err == nil {
+			if data, err := readConfig(settingsPath); err == nil {
 				var s struct {
 					DefaultProvider      string `json:"defaultProvider"`
 					DefaultModel         string `json:"defaultModel"`
@@ -603,7 +686,7 @@ func newPi() *Tool {
 						provider = managedProvider
 					}
 					if provider == managedProvider || strings.HasPrefix(provider, managedProvider+"-") {
-						if data, err := os.ReadFile(modelsPath); err == nil {
+						if data, err := readConfig(modelsPath); err == nil {
 							var cfg struct {
 								Providers map[string]piProviderConfig `json:"providers"`
 							}
@@ -651,7 +734,7 @@ func newPi() *Tool {
 
 			// Otherwise fall back to an OAuth-based provider login (pi's /login).
 			if info.AuthMode == "" {
-				if data, err := os.ReadFile(authPath); err == nil {
+				if data, err := readConfig(authPath); err == nil {
 					var auth map[string]json.RawMessage
 					if json.Unmarshal(data, &auth) == nil && len(auth) > 0 {
 						names := make([]string, 0, len(auth))

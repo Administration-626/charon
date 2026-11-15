@@ -82,7 +82,7 @@ Pi uses its native `models.json`. Existing thinking/compaction preferences and
 between writes is reported as partial application.
 
 Activating a Pi binding also registers the catalog's other **Pi bindings**: one
-provider entry per endpoint, carrying the key, model list and request protocol
+provider entry per endpoint, carrying the key, model list, request protocol and headers
 that binding saved. Pi's `/model` therefore lists the models of every endpoint
 you configured for Pi, and each request goes to the gateway that serves it the
 way that binding would have sent it. Every entry, the active binding's included,
@@ -202,6 +202,30 @@ with the tool's own /model is kept while that binding stays active. Reapply
 explicitly resets the tool to the binding's saved default model and model list.
 In status --json, the existing `active` field means the last confirmed binding;
 `endpoint` and `model` describe the live tool config.
+
+### Pi request headers
+
+Use `--headers` on `add pi` or `edit pi` to save a complete header map with a
+binding. Use the values documented by your gateway; Charon does not inject a
+client fingerprint by default.
+
+```sh
+charon edit pi work --headers '{"Originator":"your-originator","User-Agent":"your-client/1.0"}'
+charon edit pi work --headers '{}' # explicitly clear custom headers
+```
+
+Headers are written to `models.json` → `providers.charon-<label>.headers` for
+both the selected endpoint and other visible Pi endpoints. Switching, ordinary
+edits, renaming, Pi-to-Pi copies, and hiding/re-enabling a binding retain its
+saved map. The TUI preserves it; use the CLI to change it. Values are literal:
+`$` and `!` are escaped instead of becoming Pi environment/command expressions.
+Dry-run output masks header values.
+
+Omitting `--headers` keeps the saved override. Without a saved override, existing
+headers are inherited only from a managed provider for the same endpoint, even
+when its provider key changes. Headers edited only in `models.json` are not
+stored in the catalog and disappear if that endpoint is removed or hidden; save
+them with `--headers` if they must survive recreation.
 
 ### Inspect generated settings
 
@@ -407,6 +431,8 @@ internal/secret/     masking
 ```
 
 ## Development
+
+See the [behavior contracts and acceptance baseline](docs/spec.md) (Chinese) before changing behavior. The [engineering walkthrough](docs/engineering-walkthrough.md) records an evidence-backed requirements-to-verification cycle; open product questions are not approved feature requests.
 
 ```sh
 make build   # build ./charon

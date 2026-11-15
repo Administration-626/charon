@@ -1,6 +1,10 @@
 package tui
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -124,6 +128,228 @@ func TestHidingActiveBindingIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(m.View(), "~ b") {
 		t.Fatalf("refusal changed the other row:\n%s", m.View())
+	}
+}
+
+// TestDuplicateHiddenBindingViaKeys drives the duplicate wizard through real
+// Update keypresses: c/x on the hidden b row, Enter on "This tool", edit the
+// suggested name, Enter. The clone must keep b's hidden flag, credential,
+// models, protocol and headers, while leaving b, the active binding and Pi's
+// on-disk models/settings byte for byte untouched. A later explicit Reapply(a)
+// resets the live default by design but must still keep the hidden gateway key
+// out of Pi's provider list.
+func TestDuplicateHiddenBindingViaKeys(t *testing.T) {
+	for _, shortcut := range []rune{'c', 'x'} {
+		t.Run(string(shortcut), func(t *testing.T) {
+			m, _ := hiddenFixture(t)
+			cat := m.cat
+
+			b, found, err := cat.BindingByName("pi", "b")
+			if err != nil || !found {
+				t.Fatalf("b binding: found=%v err=%v", found, err)
+			}
+			b, err = cat.UpdateBinding(b.ID, b.Name, b.CredentialID, "two", []string{"two"}, "anthropic-messages")
+			if err != nil {
+				t.Fatalf("set b protocol: %v", err)
+			}
+			headers := map[string]string{"X-Backup": "hdr-backup"}
+			b, err = cat.SetBindingHeaders(b.ID, headers)
+			if err != nil {
+				t.Fatalf("set b headers: %v", err)
+			}
+
+			a, found, err := cat.BindingByName("pi", "a")
+			if err != nil || !found {
+				t.Fatalf("a binding: found=%v err=%v", found, err)
+			}
+			cr, err := cat.Credential(a.CredentialID)
+			if err != nil {
+				t.Fatalf("a credential: %v", err)
+			}
+			provider, err := cat.Provider(cr.ProviderID)
+			if err != nil {
+				t.Fatalf("a provider: %v", err)
+			}
+			if _, err := cat.PutModel(provider.ID, "one-live"); err != nil {
+				t.Fatalf("add one-live model: %v", err)
+			}
+			a, err = cat.UpdateBinding(a.ID, "a", a.CredentialID, "one", []string{"one", "one-live"})
+			if err != nil {
+				t.Fatalf("set a models: %v", err)
+			}
+			// Clear the group the fixture applied before b was hidden, and render a's
+			// two-model list.
+			if _, err := cat.Reapply(a.ID); err != nil {
+				t.Fatalf("reapply a: %v", err)
+			}
+
+			// Pi's own picker selected a non-saved default; copying must not reset it.
+			settingsPath := filepath.Join(os.Getenv("HOME"), ".pi", "agent", "settings.json")
+			modelsPath := filepath.Join(os.Getenv("HOME"), ".pi", "agent", "models.json")
+			data, err := os.ReadFile(settingsPath)
+			if err != nil {
+				t.Fatalf("read settings: %v", err)
+			}
+			var settings map[string]any
+			if err := json.Unmarshal(data, &settings); err != nil {
+				t.Fatalf("decode settings: %v", err)
+			}
+			settings["defaultModel"] = "one-live"
+			updated, err := json.Marshal(settings)
+			if err != nil {
+				t.Fatalf("encode settings: %v", err)
+			}
+			if err := os.WriteFile(settingsPath, updated, 0o600); err != nil {
+				t.Fatalf("select one-live: %v", err)
+			}
+
+			m.loadProfiles("")
+			bBefore, found, err := cat.BindingByName("pi", "b")
+			if err != nil || !found || !bBefore.Hidden {
+				t.Fatalf("b before copy: %+v found=%v err=%v", bBefore, found, err)
+			}
+			aBefore, found, err := cat.BindingByName("pi", "a")
+			if err != nil || !found {
+				t.Fatalf("a before copy: found=%v err=%v", found, err)
+			}
+			modelsBefore, err := os.ReadFile(modelsPath)
+			if err != nil {
+				t.Fatalf("read models before copy: %v", err)
+			}
+			settingsBefore, err := os.ReadFile(settingsPath)
+			if err != nil {
+				t.Fatalf("read settings before copy: %v", err)
+			}
+
+			selectBinding(t, &m, "b")
+			next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{shortcut}})
+			m = next.(model)
+			if m.view != viewCopyTool {
+				t.Fatalf("%q on b = view %v, want viewCopyTool", shortcut, m.view)
+			}
+			if it, ok := m.list.SelectedItem().(item); !ok || it.value != "pi" {
+				t.Fatalf("first destination row = %+v, want This tool (pi)", it)
+			}
+			next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			m = next.(model)
+			if m.view != viewDupName {
+				t.Fatalf("Enter on This tool = view %v, want viewDupName; status=%q", m.view, m.status)
+			}
+			if got := m.input.Value(); got != "b-copy" {
+				t.Fatalf("prefilled name = %q, want b-copy", got)
+			}
+			for range len(m.input.Value()) {
+				next, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+				m = next.(model)
+			}
+			const cloneName = "b-clone"
+			for _, r := range cloneName {
+				next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+				m = next.(model)
+			}
+			if got := m.input.Value(); got != cloneName {
+				t.Fatalf("typed name = %q, want %q", got, cloneName)
+			}
+			next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			m = next.(model)
+			if m.view != viewProfiles {
+				t.Fatalf("name submit = view %v, want viewProfiles; status=%q", m.view, m.status)
+			}
+			if !strings.Contains(m.View(), "~ "+cloneName) {
+				t.Fatalf("clone row is not marked hidden:\n%s", m.View())
+			}
+			if it, ok := m.list.SelectedItem().(item); !ok || it.value != cloneName {
+				t.Fatalf("cursor after clone = %+v, want %q", it, cloneName)
+			}
+			if row, ok := rowOf(m, cloneName); !ok || !row.hidden {
+				t.Fatalf("clone row hidden flag = %+v, ok=%v", row, ok)
+			}
+
+			clone, found, err := cat.BindingByName("pi", cloneName)
+			if err != nil || !found {
+				t.Fatalf("clone missing: found=%v err=%v", found, err)
+			}
+			if !clone.Hidden {
+				t.Errorf("clone Hidden = false, want the source's hidden flag")
+			}
+			if clone.CredentialID != bBefore.CredentialID {
+				t.Errorf("clone credential = %q, want shared %q", clone.CredentialID, bBefore.CredentialID)
+			}
+			if clone.ModelID != bBefore.ModelID || !reflect.DeepEqual(clone.Models, bBefore.Models) {
+				t.Errorf("clone models = %q %v, want %q %v", clone.ModelID, clone.Models, bBefore.ModelID, bBefore.Models)
+			}
+			if clone.PiAPI != bBefore.PiAPI {
+				t.Errorf("clone protocol = %q, want %q", clone.PiAPI, bBefore.PiAPI)
+			}
+			if !reflect.DeepEqual(clone.Headers, bBefore.Headers) {
+				t.Errorf("clone headers = %#v, want %#v", clone.Headers, bBefore.Headers)
+			}
+			cloneKey, err := cat.Credential(clone.CredentialID)
+			if err != nil || cloneKey.Key != "sk-two" {
+				t.Errorf("clone key = %q err=%v, want sk-two", cloneKey.Key, err)
+			}
+
+			bAfter, found, err := cat.BindingByName("pi", "b")
+			if err != nil || !found || !reflect.DeepEqual(bAfter, bBefore) {
+				t.Errorf("source b changed: before=%+v after=%+v err=%v", bBefore, bAfter, err)
+			}
+			aAfter, found, err := cat.BindingByName("pi", "a")
+			if err != nil || !found || !reflect.DeepEqual(aAfter, aBefore) {
+				t.Errorf("binding a changed: before=%+v after=%+v err=%v", aBefore, aAfter, err)
+			}
+			if active, found, err := cat.Active("pi"); err != nil || !found || active.Name != "a" {
+				t.Errorf("active after copy = %+v found=%v err=%v, want a", active, found, err)
+			}
+
+			modelsAfter, err := os.ReadFile(modelsPath)
+			if err != nil || string(modelsAfter) != string(modelsBefore) {
+				t.Errorf("copy rewrote Pi models.json (err=%v)", err)
+			}
+			settingsAfter, err := os.ReadFile(settingsPath)
+			if err != nil || string(settingsAfter) != string(settingsBefore) {
+				t.Errorf("copy rewrote Pi settings.json (err=%v)", err)
+			}
+			var disk struct {
+				DefaultModel string `json:"defaultModel"`
+			}
+			if err := json.Unmarshal(settingsAfter, &disk); err != nil || disk.DefaultModel != "one-live" {
+				t.Errorf("Pi defaultModel after copy = %q err=%v, want one-live", disk.DefaultModel, err)
+			}
+
+			// Explicit reapply is expected to reset the live default to a's saved
+			// default. It must not, however, register the hidden gateway or its copy.
+			if _, err := cat.Reapply(a.ID); err != nil {
+				t.Fatalf("reapply a after copy: %v", err)
+			}
+			reapplied, err := os.ReadFile(modelsPath)
+			if err != nil {
+				t.Fatalf("read models after reapply: %v", err)
+			}
+			for _, leaked := range []string{"sk-two", "https://two.example/v1"} {
+				if strings.Contains(string(reapplied), leaked) {
+					t.Errorf("reapply registered hidden gateway %q", leaked)
+				}
+			}
+			var reappliedSettings struct {
+				DefaultModel string `json:"defaultModel"`
+			}
+			settingsReapplied, err := os.ReadFile(settingsPath)
+			if err != nil {
+				t.Fatalf("read settings after reapply: %v", err)
+			}
+			if err := json.Unmarshal(settingsReapplied, &reappliedSettings); err != nil || reappliedSettings.DefaultModel != "one" {
+				t.Errorf("explicit reapply defaultModel = %q err=%v, want one (reapply resets by design)", reappliedSettings.DefaultModel, err)
+			}
+			for _, name := range []string{"b", cloneName} {
+				got, found, err := cat.BindingByName("pi", name)
+				if err != nil || !found || !got.Hidden {
+					t.Errorf("%s after reapply: Hidden=%v found=%v err=%v, want hidden", name, got.Hidden, found, err)
+				}
+			}
+			if active, found, err := cat.Active("pi"); err != nil || !found || active.Name != "a" {
+				t.Errorf("active after reapply = %+v found=%v err=%v, want a", active, found, err)
+			}
+		})
 	}
 }
 

@@ -286,7 +286,7 @@ func newCodex() *Tool {
 		Describe: func() (Info, error) {
 			var info Info
 
-			if data, err := os.ReadFile(configPath); err == nil {
+			if data, err := readConfig(configPath); err == nil {
 				var cfg struct {
 					Model                string `toml:"model"`
 					ModelReasoningEffort string `toml:"model_reasoning_effort"`
@@ -307,7 +307,7 @@ func newCodex() *Tool {
 						if !filepath.IsAbs(path) {
 							path = filepath.Join(filepath.Dir(configPath), path)
 						}
-						if data, err := os.ReadFile(path); err == nil {
+						if data, err := readConfig(path); err == nil {
 							var catalog struct {
 								Models []struct {
 									Slug          string `json:"slug"`
@@ -335,7 +335,7 @@ func newCodex() *Tool {
 				}
 			}
 
-			if data, err := os.ReadFile(authPath); err == nil {
+			if data, err := readConfig(authPath); err == nil {
 				var auth struct {
 					Tokens struct {
 						IDToken   string `json:"id_token"`
@@ -352,7 +352,7 @@ func newCodex() *Tool {
 			}
 
 			if info.AuthMode == "" {
-				if data, err := os.ReadFile(authPath); err == nil {
+				if data, err := readConfig(authPath); err == nil {
 					var auth struct {
 						AuthMode string `json:"auth_mode"`
 						APIKey   string `json:"OPENAI_API_KEY"`

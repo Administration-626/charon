@@ -85,8 +85,17 @@ func (m model) withFooter(body string, bindings ...key.Binding) string {
 		// sheet is discoverable without spelling it out per screen.
 		bindings = append(append([]key.Binding{}, bindings...), keyHelp)
 	}
-	footer := statusRender(m.statusLvl, m.status) + "\n" + m.helpLine(m.width, bindings...)
-	pad := m.height - footerRows - lipgloss.Height(body)
+	status := statusRender(m.statusLvl, m.status)
+	if m.view == viewProfiles && m.statusLvl == statusErr {
+		status = lipgloss.NewStyle().Width(max(1, m.width)).Render(status)
+	}
+	footer := status + "\n" + m.helpLine(m.width, bindings...)
+	available := max(0, m.height-lipgloss.Height(footer)-1)
+	if m.view == viewProfiles && m.statusLvl == statusErr && lipgloss.Height(body) > available {
+		lines := strings.Split(body, "\n")
+		body = strings.Join(lines[:available], "\n")
+	}
+	pad := m.height - lipgloss.Height(footer) - lipgloss.Height(body)
 	if pad < 0 {
 		pad = 0
 	}
@@ -302,6 +311,10 @@ func (m model) View() string {
 	if m.showConfirm {
 		return m.confirmDialog()
 	}
+	if m.view == viewProfiles && m.statusLvl == statusErr {
+		status := lipgloss.NewStyle().Width(max(1, m.width)).Render(statusRender(m.statusLvl, m.status))
+		m.list.SetHeight(max(1, m.list.Height()-lipgloss.Height(status)+1))
+	}
 	out := m.list.View()
 	if m.view == viewTools {
 		out = banner(m.version) + "\n\n" + out // blank line between the banner and the list title
@@ -508,15 +521,15 @@ func (m model) bindingDetailLines(name string, width, maxLines int) []string {
 		status += " · ~ hidden (kept in charon)"
 	}
 	if m.tool.MultiEndpoint {
-		// Every visible binding is registered in the same provider list; the
-		// active one is only its default.
+		// Saved visibility is not proof of current disk registration: a saved
+		// binding may never have been applied, and hidden ones are excluded.
 		switch {
 		case b.Hidden:
-			status = "hidden · not in the provider list"
+			status = "hidden · excluded from next apply"
 		case active:
-			status = "✓ default · registered"
+			status = "✓ saved default · not hidden"
 		default:
-			status = "registered · not default"
+			status = "not hidden · not default"
 		}
 	}
 

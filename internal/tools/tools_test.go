@@ -1422,3 +1422,45 @@ func TestGrokApplyPreservesCommentsAndUserTables(t *testing.T) {
 		t.Errorf("dotted slug must be quoted in the header:\n%s", out)
 	}
 }
+
+// TestApplyReadsAConfigWithABOM: Windows editors save a byte order mark in front
+// of a JSON or TOML file, and the tools themselves read through it. charon's
+// editors already trimmed it; the read helpers ApplyAuth uses did not, so a
+// config saved by Notepad made a switch fail outright.
+func TestApplyReadsAConfigWithABOM(t *testing.T) {
+	const bom = "\ufeff"
+	cases := []struct {
+		tool, path, content string
+	}{
+		{"codex", ".codex/config.toml", "# mine\nmodel = \"gpt-5\"\n"},
+		{"grok", ".grok/config.toml", "[models]\ndefault = \"mine\"\n"},
+		{"pi", ".pi/agent/models.json", "{\n  \"providers\": {\n    \"mine\": {\"baseUrl\": \"https://mine\"}\n  }\n}\n"},
+		{"pi", ".pi/agent/settings.json", "{\n  \"defaultProvider\": \"mine\"\n}\n"},
+		{"opencode", ".config/opencode/opencode.jsonc", "{\n  // mine\n  \"theme\": \"dark\"\n}\n"},
+	}
+	for _, c := range cases {
+		t.Run(c.tool+"/"+filepath.Base(c.path), func(t *testing.T) {
+			home := sandboxHome(t)
+			path := filepath.Join(home, c.path)
+			writeFile(t, path, bom+c.content)
+			if err := Find(c.tool).ApplyAuth(AuthSpec{
+				Endpoint: "https://gw.example/v1",
+				Key:      "sk-new",
+				Model:    "m-1",
+				Models:   []ModelSpec{{Slug: "m-1"}},
+			}); err != nil {
+				t.Fatalf("apply to a config with a byte order mark: %v", err)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.HasPrefix(got, []byte(bom)) {
+				t.Errorf("the file lost its byte order mark:\n%q", got)
+			}
+			if string(got) == bom+c.content {
+				t.Errorf("the binding was not written:\n%s", got)
+			}
+		})
+	}
+}

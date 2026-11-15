@@ -69,7 +69,7 @@ func TestSetJSONCreatesMissingFileAndParents(t *testing.T) {
 
 func TestApplyJSONDeletesThenSets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.json")
-	write(t, path, "{\n  \"env\": {\n    \"ANTHROPIC_API_KEY\": \"old\",\n    \"KEEP\": 1\n  }\n}\n")
+	write(t, path, "{\n  \"env\": {\n    \"BEFORE\": 0,\n    \"ANTHROPIC_API_KEY\": \"old\",\n    \"KEEP\": 1\n  }\n}\n")
 	if err := ApplyJSON(path,
 		[]KV{{Path: "env.ANTHROPIC_API_KEY", Value: "new"}},
 		[]string{"env.ANTHROPIC_API_KEY"},
@@ -80,8 +80,95 @@ func TestApplyJSONDeletesThenSets(t *testing.T) {
 	if !strings.Contains(out, "\"ANTHROPIC_API_KEY\": \"new\"") {
 		t.Errorf("delete should not win over set:\n%s", out)
 	}
+	// A key named by both keeps the place it had: the file stays as the user
+	// left it, and the switch is the only thing that changes.
+	if !strings.Contains(out, "\"BEFORE\": 0,\n    \"ANTHROPIC_API_KEY\": \"new\",\n    \"KEEP\": 1") {
+		t.Errorf("set key moved out of place:\n%s", out)
+	}
 	if !strings.Contains(out, "\"KEEP\"") {
 		t.Errorf("sibling lost:\n%s", out)
+	}
+}
+
+// TestDelJSONTrailingCommaBeforeComment guards a JSONC file whose last member
+// carries a trailing comma and is followed by a comment line. jsonc blanks out
+// the comma, so the delete used to leave it behind on its own line — a lone
+// comma that made the next edit fail as invalid.
+func TestDelJSONTrailingCommaBeforeComment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	write(t, path, "{\n  \"a\": 1,\n  \"model\": \"SET\",\n  // note\n}\n")
+	if err := DelJSON(path, "model"); err != nil {
+		t.Fatal(err)
+	}
+	out := read(t, path)
+	if strings.Contains(out, "\n,") || strings.Contains(out, "\n  ,") {
+		t.Errorf("deleted member left its comma behind:\n%s", out)
+	}
+	if !strings.Contains(out, "// note") || !strings.Contains(out, "\"a\": 1") {
+		t.Errorf("neighbor or comment lost:\n%s", out)
+	}
+	// The file is still editable: put the key back.
+	if err := SetJSON(path, KV{Path: "model", Value: "SET"}); err != nil {
+		t.Fatalf("the file cannot be edited after the delete: %v\n%s", err, out)
+	}
+	if out := read(t, path); !strings.Contains(out, "\"model\": \"SET\"") {
+		t.Errorf("key not written back:\n%s", out)
+	}
+}
+
+// TestJSONOneLineFileStaysOneLine pins the layout of a document written on a
+// single line, however it was saved: the file's only line break is the one after
+// its content, which does not make it a multi-line document.
+func TestJSONOneLineFileStaysOneLine(t *testing.T) {
+	cases := []struct {
+		name, src string
+		edit      func(path string) error
+		want      string
+	}{
+		{
+			name: "insert",
+			src:  "{\"a\":1}\n",
+			edit: func(path string) error { return SetJSON(path, KV{Path: "b", Value: 2}) },
+			want: "{\"b\":2,\"a\":1}\n",
+		},
+		{
+			name: "insert nested",
+			src:  "{\"a\":{\"x\":1}}\n",
+			edit: func(path string) error { return SetJSON(path, KV{Path: "a.y", Value: 2}) },
+			want: "{\"a\":{\"y\":2,\"x\":1}}\n",
+		},
+		{
+			name: "replace value with object",
+			src:  "{\"a\":1}\n",
+			edit: func(path string) error {
+				return SetJSON(path, KV{Path: "a", Value: map[string]any{"b": 1}})
+			},
+			want: "{\"a\":{\"b\":1}}\n",
+		},
+		{
+			name: "insert after anchor",
+			src:  "{\"a\":1,\"b\":2}\n",
+			edit: func(path string) error { return SetJSONAfter(path, "a", "c", 3) },
+			want: "{\"a\":1,\"c\":3,\"b\":2}\n",
+		},
+		{
+			name: "crlf",
+			src:  "{\"a\":1}\r\n",
+			edit: func(path string) error { return SetJSON(path, KV{Path: "b", Value: 2}) },
+			want: "{\"b\":2,\"a\":1}\r\n",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "compact.json")
+			write(t, path, c.src)
+			if err := c.edit(path); err != nil {
+				t.Fatal(err)
+			}
+			if out := read(t, path); out != c.want {
+				t.Errorf("got %q, want %q", out, c.want)
+			}
+		})
 	}
 }
 
@@ -458,8 +545,10 @@ func TestSetJSONAfterCreatesMissingFile(t *testing.T) {
 	if err := SetJSONAfter(path, "", "a", 1); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(read(t, path), "\"a\": 1") {
-		t.Errorf("missing file not created:\n%s", read(t, path))
+	// A file that did not exist has no layout to copy, so it is written the
+	// multi-line way the tools' own configs are.
+	if got := read(t, path); got != "{\n  \"a\": 1\n}\n" {
+		t.Errorf("missing file not created:\n%q", got)
 	}
 }
 

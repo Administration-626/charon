@@ -71,7 +71,7 @@ Pi 的 Charon provider 使用原生 `models.json`。现有 thinking、压缩偏�
 错误，会明确提示配置可能部分生效。
 
 激活 Pi 绑定时，Charon 还会把 catalog 里其他 Pi 绑定一并注册：每个 endpoint 一条
-provider 条目，携带该绑定保存的 key、模型列表与请求协议。Pi 的 `/model` 因此列出
+provider 条目，携带该绑定保存的 key、模型列表、请求协议与 headers。Pi 的 `/model` 因此列出
 所有为 Pi 配过的 endpoint 的模型，选中后请求按该绑定的协议发往对应网关。每条条目
 （包括当前绑定的那条）的 provider 键都是 `charon-<标签>`，`name` 也用同一个标签，
 Pi 显示 `provider/id` 时读到的是网关名而不是光秃秃的 `charon`。标签取主机名的首段
@@ -164,6 +164,26 @@ status 和 ls 支持 --json，便于脚本与编辑器集成。status 分别显�
 与工具实况；写入失败或手动改动后，两者可能不同。在工具里通过 /model 更改的模型
 会保留，直到应用另一条绑定。reapply 会显式重写默认模型和模型列表。
 status --json 的 `active` 字段表示上次确认的绑定；`endpoint` 和 `model` 来自工具实况。
+
+### Pi 请求标头
+
+`add pi` 和 `edit pi` 支持 `--headers`，把完整的标头映射保存到绑定。值请按网关
+文档填写；Charon 不会默认注入某个客户端的指纹。
+
+```sh
+charon edit pi work --headers '{"Originator":"your-originator","User-Agent":"your-client/1.0"}'
+charon edit pi work --headers '{}' # 显式清空自定义标头
+```
+
+当前 endpoint 与其他可见 Pi endpoint 的标头都写入 `models.json` →
+`providers.charon-<标签>.headers`。切换、普通编辑、改名、Pi 内复制、隐藏后重新启用，
+都会保留绑定里保存的映射。TUI 编辑也会保留它；修改标头请使用 CLI。输入值按字面值
+处理，`$` 和 `!` 会转义，不会变成 Pi 的环境变量或命令表达式。试运行预览会遮罩标头值。
+
+省略 `--headers` 会保留已有的绑定设置。绑定未保存标头时，只继承同一 endpoint 的
+Charon provider 中已有的 headers，即使 provider 键名改变也能带过去，不会串到其他
+网关。只手写在 `models.json` 中的标头不会自动存入 catalog；endpoint 被删除或隐藏后
+它们仍会消失。需要跨节点重建保留时，请用 `--headers` 保存到绑定。
 
 ### 查看生成的配置参数
 
@@ -333,6 +353,8 @@ internal/secret/     掩码
 ```
 
 ## 开发
+
+修改行为前先看[行为规格与验收基线](docs/spec.md)；[工程走查记录](docs/engineering-walkthrough.md)展示一次“需求 → 规格 → 验证 → 交付门禁”的实际流程。规格中的待确认项不是已批准的新功能。
 
 ```sh
 make build   # 构建 ./charon

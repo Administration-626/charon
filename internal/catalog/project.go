@@ -59,7 +59,7 @@ func (c *Catalog) ProjectSpec(b Binding) (tools.AuthSpec, error) {
 	if err != nil {
 		return tools.AuthSpec{}, err
 	}
-	spec := tools.AuthSpec{Endpoint: p.BaseURL, Key: cr.Key, Model: slug, PiAPI: b.PiAPI}
+	spec := tools.AuthSpec{Endpoint: p.BaseURL, Key: cr.Key, Model: slug, PiAPI: b.PiAPI, Headers: b.Headers}
 	officialOpenAI := tools.IsOfficialOpenAIEndpoint(p.BaseURL)
 	specs := make([]tools.ModelSpec, 0, len(b.Models))
 	for _, id := range b.Models {
@@ -112,6 +112,10 @@ func (c *Catalog) endpointGroups(tool, excludeBindingID string) ([]tools.Endpoin
 	if err != nil {
 		return nil, err
 	}
+	return c.endpointGroupsFromBindings(tool, excludeBindingID, bs)
+}
+
+func (c *Catalog) endpointGroupsFromBindings(tool, excludeBindingID string, bs []Binding) ([]tools.EndpointGroup, error) {
 	cs, err := c.credentials()
 	if err != nil {
 		return nil, err
@@ -130,6 +134,7 @@ func (c *Catalog) endpointGroups(tool, excludeBindingID string) ([]tools.Endpoin
 	}
 	providers := make(map[string]Provider, len(ps))
 	for _, p := range ps {
+		p.BaseURL = endpointIdentity(p.BaseURL)
 		providers[p.ID] = p
 	}
 	models := make(map[string]Model, len(ms))
@@ -185,6 +190,7 @@ func (c *Catalog) endpointGroups(tool, excludeBindingID string) ([]tools.Endpoin
 			Endpoint: p.BaseURL,
 			Key:      cr.Key,
 			PiAPI:    b.PiAPI,
+			Headers:  b.Headers,
 			Models:   specs,
 		})
 	}
@@ -252,6 +258,23 @@ func (c *Catalog) activate(id string, reapply bool) (Binding, error) {
 		return Binding{}, err
 	}
 	same := active[b.Tool] == id
+	if b.Tool == "pi" {
+		indexes, err := c.endpointBindingIndexes(bs, b)
+		if err != nil {
+			return Binding{}, err
+		}
+		changed := false
+		for _, i := range indexes {
+			changed = changed || bs[i].Hidden
+			bs[i].Hidden = false
+		}
+		b = bs[idx]
+		if changed {
+			if err := writeTable(c.table("bindings.json"), bs); err != nil {
+				return Binding{}, err
+			}
+		}
+	}
 	if same && !reapply {
 		return b, nil
 	}

@@ -1,8 +1,15 @@
 package preview
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
+
+	"charon/internal/secret"
+
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/jsonc"
 )
 
 // contextLines is how many unchanged lines a hunk shows around each change.
@@ -74,6 +81,31 @@ func splitLines(b []byte) []string {
 	return lines
 }
 
+// maskHeaders masks JSON header values and Pi API keys after computing the diff,
+// so even two short secrets with the same mask still produce visible +/- lines.
+func (d FileDiff) maskHeaders(rendered string) string {
+	var replacements []string
+	var collect func(gjson.Result, bool)
+	collect = func(value gjson.Result, sensitive bool) {
+		if sensitive && value.Type == gjson.String {
+			masked, _ := json.Marshal(secret.Mask(value.String()))
+			replacements = append(replacements, value.Raw, string(masked))
+			return
+		}
+		if value.IsObject() || value.IsArray() {
+			value.ForEach(func(key, child gjson.Result) bool {
+				collect(child, sensitive || key.String() == "headers" || key.String() == "apiKey")
+				return true
+			})
+		}
+	}
+	for _, raw := range [][]byte{d.Before, d.After} {
+		raw = bytes.TrimPrefix(raw, []byte{0xef, 0xbb, 0xbf})
+		collect(gjson.ParseBytes(jsonc.ToJSONInPlace(append([]byte(nil), raw...))), false)
+	}
+	return strings.NewReplacer(replacements...).Replace(rendered)
+}
+
 // Render is d as a unified diff, or "" when it would not change.
 func (d FileDiff) Render() string {
 	if !d.Changed() {
@@ -88,7 +120,7 @@ func (d FileDiff) Render() string {
 			b.WriteString(l)
 			b.WriteString("\n")
 		}
-		return b.String()
+		return d.maskHeaders(b.String())
 	case d.After == nil:
 		fmt.Fprintf(&b, "(file removed)\n")
 		for _, l := range splitLines(d.Before) {
@@ -96,7 +128,7 @@ func (d FileDiff) Render() string {
 			b.WriteString(l)
 			b.WriteString("\n")
 		}
-		return b.String()
+		return d.maskHeaders(b.String())
 	}
 	a, c := splitLines(d.Before), splitLines(d.After)
 	if len(a) > maxDiffLines || len(c) > maxDiffLines {
@@ -163,5 +195,5 @@ func (d FileDiff) Render() string {
 			b.WriteString("\n")
 		}
 	}
-	return b.String()
+	return d.maskHeaders(b.String())
 }

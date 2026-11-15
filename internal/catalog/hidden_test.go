@@ -62,7 +62,7 @@ func TestHiddenBindingLeavesTheEndpointList(t *testing.T) {
 	}
 }
 
-func TestHiddenDuplicateDoesNotShadowVisible(t *testing.T) {
+func TestHiddenDuplicateSharesEndpointVisibility(t *testing.T) {
 	c := openTest(t)
 	_, ownCred := seed(t, c, "https://own.example/v1", "sk-own", "own-a")
 	shared, firstCred := seed(t, c, "https://shared.example/v1", "sk-first", "shared-a")
@@ -74,7 +74,8 @@ func TestHiddenDuplicateDoesNotShadowVisible(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.AddBinding("pi", "second", secondCred.ID, "shared-a", []string{"shared-a"}); err != nil {
+	second, err := c.AddBinding("pi", "second", secondCred.ID, "shared-a", []string{"shared-a"})
+	if err != nil {
 		t.Fatal(err)
 	}
 	own, err := c.AddBinding("pi", "own", ownCred.ID, "own-a", []string{"own-a"})
@@ -82,17 +83,35 @@ func TestHiddenDuplicateDoesNotShadowVisible(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The hidden binding comes first in file order; the endpoint must still be
-	// represented by the visible one rather than dropped.
+	// Pi visibility belongs to the endpoint, not to an individual alias.
 	if err := c.SetBindingHidden(first.ID, true); err != nil {
 		t.Fatal(err)
+	}
+	for _, name := range []string{"first", "second"} {
+		b, found, err := c.BindingByName("pi", name)
+		if err != nil || !found || !b.Hidden {
+			t.Fatalf("%s hidden=%v, found=%v, err=%v; want hidden", name, b.Hidden, found, err)
+		}
 	}
 	spec, err := c.ProjectSpec(own)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(spec.Groups) != 1 || spec.Groups[0].Key != "sk-second" {
-		t.Fatalf("groups = %+v, want the visible binding's key", spec.Groups)
+	if len(spec.Groups) != 0 {
+		t.Fatalf("groups after hiding = %+v, want no shared endpoint", spec.Groups)
+	}
+
+	// Showing through either alias restores one provider, using the same
+	// first-visible-in-file-order representative as an ordinary apply.
+	if err := c.SetBindingHidden(second.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	spec, err = c.ProjectSpec(own)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spec.Groups) != 1 || spec.Groups[0].Key != "sk-first" {
+		t.Fatalf("groups after showing = %+v, want the first binding's key", spec.Groups)
 	}
 }
 
@@ -161,11 +180,12 @@ func TestSwitchingToHiddenBindingShowsIt(t *testing.T) {
 func TestEditingKeepsHidden(t *testing.T) {
 	c := openTest(t)
 	_, cr := seed(t, c, "https://one.example/v1", "sk-one", "one", "two")
+	_, otherCred := seed(t, c, "https://other.example/v1", "sk-other", "one")
 	keep, err := c.AddBinding("pi", "keep", cr.ID, "one", []string{"one"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := c.AddBinding("pi", "other", cr.ID, "one", []string{"one"})
+	other, err := c.AddBinding("pi", "other", otherCred.ID, "one", []string{"one"})
 	if err != nil {
 		t.Fatal(err)
 	}

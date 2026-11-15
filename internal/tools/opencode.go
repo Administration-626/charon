@@ -108,7 +108,7 @@ func newOpenCode() *Tool {
 			var info Info
 
 			// A charon-managed provider keeps endpoint + key in the config.
-			if data, err := os.ReadFile(configPath); err == nil {
+			if data, err := readConfig(configPath); err == nil {
 				var cfg struct {
 					Model           string `json:"model"`
 					SmallModel      string `json:"small_model"`
@@ -199,7 +199,7 @@ func newOpenCode() *Tool {
 			}
 
 			// Otherwise fall back to a key stored in auth.json (login-based).
-			if data, err := os.ReadFile(authPath); err == nil {
+			if data, err := readConfig(authPath); err == nil {
 				var auth map[string]struct {
 					Type   string `json:"type"`
 					Key    string `json:"key"`

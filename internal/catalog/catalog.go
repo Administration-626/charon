@@ -72,13 +72,14 @@ const (
 // default, and which models the tool's own picker should offer. Name is the label
 // the user sees and types.
 type Binding struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	Tool         string   `json:"tool"`
-	CredentialID string   `json:"credentialId"`
-	ModelID      string   `json:"modelId"`
-	Models       []string `json:"models"`
-	PiAPI        string   `json:"piApi,omitempty"` // Pi request protocol, not model discovery
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Tool         string            `json:"tool"`
+	CredentialID string            `json:"credentialId"`
+	ModelID      string            `json:"modelId"`
+	Models       []string          `json:"models"`
+	PiAPI        string            `json:"piApi,omitempty"`  // Pi request protocol, not model discovery
+	Headers      map[string]string `json:"headers,omitzero"` // Pi headers; nil inherits, {} clears
 	// Hidden keeps the binding configured but out of the tool's shared endpoint
 	// list: its key, models and protocol stay here, the next apply leaves the
 	// endpoint out of the tool's config. Only a tool that can hold several
@@ -444,6 +445,9 @@ func (c *Catalog) AddBinding(tool, name, credentialID, defaultSlug string, model
 		return Binding{}, err
 	}
 	b.ID = c.nextID(bindingIDs(bs), "b")
+	if err := c.inheritPiVisibility(bs, &b); err != nil {
+		return Binding{}, err
+	}
 	return b, writeTable(c.table("bindings.json"), append(bs, b))
 }
 
@@ -472,7 +476,11 @@ func (c *Catalog) UpdateBinding(id, name, credentialID, defaultSlug string, mode
 		return Binding{}, err
 	}
 	b.ID = id
-	b.Hidden = bs[idx].Hidden // editing the endpoint, key or models does not unhide
+	b.Headers = bs[idx].Headers // ordinary edits and renames preserve saved headers
+	b.Hidden = bs[idx].Hidden
+	if err := c.inheritPiVisibility(bs, &b); err != nil {
+		return Binding{}, err
+	}
 	bs[idx] = b
 	if err := writeTable(c.table("bindings.json"), bs); err != nil {
 		return Binding{}, err
@@ -603,12 +611,9 @@ func (c *Catalog) RemoveBinding(id string) error {
 	return nil
 }
 
-// SetBindingHidden keeps a binding out of its tool's shared endpoint list
-// without deleting it: the key, models and protocol stay in the catalog, and
-// the next apply writes the tool's config without this endpoint. Only a tool
-// that holds several endpoints at once has a list to stay out of, and the
-// binding the tool currently renders cannot be hidden: the tool's defaults
-// would point at an entry that is no longer written.
+// SetBindingHidden hides or shows a saved endpoint without deleting bindings.
+// Pi bindings sharing the same endpoint are updated together, including the
+// managed provider on disk. Neither the active pointer nor Pi defaults change.
 func (c *Catalog) SetBindingHidden(id string, hidden bool) error {
 	if err := c.lock(); err != nil {
 		return err
@@ -625,6 +630,9 @@ func (c *Catalog) SetBindingHidden(id string, hidden bool) error {
 	b := bs[idx]
 	if t := tools.Find(b.Tool); t == nil || !t.MultiEndpoint {
 		return fmt.Errorf("%s holds one endpoint, so %q has no list to be hidden from", b.Tool, b.Name)
+	}
+	if b.Tool == "pi" {
+		return c.setPiEndpointHidden(bs, idx, hidden)
 	}
 	if b.Hidden == hidden {
 		return nil

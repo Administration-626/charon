@@ -4,6 +4,9 @@
 
 | 严重度 | 问题 | 证据 | 影响 | 建议 |
 |---|---|---|---|---|
+| 已修复（原高） | edit 的 help/usage 曾输出已保存 key 默认值 | `cmd/charon/commands.go` 的 `cmdEdit`、`cmd/charon/main_test.go` 两项新测试；`docs/spec.md` D1 | 不可把其他遮罩测试当作帮助也安全；任意输入域安全仍未穷尽 | 已移除可打印 secret 默认值，四种输出路径和 key 语义回归通过，变异可报警 |
+| 已修复（原中） | 原 CLI 复制隐藏 Pi 绑定未保留 Hidden，TUI 已保留 | `cmd/charon/commands.go`、`cmd/charon/main_test.go`、`internal/tui/hidden_test.go`；`docs/spec.md` D2 | 不能让备用入口破坏隐藏规则或复制时重设当前模型 | 已统一规则并增加 TUI c/x 按键／渲染主验收，三项变异可报警 |
+| 产品验收否决（已撤回） | 用户不接受 h 与独立 key 停供／恢复并存的设计 | `docs/spec.md` D5 与最新结论；`p` 菜单、CLI 命令、`PiDisabled` 政策和屏障已精准删除，历史证据留在接棒文档 | 测试通过不能挽救不合适的产品设计 | 不重新引入独立 key 政策；按 endpoint 分组实现 `h` 时仍以用户试用为准 |
 | 高 | API key 在 `credentials.json` 和各目标 CLI 配置中以可读形式存在 | `internal/catalog/catalog.go`、`internal/tools/*.go` | 本地用户目录泄露会同时暴露多份凭据 | 明确威胁模型；可考虑平台密钥链或只保留引用，但不能削弱当前 `0600` |
 | 中 | `StoreBinding` 的跨表写入不是一个完整锁定事务 | `internal/catalog/bind.go` 调用多个分别加锁的 Catalog 方法 | 并发进程可能在 provider、credential、model、binding 写入之间插入操作，留下半成品或重复行 | 增加 catalog 内部的组合 mutation API，让整段读改写只获取一次锁 |
 | 中 | 多文件 mutation 没有跨文件事务 | `internal/catalog/catalog.go`、`internal/tools/pi.go` | 中途崩溃可能出现 catalog 与 live config 不一致，或 Pi 两份配置不同步 | 写入临时状态/恢复日志，或把一次投影封装成可检测、可重试的事务步骤 |
@@ -48,6 +51,10 @@
 
 ## 7) 证据
 
+行为问题的具体场景统一维护在[规格 Q1–Q4](../spec.md)。Q1 的“配置写入失败应明确报错、可重试”已获用户确认；Q2–Q4 仍需先解释首次查看时 Charon 文件的创建、隐藏备用方案时重设另一方案的默认模型、同网关同模型的 context 等参数联动，再决定是否改动。D1 安全与 D2 复制偏差已修复；用户已明确 TUI 是主要入口，D5 的独立 key 停供设计已被否决并连同 p 菜单、CLI 命令与政策字段一起撤回；实现与测试证据不是采用或交付许可。不用后台测试冒充用户交付，也不借此继续扩展架构。
+
+- `cmd/charon/commands.go` 的 `cmdEdit`、`cmdDuplicate`；`internal/tui/actions.go` 的复制路径。
+- `docs/spec.md`
 - `wc -l cmd/charon/*.go internal/catalog/*.go internal/tools/*.go internal/tui/*.go`
 - `git log --oneline -20 -- internal/tui internal/tools internal/catalog`
 - `cmd/charon/commands.go`

@@ -44,7 +44,8 @@ func (i Info) withDefaults(endpoint string) Info {
 type EndpointGroup struct {
 	Endpoint string
 	Key      string
-	PiAPI    string // Pi request protocol saved with that endpoint's binding
+	PiAPI    string            // Pi request protocol saved with that endpoint's binding
+	Headers  map[string]string // Pi request headers; nil keeps the endpoint's existing headers
 	Models   []ModelSpec
 }
 
@@ -55,8 +56,9 @@ type AuthSpec struct {
 	Key      string
 	Model    string
 	Effort   string
-	Models   []ModelSpec     // complete registered list; nil means keep what is already there
-	Groups   []EndpointGroup // other endpoints to register too, for MultiEndpoint tools
+	Headers  map[string]string // Pi request headers; nil keeps existing, an empty map clears
+	Models   []ModelSpec       // complete registered list; nil means keep what is already there
+	Groups   []EndpointGroup   // other endpoints to register too, for MultiEndpoint tools
 }
 
 // ModelSpec is one model registered in a tool's own model picker.
