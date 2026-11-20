@@ -59,6 +59,29 @@ Always run `make fmt` and `make test` before finishing a change. CI
 (`.github/workflows/ci.yml`) runs fmt-check, vet, `-race` tests, and build on
 Linux + macOS, plus golangci-lint on Linux; keep all of them green.
 
+## CodeGraph code search
+
+When the `codegraph` CLI and this project's local `.codegraph/` index are
+available, prefer CodeGraph for cross-file navigation, caller discovery, and
+change-impact exploration. Simple text lookups can still use `rg` directly.
+Run commands from the repository root:
+
+- `codegraph status --strict` checks index readiness and freshness. If source
+  changes are pending, run `codegraph sync` before querying; do not assume a
+  background watcher is running.
+- `codegraph query <symbol>` locates definitions.
+- `codegraph callers <symbol>` finds direct callers.
+- `codegraph explore --max-files 3 '<symbols or code terms>'` returns related
+  source and call paths. For example:
+  `codegraph explore --max-files 3 'SetBindingHidden PreparePiEndpointVisibility'`.
+
+Use symbol names, file names, or English code terms: search is lexical, not
+meaning-based, and Chinese natural-language queries are unreliable. The graph
+can miss relationships; verify completeness with `rg`, source, and tests before
+removing code or claiming a complete impact analysis. If the CLI or index is
+missing or fails, fall back to `rg` + file reads. Do not automatically install
+software, initialize an index, or change global agent configuration.
+
 ## Architecture
 
 ```
