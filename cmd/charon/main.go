@@ -87,7 +87,7 @@ func printUsage() {
 
 Usage:
   charon                     interactive menu
-	  charon status              show live config and last confirmed binding (--json)
+  charon status              show live config and last confirmed binding (--json)
   charon ls <tool>           list saved bindings for a tool (--json)
   charon models <tool>       list models from an API (--key, --endpoint; --local)
   charon add <tool>          add+activate a binding (--name --key plus a model id)
@@ -97,9 +97,9 @@ Usage:
   charon rename <tool> <o> <n>  rename a saved binding
   charon cp <tool> <src> <dst>  duplicate a saved binding
   charon cp <tool> <src> <tool> <dst>  copy a binding to another tool
-	  charon switch <tool> <b>   render a saved binding into the tool (--dry-run)
-	  charon reapply <tool> <b>  render a binding even if it was last confirmed (--dry-run)
-	  charon off <tool>          take charon out of a tool, restoring pre-charon values
+  charon switch <tool> <b>   render a saved binding into the tool (--dry-run)
+  charon reapply <tool> <b>  render a binding even if it was last confirmed (--dry-run)
+  charon off <tool>          take charon out of a tool, restoring pre-charon values
   charon rm <tool> <b>       delete a saved binding (not the active one)
   charon completion <shell>  print a bash/zsh/fish completion script
   charon update              upgrade charon to the latest version

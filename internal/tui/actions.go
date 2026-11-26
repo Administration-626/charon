@@ -719,8 +719,7 @@ func (m model) updateReviewModels(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case 'f', 'F':
 				// Fetch from the endpoint without leaving the model list. The
 				// picker shows the result; confirming it lands back here.
-				endpoint := strings.TrimRight(strings.TrimSpace(m.wiz.endpoint), "/")
-				key := strings.TrimSpace(m.wiz.key)
+				endpoint, key := m.resolveFetchTarget()
 				switch {
 				case endpoint == "":
 					m.setStatus(statusErr, "set an endpoint first")

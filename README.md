@@ -49,7 +49,8 @@ re-renders that binding into the tool, overwriting only the keys charon owns.
   endpoints in one table (model, endpoint, context, source); type to filter by
   model or endpoint, esc to clear.
 - Single-page form. Add or edit a binding on one screen (Name, Endpoint,
-  Token, Model) with direct typing and [ Save ] / [ Cancel ] buttons.
+  API Key/Token, [ Models… ], and Endpoint Type for Pi) with direct typing and
+  [ Save ] / [ Cancel ] buttons.
 - Duplicate with a name. Press c (or x) on a binding, pick the destination —
   this tool or another one — then name the copy (prefilled <name>-copy). The
   duplicate shares the endpoint and key and is never activated.
@@ -96,12 +97,15 @@ Claude or Codex bindings use stay out: their models and protocol were never
 chosen for Pi. The active binding still decides the default endpoint, the default
 model and its own model list, and `charon off` removes every `charon*` provider.
 
-A binding can also be **hidden**: `h` on the bindings screen keeps it in charon —
-name, key, models, protocol — while the next apply leaves its endpoint out of
-`models.json`. The row stays listed but recedes to gray and is marked `~`; the
-picker then offers only the endpoints you want there, and the key of a hidden
-endpoint is not written at all. The active binding cannot be hidden (switch away
-first); switching to a hidden binding brings it back into the list.
+Bindings at a Pi endpoint can also be **hidden**: pressing `h` on the bindings
+screen toggles visibility for that normalized endpoint across all saved Pi
+bindings sharing it (name, key, models, protocol, and headers stay in charon).
+Hidden rows recede to gray and are marked `~`, and `h` updates `models.json`
+immediately — adding or removing only `providers.charon-<label>` — without
+changing `settings.json` or resetting the live model. Hiding is refused when the
+endpoint holds the active binding or is Pi's on-disk `defaultProvider`;
+switching to any binding in a hidden group restores the whole group, while `d`
+still deletes only the selected binding.
 
 Pi's add/edit form has an **Endpoint Type** dropdown: OpenAI (Chat Completions,
 the default), OpenAI (Responses), Anthropic (Messages), or Gemini (Generate Content).
@@ -253,8 +257,8 @@ source <(charon completion zsh)
 charon completion fish | source
 ```
 
-They complete subcommands, tool names, and — for switch, edit, rename, cp, rm
-— saved binding names.
+They complete subcommands, tool names, and — for switch, edit, set-context,
+set-effort, rename, cp, rm — saved binding names.
 
 ## Adding & editing bindings
 
@@ -266,34 +270,32 @@ A single-page form collects everything on one screen:
 - Name — a binding name (any script; Unicode is fine).
 - Endpoint — leave blank to accept the provider default; a real value is
   never prefilled.
-- API key — masked input.
-- Model — two action buttons underneath give you full control:
-  - [ Fetch & Pick Online Models ] hits GET /v1/models (using Authorization:
-    Bearer for OpenAI-style APIs and x-api-key for Anthropic) and opens the
-    model picker.
-  - [ Type Model IDs Manually ] lets you type model IDs directly (comma-separated,
-    e.g. kimi-k2, deepseek-v3) for endpoints or gateways that do not expose
-    /v1/models. If an online fetch fails, Charon falls back to this manual screen
-    automatically with existing IDs prefilled.
-  You can also type a model slug directly into the field. If you leave it blank,
-  the first model in the registered list becomes the default.
+- API Key/Token — hidden with `•` while focused and masked when unfocused.
+- Endpoint Type (Pi only) — dropdown for OpenAI (Chat Completions), OpenAI
+  (Responses), Anthropic (Messages), or Gemini (Generate Content).
+- Models — pressing Enter on [ Models… ] opens the binding's model list:
+  - Press `f` to fetch online models (`GET /v1/models`, using
+    Authorization: Bearer for OpenAI-style APIs and x-api-key for Anthropic).
+    If an online fetch fails, Charon opens manual entry instead.
+  - Press `a` (or Enter on ＋ Add model…) to type model IDs directly
+    (comma-separated, e.g. kimi-k2, deepseek-v3) for gateways that do not expose
+    /v1/models.
+  - Press `w` to adjust a row's context window, `e` to edit a model ID, `d` to
+    remove a model, and Enter on a model row to return to the form.
 
-In the model picker, just start typing to fuzzy-filter the list in real time
+In the online model picker, just start typing to fuzzy-filter the list in real time
 (Backspace edits the query, Esc clears it):
-- Space checks/unchecks a model (marked •) into the curated list registered
-  with the tool.
-- Ctrl+A selects or deselects all models (or all matching search results).
-- Once models are checked, a Done — register these N model(s) row appears at the
-  top (showing the active default model). Press Enter on it to return to the
-  form without re-picking the default.
-- Press Enter on any model row to set it as the default,
-  automatically adding it to the registered list if not already checked, and return
-  to the form.
-- Check nothing and the whole fetched list is registered.
-Tab to [ Save ] to write the endpoint/key/model into the tool's live
-config and switch to it, or [ Cancel ] to discard. Name, key, and at least
-one model are required. Leave Endpoint blank to use the tool's default endpoint; a red
-status bar flags missing required values on submit.
+- Space (or `x`) checks/unchecks a model (`[✓]` / `[ ]`) into the curated list
+  registered with the tool.
+- Ctrl+A selects or deselects all models (or all matching search results); Ctrl+R
+  refreshes the online fetch; `w` edits context window; `m` opens manual entry.
+- For multi-model tools, check at least one model and press Enter to proceed to
+  the model list (and back to the form); for Codex (single model only), Enter
+  picks the highlighted model.
+Tab to [ Save ] (or press `s` on the action rows) to write the binding into the
+tool's live config and switch to it, or [ Cancel ] to discard. Name, key, and at
+least one model are required; leaving Endpoint blank uses the tool's default
+endpoint.
 
 ### Switching model inside the tool
 
@@ -333,10 +335,10 @@ replaces the model list.
 ### Editing an existing binding
 
 Press e on a binding to open its edit form, showing the current Name,
-Endpoint, Token (masked), and Model on a single screen. Type directly into
-any field; the Model field's [ Fetch & Pick Online Models ] and
-[ Type Model IDs Manually ] buttons let you update or re-fetch the registered
-models. The model list saved on this binding stays as-is unless you curate a new list,
+Endpoint, API Key/Token (masked), optional Endpoint Type (Pi), and configured
+Models on a single screen. Edit text fields directly or open [ Models… ] to
+re-fetch (`f`) or manually edit (`a` / `e` / `d` / `w`) the registered models.
+The model list saved on this binding stays as-is unless you change it,
 so a rename or key rotation keeps the binding's own picker. Tab to [ Save ]
 to apply the changes — renaming is handled automatically — or [ Cancel ] to
 discard. Editing a binding that is not the active one updates only the catalog;

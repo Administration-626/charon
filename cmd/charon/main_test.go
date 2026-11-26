@@ -1258,6 +1258,34 @@ func TestOffCommandUsageAndUnknownTool(t *testing.T) {
 	}
 }
 
+func TestCompletionScriptsAndUsageStayInSync(t *testing.T) {
+	sandbox(t)
+	usage, err := captureStdout(t, func() error {
+		return run([]string{"help"})
+	})
+	if err != nil {
+		t.Fatalf("help: %v", err)
+	}
+	for _, line := range strings.Split(usage, "\n") {
+		if strings.HasPrefix(line, "\t") {
+			t.Errorf("usage line has leading tab indentation: %q", line)
+		}
+	}
+	for _, shell := range []string{"bash", "zsh", "fish"} {
+		out, err := captureStdout(t, func() error {
+			return run([]string{"completion", shell})
+		})
+		if err != nil {
+			t.Fatalf("completion %s: %v", shell, err)
+		}
+		for _, want := range []string{"set-context", "set-effort", "off", "update", "uninstall", "mv"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("completion %s missing %q", shell, want)
+			}
+		}
+	}
+}
+
 func mustEqualFile(t *testing.T, path, want string) {
 	t.Helper()
 	got, err := os.ReadFile(path)

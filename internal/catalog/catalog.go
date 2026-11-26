@@ -402,13 +402,6 @@ func (c *Catalog) putModel(providerID, slug string, contextWindow *int, source W
 				ms[i].ContextWindowSource = source
 				return ms[i], writeTable(c.table("models.json"), ms)
 			}
-			if m.ContextWindow == 0 && m.ContextWindowSource == "" {
-				if bw := models.DefaultContextWindow(slug); bw > 0 {
-					ms[i].ContextWindow = bw
-					ms[i].ContextWindowSource = WindowBuiltin
-					return ms[i], writeTable(c.table("models.json"), ms)
-				}
-			}
 			return m, nil
 		}
 	}

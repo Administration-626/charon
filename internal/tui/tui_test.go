@@ -3528,3 +3528,132 @@ func TestBindingDetailInactiveNote(t *testing.T) {
 		})
 	}
 }
+
+func TestSubmitFormDefaultsBlankEndpointAndMasksFocusedToken(t *testing.T) {
+	st := openTestCatalog(t, false)
+	m := newModel(st, "test")
+	m.tool = tools.Find("codex")
+	m.width, m.height = 100, 30
+	m.view = viewEditForm
+	m.wiz = wizard{model: "gpt-5"}
+	m.loadEditForm()
+	m.formInputs[focusName].SetValue("work")
+	m.formInputs[focusToken].SetValue("sk-secret-focused-key")
+	m.formFocus = focusToken
+	m.applyFormFocus()
+
+	if view := m.View(); strings.Contains(view, "sk-secret-focused-key") {
+		t.Fatalf("focused token field exposed plaintext key:\n%s", view)
+	}
+
+	next, _ := m.submitForm()
+	got := next.(model)
+	if got.statusLvl != statusOK {
+		t.Fatalf("submitForm with blank endpoint failed: level=%v status=%q", got.statusLvl, got.status)
+	}
+	b, found, err := st.BindingByName("codex", "work")
+	if err != nil || !found {
+		t.Fatalf("saved binding not found: found=%v err=%v", found, err)
+	}
+	cr, err := st.Credential(b.CredentialID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.Provider(cr.ProviderID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.BaseURL != "https://api.openai.com/v1" {
+		t.Fatalf("resolved default endpoint = %q, want https://api.openai.com/v1", p.BaseURL)
+	}
+}
+
+func TestReviewFetchAndPickerRefreshAcceptBlankEndpoint(t *testing.T) {
+	st := openTestCatalog(t, false)
+	t.Run("review_f", func(t *testing.T) {
+		m := newModel(st, "test")
+		m.tool = tools.Find("codex")
+		m.view = viewReviewModels
+		m.wiz = wizard{key: "sk-test", models: []string{"gpt-5"}}
+		next, _ := m.updateReviewModels(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+		got := next.(model)
+		if got.view != viewFetching {
+			t.Fatalf("view = %v, want viewFetching (status=%q)", got.view, got.status)
+		}
+		if got.wiz.endpoint != "https://api.openai.com/v1" {
+			t.Fatalf("resolved fetch endpoint = %q, want default", got.wiz.endpoint)
+		}
+	})
+	t.Run("picker_ctrl_r", func(t *testing.T) {
+		m := pickerModel(t, []string{"gpt-5"})
+		m.tool = tools.Find("codex")
+		m.wiz = wizard{key: "sk-test", models: []string{"gpt-5"}}
+		next, _ := m.updatePickModel(tea.KeyMsg{Type: tea.KeyCtrlR})
+		got := next.(model)
+		if got.view != viewFetching {
+			t.Fatalf("view = %v, want viewFetching (status=%q)", got.view, got.status)
+		}
+		if got.wiz.endpoint != "https://api.openai.com/v1" {
+			t.Fatalf("resolved refresh endpoint = %q, want default", got.wiz.endpoint)
+		}
+	})
+}
+
+func TestViewModelEndpointRejectsBlankImmediately(t *testing.T) {
+	st := openTestCatalog(t, false)
+	m := newModel(st, "test")
+	m.view = viewModelEndpoint
+	m.startInput("endpoint", false)
+	m.input.SetValue("   ")
+
+	next, _ := m.updateInput(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(model)
+	if got.view != viewModelEndpoint {
+		t.Fatalf("view = %v, want viewModelEndpoint to stay open on blank input", got.view)
+	}
+	if !strings.Contains(got.status, "endpoint is required") {
+		t.Fatalf("status = %q, want endpoint is required", got.status)
+	}
+}
+
+func TestModelLibraryContextWindowUpdateReprojectsActiveBinding(t *testing.T) {
+	st := openTestCatalog(t, false)
+	pi := tools.Find("pi")
+	p, err := st.PutProvider("https://gw.example/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr, err := st.PutCredential(p.ID, "sk-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mod, err := st.PutModel(p.ID, "custom-gw-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := st.AddBinding("pi", "gw", cr.ID, "custom-gw-model", []string{"custom-gw-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Activate(b.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newModel(st, "test")
+	m.tool = pi
+	m.editingModel = mod
+	m.modelEditEndpoint = p.BaseURL
+	next, _ := m.saveCatalogWindow(256000)
+	got := next.(model)
+	if got.statusLvl != statusOK || got.view != viewModels {
+		t.Fatalf("saveCatalogWindow failed: lvl=%v status=%q view=%v", got.statusLvl, got.status, got.view)
+	}
+
+	info, err := pi.Describe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.ContextWindow != 256000 {
+		t.Fatalf("live Pi context window after Model Library edit = %d, want 256000", info.ContextWindow)
+	}
+}

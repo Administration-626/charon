@@ -336,6 +336,12 @@ func (m model) saveCatalogWindow(window int) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+	if err := m.projectBindingsUsingModel(saved.ID); err != nil {
+		m.setStatus(statusErr, err.Error())
+		m.view = viewModels
+		m.loadModels(saved.ID)
+		return m, nil
+	}
 	m.editingModel = catalog.Model{}
 	m.modelEditEndpoint = ""
 	m.view = viewModels

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"charon/internal/catalog"
@@ -136,7 +137,7 @@ func (m *model) loadEditForm() {
 	m.formInputs = make([]textinput.Model, formInputCount)
 	m.formInputs[focusName] = newFormInput("e.g. openrouter-fast", m.wiz.name, false)
 	m.formInputs[focusURL] = newFormInput(exampleEndpoint, m.wiz.endpoint, false)
-	m.formInputs[focusToken] = newFormInput("sk-or-v1-xxxxxxxx", m.wiz.key, false)
+	m.formInputs[focusToken] = newFormInput("sk-or-v1-xxxxxxxx", m.wiz.key, true)
 	m.formInputs[focusName].Focus()
 }
 
@@ -350,6 +351,9 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 	}
 
 	endpoint := strings.TrimRight(strings.TrimSpace(m.formInputs[focusURL].Value()), "/")
+	if endpoint == "" && m.tool != nil {
+		endpoint = strings.TrimRight(strings.TrimSpace(m.tool.ResolveEndpoint("")), "/")
+	}
 	if endpoint == "" {
 		m.setStatus(statusErr, "Endpoint is required")
 		return m, nil
@@ -369,6 +373,24 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 	m.wiz.endpoint = endpoint
 	m.wiz.key = key
 	return m.finishAdd(name)
+}
+
+// projectBindingsUsingModel re-projects any active binding referencing modelID
+// so live tool configs stay in sync with Model Library updates.
+func (m model) projectBindingsUsingModel(modelID string) error {
+	bindings, err := m.cat.Bindings("")
+	if err != nil {
+		return err
+	}
+	for _, binding := range bindings {
+		if binding.ModelID != modelID && !slices.Contains(binding.Models, modelID) {
+			continue
+		}
+		if _, err := m.cat.ProjectIfActive(binding.ID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // onEditFormSelect handles a chosen row in the edit field-picker.
@@ -595,6 +617,10 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		case viewModelEndpoint:
 			endpoint := strings.TrimRight(strings.TrimSpace(val), "/")
+			if endpoint == "" {
+				m.setStatus(statusErr, "endpoint is required")
+				return m, nil
+			}
 			if err := tools.ValidateEndpoint(endpoint); err != nil {
 				m.setStatus(statusErr, err.Error())
 				return m, nil
@@ -645,23 +671,11 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			saved.ThinkingLevelMap = levels
-			bindings, err := m.cat.Bindings("")
-			if err != nil {
+			if err := m.projectBindingsUsingModel(saved.ID); err != nil {
 				m.setStatus(statusErr, err.Error())
+				m.view = viewModels
+				m.loadModels(saved.ID)
 				return m, nil
-			}
-			for _, binding := range bindings {
-				for _, modelID := range binding.Models {
-					if modelID != saved.ID {
-						continue
-					}
-					if _, err := m.cat.ProjectIfActive(binding.ID); err != nil {
-						m.setStatus(statusErr, err.Error())
-						m.view = viewModels
-						m.loadModels(saved.ID)
-						return m, nil
-					}
-				}
 			}
 			m.editingModel = catalog.Model{}
 			m.modelEditEndpoint = ""

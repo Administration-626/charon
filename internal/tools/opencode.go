@@ -47,7 +47,7 @@ func newOpenCode() *Tool {
 			var existingModels []string
 			if raw, ok := edit.GetJSONRaw(configPath, "provider.charon.models"); ok {
 				var models map[string]any
-				if json.Unmarshal([]byte(raw), &models) == nil {
+				if unmarshalJSONC([]byte(raw), &models) == nil {
 					for id := range models {
 						existingModels = append(existingModels, id)
 					}
@@ -134,7 +134,7 @@ func newOpenCode() *Tool {
 						} `json:"options"`
 					} `json:"provider"`
 				}
-				if json.Unmarshal(data, &cfg) == nil {
+				if unmarshalJSONC(data, &cfg) == nil {
 					modelRef := cfg.Model
 					if modelRef == "" {
 						modelRef = cfg.SmallModel

@@ -355,6 +355,17 @@ func claudeFixtures() []offFixture {
   }
 }
 `)
+	// Nested siblings where an alphabetically-earlier key follows an
+	// alphabetically-later owned sibling, before a user key.
+	add("nested reverse alpha order", `{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://user-gw.example.com",
+    "ANTHROPIC_AUTH_TOKEN": "sk-user-own",
+    "KEEP_ME": "1"
+  },
+  "theme": "dark"
+}
+`)
 	add("empty object", "{}\n")
 	return out
 }

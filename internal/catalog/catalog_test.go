@@ -181,6 +181,22 @@ func TestPutModelStoresContextWindow(t *testing.T) {
 	if stored.ContextWindow != 0 || stored.ContextWindowSource != "" {
 		t.Fatalf("cleared window must return to unknown: %+v", stored)
 	}
+	// A later PutModel (e.g. StoreBinding on edit/copy) must not overwrite an
+	// intentionally cleared unknown window back to builtin.
+	after, err := c.PutModel(p.ID, "kimi-k2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.ContextWindow != 0 || after.ContextWindowSource != "" {
+		t.Fatalf("PutModel overwrote cleared window: %+v", after)
+	}
+	stored, err = c.Model(m.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ContextWindow != 0 || stored.ContextWindowSource != "" {
+		t.Fatalf("stored cleared window mutated after PutModel: %+v", stored)
+	}
 }
 
 func TestPutModelBuiltinContextWindow(t *testing.T) {

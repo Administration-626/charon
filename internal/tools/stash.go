@@ -349,7 +349,7 @@ func deleteEmptiedParents(path string, parents []string) error {
 			continue
 		}
 		var obj map[string]json.RawMessage
-		if json.Unmarshal([]byte(raw), &obj) != nil || len(obj) > 0 {
+		if unmarshalJSONC([]byte(raw), &obj) != nil || len(obj) > 0 {
 			continue
 		}
 		if err := edit.DelJSON(path, p); err != nil {
@@ -407,7 +407,7 @@ func orderJSONByPrev(paths []string, vals map[string]StashVal) []string {
 			if done[p] {
 				continue
 			}
-			if v := vals[p]; v.Prev != "" && known[v.Prev] && !done[v.Prev] {
+			if prev := prevPath(p, vals[p].Prev); prev != "" && known[prev] && !done[prev] {
 				continue // its predecessor is still to come
 			}
 			out, done[p], progressed = append(out, p), true, true
@@ -440,13 +440,13 @@ func jsonKeysUnder(path, prefix string) []string {
 		return nil
 	}
 	var obj map[string]json.RawMessage
-	if json.Unmarshal([]byte(raw), &obj) != nil {
+	if unmarshalJSONC([]byte(raw), &obj) != nil {
 		return nil
 	}
 	keys := make([]string, 0, len(obj))
 	for key := range obj {
 		if key == leaf || strings.HasPrefix(key, leaf+"-") {
-			keys = append(keys, parent+"."+key)
+			keys = append(keys, parent+"."+piJSONKey(key))
 		}
 	}
 	sort.Strings(keys)

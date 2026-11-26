@@ -62,8 +62,8 @@ func TestInteractiveFlowVisualAudit(t *testing.T) {
 	if !strings.Contains(pickerView, "ctrl+a all") {
 		t.Fatal("Picker missing ctrl+a in the footer")
 	}
-	if !strings.Contains(pickerView, "none checked — all 3 will be registered") {
-		t.Fatal("Picker title must spell out what an empty checklist registers")
+	if !strings.Contains(pickerView, "none checked — space toggles models") {
+		t.Fatal("Picker title must tell the user how to check models when empty")
 	}
 
 	// Step 4: Press Space on first model
@@ -94,8 +94,8 @@ func TestInteractiveFlowVisualAudit(t *testing.T) {
 	next, _ = m.updatePickModel(tea.KeyMsg{Type: tea.KeyCtrlA})
 	m = next.(model)
 	afterDeselectView := m.View()
-	if !strings.Contains(afterDeselectView, "none checked — all 3 will be registered") {
-		t.Fatal("Picker title should say the whole list is registered after clearing")
+	if !strings.Contains(afterDeselectView, "none checked — space toggles models") {
+		t.Fatal("Picker title should explain how to select models after clearing")
 	}
 	if strings.Contains(afterDeselectView, "Done") {
 		t.Fatal("Picker must not mention a Done row")

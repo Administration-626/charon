@@ -5,6 +5,7 @@ import (
 	"os"
 
 	toml "github.com/pelletier/go-toml/v2"
+	"github.com/tidwall/jsonc"
 
 	"charon/internal/edit"
 )
@@ -20,6 +21,12 @@ func readConfig(path string) ([]byte, error) {
 		return nil, err
 	}
 	return edit.TrimBOM(data), nil
+}
+
+// unmarshalJSONC decodes JSON or JSONC bytes (with comments or trailing commas)
+// into dst without mutating data.
+func unmarshalJSONC(data []byte, dst any) error {
+	return json.Unmarshal(jsonc.ToJSON(edit.TrimBOM(data)), dst)
 }
 
 // loadJSONMap reads path as a JSON object, returning an empty map if absent.

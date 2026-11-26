@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"encoding/json"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -133,7 +132,7 @@ func newClaude() *Tool {
 						Context   string `json:"CLAUDE_CODE_MAX_CONTEXT_TOKENS"`
 					} `json:"env"`
 				}
-				if json.Unmarshal(data, &s) == nil {
+				if unmarshalJSONC(data, &s) == nil {
 					info.Endpoint = s.Env.BaseURL
 					info.Model = s.Model
 					if info.Model == "" {
@@ -213,7 +212,7 @@ func claudeAccountEmail() string {
 			EmailAddress string `json:"emailAddress"`
 		} `json:"oauthAccount"`
 	}
-	if json.Unmarshal(data, &c) != nil {
+	if unmarshalJSONC(data, &c) != nil {
 		return ""
 	}
 	return c.OAuthAccount.EmailAddress
@@ -233,7 +232,7 @@ func claudeExistingModels(settingsPath string) []string {
 			} `json:"options"`
 		} `json:"modelPicker"`
 	}
-	if json.Unmarshal(data, &s) != nil {
+	if unmarshalJSONC(data, &s) != nil {
 		return nil
 	}
 	ids := make([]string, 0, len(s.ModelPicker.Options))
@@ -321,7 +320,7 @@ func claudeStringList(settingsPath, path string) []string {
 		return nil
 	}
 	var list []string
-	if json.Unmarshal([]byte(raw), &list) != nil {
+	if unmarshalJSONC([]byte(raw), &list) != nil {
 		return nil
 	}
 	return list

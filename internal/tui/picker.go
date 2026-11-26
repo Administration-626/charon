@@ -383,7 +383,7 @@ func (m *model) renderModels() {
 		title += " · single model only"
 	case len(m.allModels) == 0:
 	case n == 0 && m.modelFilter == "":
-		title += fmt.Sprintf(" · none checked — all %d will be registered", len(m.allModels))
+		title += " · none checked — space toggles models"
 	default:
 		title += fmt.Sprintf(" · %d of %d selected", n, len(m.allModels))
 	}
@@ -455,10 +455,12 @@ func (m model) updatePickModel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		return m.finishPicker()
 	case tea.KeyCtrlR:
-		if m.wiz.endpoint == "" || m.wiz.key == "" {
+		endpoint, key := m.resolveFetchTarget()
+		if endpoint == "" || (key == "" && !strings.Contains(endpoint, "localhost") && !strings.Contains(endpoint, "127.0.0.1")) {
 			m.setStatus(statusInfo, "set endpoint and key first, then refresh")
 			return m, nil
 		}
+		m.wiz.endpoint, m.wiz.key = endpoint, key
 		cmd := m.beginFetch()
 		return m, cmd
 	case tea.KeyBackspace:
@@ -561,6 +563,16 @@ func (m model) finishPicker() (tea.Model, tea.Cmd) {
 	m.reviewCursor = 0
 	m.clearStatus()
 	return m, nil
+}
+
+// resolveFetchTarget returns the endpoint (falling back to the tool default) and
+// API key trimmed from the wizard form.
+func (m model) resolveFetchTarget() (endpoint, key string) {
+	endpoint = strings.TrimRight(strings.TrimSpace(m.wiz.endpoint), "/")
+	if endpoint == "" && m.tool != nil {
+		endpoint = strings.TrimRight(strings.TrimSpace(m.tool.ResolveEndpoint("")), "/")
+	}
+	return endpoint, strings.TrimSpace(m.wiz.key)
 }
 
 // editModelWindow opens the one-field editor for the highlighted model. Empty saves

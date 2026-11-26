@@ -1464,3 +1464,99 @@ func TestApplyReadsAConfigWithABOM(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenCodeAndClaudeReadJSONCWithCommentsAndTrailingCommas(t *testing.T) {
+	t.Run("opencode", func(t *testing.T) {
+		home := sandboxHome(t)
+		jsoncPath := filepath.Join(home, ".config", "opencode", "opencode.jsonc")
+		writeFile(t, jsoncPath, `{
+  // hand-written JSONC
+  "model": "charon/deepseek-v4",
+  "reasoningEffort": "high",
+  "provider": {
+    "charon": {
+      "options": {
+        "baseURL": "https://gw.example/v1",
+        "apiKey": "sk-jsonc-open",
+      },
+      "models": {
+        /* first */ "deepseek-v4": {"name": "deepseek-v4"},
+        "qwen-3": {"name": "qwen-3"}, // trailing comma
+      },
+    },
+  },
+}
+`)
+		c := Find("opencode")
+		info, err := c.Describe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Endpoint != "https://gw.example/v1" || info.Secret != "sk-jsonc-open" || info.Model != "deepseek-v4" || info.Effort != "high" {
+			t.Fatalf("opencode Describe on JSONC = %+v", info)
+		}
+		if err := c.ApplyAuth(AuthSpec{Endpoint: "https://gw.example/v1", Key: "sk-rotated", Model: "deepseek-v4"}); err != nil {
+			t.Fatalf("ApplyAuth without model list on JSONC failed: %v", err)
+		}
+		data, err := os.ReadFile(jsoncPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cfg struct {
+			Provider struct {
+				Charon struct {
+					Models map[string]any `json:"models"`
+				} `json:"charon"`
+			} `json:"provider"`
+		}
+		if err := json.Unmarshal(jsonclib.ToJSON(data), &cfg); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := cfg.Provider.Charon.Models["qwen-3"]; !ok {
+			t.Fatalf("ApplyAuth dropped existing JSONC models: %+v", cfg.Provider.Charon.Models)
+		}
+	})
+
+	t.Run("claude", func(t *testing.T) {
+		home := sandboxHome(t)
+		settingsPath := filepath.Join(home, ".claude", "settings.json")
+		writeFile(t, settingsPath, `{
+  // settings comments and trailing commas
+  "model": "claude-sonnet-4-6",
+  "effortLevel": "medium",
+  "env": {
+    "ANTHROPIC_API_KEY": "sk-ant-jsonc-key",
+  },
+  "customApiKeyResponses": {
+    "approved": [
+      /* keep existing approval */
+      "existing-key-id",
+    ],
+  },
+  "modelPicker": {
+    "options": [
+      {"model": "claude-sonnet-4-6", "label": "claude-sonnet-4-6"},
+    ],
+  },
+}
+`)
+		c := Find("claude")
+		info, err := c.Describe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Model != "claude-sonnet-4-6" || info.Effort != "medium" || info.Secret != "sk-ant-jsonc-key" || info.AuthMode != "api" {
+			t.Fatalf("claude Describe on JSONC = %+v", info)
+		}
+		if got := claudeExistingModels(settingsPath); strings.Join(got, ",") != "claude-sonnet-4-6" {
+			t.Fatalf("claudeExistingModels on JSONC = %v, want [claude-sonnet-4-6]", got)
+		}
+		if err := c.ApplyAuth(AuthSpec{Endpoint: "https://api.anthropic.com", Key: "sk-ant-new-secret-key", Model: "claude-sonnet-4-6"}); err != nil {
+			t.Fatal(err)
+		}
+		got := claudeStringList(settingsPath, "customApiKeyResponses.approved")
+		if len(got) != 2 || got[0] != "existing-key-id" {
+			t.Fatalf("approved key list lost existing JSONC entry: %v", got)
+		}
+	})
+}

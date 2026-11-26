@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"charon/internal/secret"
 
+	"github.com/pelletier/go-toml/v2/unstable"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/jsonc"
 )
@@ -81,29 +83,117 @@ func splitLines(b []byte) []string {
 	return lines
 }
 
-// maskHeaders masks JSON header values and Pi API keys after computing the diff,
-// so even two short secrets with the same mask still produce visible +/- lines.
+// maskHeaders masks sensitive credential/header values (JSON headers, apiKey,
+// Claude env secrets/approvals, and Codex/Grok TOML tokens) after computing the
+// diff, so even two short secrets with the same mask still produce visible +/-
+// lines.
 func (d FileDiff) maskHeaders(rendered string) string {
 	var replacements []string
-	var collect func(gjson.Result, bool)
-	collect = func(value gjson.Result, sensitive bool) {
+	var collectJSON func(gjson.Result, bool)
+	collectJSON = func(value gjson.Result, sensitive bool) {
 		if sensitive && value.Type == gjson.String {
-			masked, _ := json.Marshal(secret.Mask(value.String()))
-			replacements = append(replacements, value.Raw, string(masked))
+			if s := value.String(); s != "" {
+				masked, _ := json.Marshal(secret.Mask(s))
+				replacements = append(replacements, value.Raw, string(masked))
+			}
 			return
 		}
 		if value.IsObject() || value.IsArray() {
 			value.ForEach(func(key, child gjson.Result) bool {
-				collect(child, sensitive || key.String() == "headers" || key.String() == "apiKey")
+				collectJSON(child, sensitive || isJSONSensitiveKey(key.String()))
 				return true
 			})
 		}
 	}
+	collectTOML := func(raw []byte) {
+		var p unstable.Parser
+		p.Reset(raw)
+		headerTable := false
+		var maskNode func(*unstable.Node, bool)
+		maskNode = func(n *unstable.Node, sensitive bool) {
+			if n == nil {
+				return
+			}
+			switch n.Kind {
+			case unstable.String:
+				if !sensitive {
+					return
+				}
+				if s := string(n.Data); s != "" {
+					if rawLit := string(p.Raw(n.Raw)); rawLit != "" {
+						replacements = append(replacements, rawLit, strconv.Quote(secret.Mask(s)))
+					}
+				}
+			case unstable.Array:
+				for it := n.Children(); it.Next(); {
+					maskNode(it.Node(), sensitive)
+				}
+			case unstable.InlineTable:
+				for it := n.Children(); it.Next(); {
+					child := it.Node()
+					if child.Kind != unstable.KeyValue {
+						continue
+					}
+					k := tomlLastKey(child)
+					val := child.Value()
+					if isTOMLHeaderKey(k) && val.Kind == unstable.InlineTable {
+						maskNode(val, true)
+						continue
+					}
+					maskNode(val, sensitive || isTOMLSensitiveKey(k))
+				}
+			}
+		}
+		for p.NextExpression() {
+			expr := p.Expression()
+			switch expr.Kind {
+			case unstable.Table, unstable.ArrayTable:
+				headerTable = isTOMLHeaderKey(tomlLastKey(expr))
+			case unstable.KeyValue:
+				k := tomlLastKey(expr)
+				val := expr.Value()
+				if isTOMLHeaderKey(k) && val.Kind == unstable.InlineTable {
+					maskNode(val, true)
+					continue
+				}
+				maskNode(val, headerTable || isTOMLSensitiveKey(k))
+			}
+		}
+	}
 	for _, raw := range [][]byte{d.Before, d.After} {
 		raw = bytes.TrimPrefix(raw, []byte{0xef, 0xbb, 0xbf})
-		collect(gjson.ParseBytes(jsonc.ToJSONInPlace(append([]byte(nil), raw...))), false)
+		if len(bytes.TrimSpace(raw)) == 0 {
+			continue
+		}
+		collectJSON(gjson.ParseBytes(jsonc.ToJSONInPlace(append([]byte(nil), raw...))), false)
+		collectTOML(raw)
 	}
 	return strings.NewReplacer(replacements...).Replace(rendered)
+}
+
+func isJSONSensitiveKey(k string) bool {
+	switch k {
+	case "headers", "apiKey", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "customApiKeyResponses":
+		return true
+	default:
+		return false
+	}
+}
+
+func isTOMLSensitiveKey(k string) bool {
+	return k == "experimental_bearer_token" || k == "api_key"
+}
+
+func isTOMLHeaderKey(k string) bool {
+	return k == "headers" || k == "http_headers"
+}
+
+func tomlLastKey(n *unstable.Node) string {
+	var last string
+	for keys := n.Key(); keys.Next(); {
+		last = string(keys.Node().Data)
+	}
+	return last
 }
 
 // Render is d as a unified diff, or "" when it would not change.

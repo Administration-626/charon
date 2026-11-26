@@ -43,7 +43,8 @@ endpoint 和凭据。
   或在模型库按 `r`，可将 low、medium、high、xhigh、max 或 ultra 写入当前激活的 Codex 绑定。
 - 可搜索的模型库。模型库在一张表里列出各 endpoint 下已保存的全部模型
   （型号、endpoint、上下文、来源）；输入文字即可按型号或 endpoint 筛选，esc 清除。
-- 单页表单。在同一屏新增或编辑绑定（Name、Endpoint、Token、Model），可直接输入，
+- 单页表单。在同一屏新增或编辑绑定（Name、Endpoint、API Key/Token、
+  [ Models… ]，Pi 还包含 Endpoint Type 下拉框），可直接输入，
   并使用 [ Save ] / [ Cancel ] 按钮。
 - 快速复制与搜索。按 c（或 x）复制绑定：先选目标工具（当前工具在列表首位），
   再命名副本；副本共用 endpoint 与 key，不会自动激活。在模型列表中输入文字即可实时模糊搜索。
@@ -82,10 +83,21 @@ Codex 绑定用到的 endpoint 不参与聚合：它们的模型和协议从未�
 仍决定默认 endpoint、默认模型和它自己的模型列表；`charon off` 会删除全部 `charon*`
 provider。
 
-绑定还可以**隐藏**：在绑定列表里按 `h`，行首出现 `~`，整行转为灰色。隐藏只影响
-写入——binding 的名称、key、模型和协议都留在 charon，下一次 apply 时这个 endpoint
-不再进 `models.json`，key 也就不会落盘。当前生效的 binding 不能隐藏（先切到别的），
-切到一条被隐藏的 binding 会自动让它回到列表里。
+Pi 的同一 endpoint 下的绑定还可以**隐藏**：在绑定列表里按 `h`，会按归一化
+endpoint 地址切换可见状态，将该地址下的全部 Pi 绑定一起隐藏或恢复（名称、key、
+模型、协议和标头都留在 charon）。隐藏的行保留在列表中，但变为灰色并带 `~` 标记；
+`h` 会立即更新 `models.json`（只增删 `providers.charon-<标签>` 条目），不修改
+`settings.json`，也不切换绑定或重置当前模型。正在生效的绑定或磁盘
+`defaultProvider` 使用该 endpoint 时会拒绝隐藏；切换到隐藏分组里的任一条
+绑定会自动恢复整组可见，而 `d` 仍只删除当前选中的单条绑定。
+
+Pi 的新增/编辑表单还提供 **Endpoint Type** 下拉框：OpenAI (Chat Completions，
+默认)、OpenAI (Responses)、Anthropic (Messages) 或 Gemini (Generate Content)。
+选择按绑定保存，并写入 `models.json` → `providers.charon-<标签>.api`，在切换、
+编辑或复制绑定时都会保留。下拉框中 `[✓]` 标出当前项、`>` 标出光标；Enter
+确认选择，Save 保存绑定。未保存类型的绑定默认使用 Chat Completions；Pi 1.0.4
+没有单独的 Responses Compact 协议，因此下拉框不提供该项。请填写网关文档对应的
+地址；原生 Gemini 因模型发现只探测 OpenAI/Anthropic，请手动输入模型 ID。
 
 Charon 会为 Pi 注册的每个模型默认开启 thinking，并提供标准的
 `off`、`minimal`、`low`、`medium`、`high`、`xhigh` 和 `max` 档位。启动时使用的
@@ -210,8 +222,8 @@ source <(charon completion zsh)
 charon completion fish | source
 ```
 
-补全覆盖子命令、工具名，以及 switch、edit、rename、cp、rm 等子命令的已保存
-绑定名。
+补全覆盖子命令、工具名（含 `off`），以及 `switch`、`edit`、`set-context`、
+`set-effort`、`rename`、`mv`、`cp`、`rm` 的已保存绑定名。
 
 ## 添加与编辑绑定
 
@@ -220,24 +232,24 @@ charon completion fish | source
 在菜单里进入某个工具，选择 ＋ Add new binding…（或按 a）。单页表单会显示所有字段：
 
 - Name：绑定名（支持 Unicode 文字）。
-- Endpoint：留空即采用该 provider 的默认值；Charon 不会预填真实地址。
-- API key：输入内容会隐藏。
-- Model：字段下方提供两个操作按钮：
-  - [ Fetch & Pick Online Models ]：请求 GET /v1/models（OpenAI 兼容 API 使用
-    Authorization: Bearer，Anthropic 用 x-api-key）并打开模型选择器。
-  - [ Type Model IDs Manually ]：手动输入模型 ID，多个 ID 用逗号分隔，例如
-    kimi-k2, deepseek-v3。适用于未提供 /v1/models 的中转服务或私有网关。在线获取失败时，
-    Charon 会打开手动输入界面，并填入已有 ID。
-  也可以直接在该输入框输入模型 slug。每条绑定至少需要一个模型 ID。
+- Endpoint：留空即采用该工具的默认地址；Charon 不会预填真实地址。
+- API Key/Token：聚焦编辑时显示为 `•`，失焦后只显示遮罩前后缀。
+- Endpoint Type（仅 Pi）：下拉选择请求协议。
+- Models：选中 `[ Models… ]` 并按 Enter 打开绑定的模型列表：
+  - 按 `f` 从 API 在线获取模型（`GET /v1/models`，OpenAI 兼容 API 使用
+    Authorization: Bearer，Anthropic 用 x-api-key）并打开模型选择器。在线获取
+    失败时，Charon 会落回手动输入界面。
+  - 按 `a`（或在 `＋ Add model…` 上按 Enter）手动输入模型 ID，多个 ID 用逗号
+    分隔，例如 `kimi-k2, deepseek-v3`。
+  - 在模型列表里还可按 `w` 设置上下文窗口、`e` 修改模型 ID、`d` 删除模型，
+    按 Enter 确认模型选择并返回表单。
 
-在模型选择器中，输入文字即可实时模糊搜索列表（Backspace 修改搜索内容，Esc 清空）：
-- Space：勾选或取消勾选模型。已选模型旁显示 •，并会注册到工具的模型菜单中。
-- Ctrl+A：全选或取消全选所有模型（处于搜索过滤状态时仅作用于匹配结果）。
-- 勾选模型后，列表顶部会出现 Done — register these N model(s) 选项，副标题显示当前默认模型。选中该行并按 Enter 可确认选择并返回表单，默认模型保持不变。
-- 在模型行按 Enter 可将该模型设为默认模型；若尚未勾选，该模型会自动加入注册列表。默认模型会显示勾号。
-- 如果没有勾选模型，工具会注册获取到的全部模型。
+在在线模型选择器中，输入文字即可实时模糊搜索列表（Backspace 修改搜索内容，Esc 清空筛选）：
+- Space（或 `x`）：勾选或取消勾选模型（`[✓]` / `[ ]`），选中的模型会注册到工具的模型菜单中。
+- Ctrl+A：全选或取消全选所有模型（处于搜索过滤状态时仅作用于匹配结果）；`Ctrl+R` 刷新抓取，`w` 修改上下文窗口，`m` 切换手动输入。
+- 支持多模型的工具至少需要勾选 1 个模型，按 Enter 确认后进入模型列表；Codex（仅单模型）按 Enter 直接选中当前高亮行。
 
-按 Tab 选中 [ Save ] 并保存后，Charon 会将 endpoint、key 和 model 写入工具当前配置并激活该绑定。选择 [ Cancel ] 可放弃修改。Name、key 和至少一个模型为必填项；Endpoint 留空时使用工具默认值。必填项缺失时，底部状态栏会显示提示。
+按 Tab 选中 [ Save ]（或在按钮行按 `s`）保存后，Charon 会将配置写入工具并激活该绑定；选择 [ Cancel ] 可放弃修改。Name、key 和至少一个模型为必填项；Endpoint 留空时使用工具默认地址。
 
 ### 在工具内切换模型
 
@@ -269,10 +281,10 @@ Pi 的 `maxTokens` 单独查询内置模型表中的已核实输出上限（数�
 
 ### 编辑已有绑定
 
-在某绑定上按 e 打开编辑表单，查看当前的 Name、Endpoint、
-Token（内容隐藏）与 Model。可直接修改任意字段；Model 字段下的
-[ Fetch & Pick Online Models ] 与 [ Type Model IDs Manually ]
-按钮可重新获取或手动调整模型。除非重新调整，绑定中保存的模型列表会保持不变；改名
+在某绑定上按 e 打开编辑表单，查看当前的 Name、Endpoint、API Key/Token
+（内容隐藏）、Endpoint Type（仅 Pi）与已选 Models。可直接修改任意文本字段，
+或进入 `[ Models… ]` 按 `f` 重新获取，按 `a` / `e` / `d` / `w` 手动增删、
+改名或调整上下文窗口。除非重新调整，绑定中保存的模型列表会保持不变；改名
 或更换 key 后，模型列表也会保留。按 Tab 选中 [ Save ] 应用修改（系统会自动处理改名），或
 [ Cancel ] 放弃。编辑一条非当前绑定只改目录，实时配置要等切换过去才变。
 按 r 可显式重新应用选中的绑定及其默认模型。按 d 删除；正在使用的绑定不能删除，

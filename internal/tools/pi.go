@@ -418,7 +418,7 @@ func piWriteProviders(path string, existing map[string]any, primaryKey string, k
 			continue
 		}
 		if !keep[key] {
-			stale = append(stale, "providers."+key)
+			stale = append(stale, "providers."+piJSONKey(key))
 		}
 	}
 	sort.Strings(stale)
